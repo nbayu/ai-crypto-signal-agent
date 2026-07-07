@@ -6,6 +6,9 @@ from engine.scanner import scan_market
 from engine.validated_pipeline_v4 import run_validated_pipeline_v4
 from engine.outcome_tracker_v4 import save_outcome_snapshot
 from engine.final_reporter_v4 import print_final_report_v4
+from engine.top5_watchlist_artifact_v4 import (
+    save_top5_watchlist_artifact,
+)
 
 
 def save_snapshot(out):
@@ -32,6 +35,9 @@ out = run_validated_pipeline_v4(results)
 
 snapshot_path = save_snapshot(out)
 outcome_path = save_outcome_snapshot(
+    out["final_top5"]
+)
+watchlist_path = save_top5_watchlist_artifact(
     out["final_top5"]
 )
 
