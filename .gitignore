@@ -21,3 +21,6 @@ data/pre_delivery_v4/
 
 # Immutable runtime production evidence bundles
 data/production_evidence_v4/
+
+# Mutable Pine delivery artifacts
+data/pine_delivery_v4/

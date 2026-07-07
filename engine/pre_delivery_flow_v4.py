@@ -7,6 +7,13 @@ from engine.pre_delivery_artifact_v4 import (
 from engine.pre_delivery_validator_v4 import (
     build_pre_delivery_artifact,
 )
+from engine.pine_bridge_v4 import (
+    build_pine_bridge_artifact,
+    build_pine_bridge_delivery_payload,
+)
+from engine.pine_delivery_artifact_v4 import (
+    save_pine_delivery_artifact,
+)
 from engine.tradingview_watchlist_export_v4 import (
     export_tradingview_watchlist,
 )
@@ -44,11 +51,35 @@ def run_pre_delivery_flow(
         )
     )
 
+    pine_bridge_artifact = (
+        build_pine_bridge_artifact(
+            delivery_artifact
+        )
+    )
+    pine_delivery_payload = (
+        build_pine_bridge_delivery_payload(
+            pine_bridge_artifact
+        )
+    )
+    (
+        pine_bridge_artifact_path,
+        pine_delivery_payload_path,
+    ) = save_pine_delivery_artifact(
+        pine_bridge_artifact,
+        pine_delivery_payload,
+    )
+
     return {
         "delivery_artifact_path": (
             delivery_artifact_path
         ),
         "tradingview_watchlist_path": (
             tradingview_watchlist_path
+        ),
+        "pine_bridge_artifact_path": (
+            pine_bridge_artifact_path
+        ),
+        "pine_delivery_payload_path": (
+            pine_delivery_payload_path
         ),
     }
