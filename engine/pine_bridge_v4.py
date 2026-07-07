@@ -1,3 +1,8 @@
+from engine.tradingview_watchlist_export_v4 import (
+    build_tradingview_symbol,
+)
+
+
 def format_pine_bridge_value(value):
     if isinstance(value, float):
         return format(value, ".15g")
@@ -14,6 +19,7 @@ def build_pine_bridge_payload(artifact):
 
         fields = [
             setup["symbol"],
+            build_tradingview_symbol(setup["symbol"]),
             golden_zone["direction"],
             golden_zone["swing_low_at"],
             golden_zone["swing_high_at"],

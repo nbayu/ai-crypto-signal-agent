@@ -1,6 +1,9 @@
 from engine.pine_bridge_v4 import (
     build_pine_bridge_payload,
 )
+from engine.tradingview_watchlist_export_v4 import (
+    build_tradingview_symbol,
+)
 
 
 def _artifact():
@@ -48,7 +51,7 @@ def test_build_pine_bridge_payload_preserves_scanner_values():
     payload = build_pine_bridge_payload(_artifact())
 
     assert payload == (
-        "SUN/USDT:USDT|BULLISH|"
+        "SUN/USDT:USDT|BINANCE:SUNUSDT.P|BULLISH|"
         "2026-07-05T04:00:00|"
         "2026-07-05T20:00:00|"
         "0.016879|0.018093|"
@@ -130,3 +133,18 @@ def test_build_pine_bridge_delivery_payload_is_single_line():
     assert records[1].startswith(
         "HUMA/USDT:USDT|"
     )
+
+
+
+def test_bridge_uses_existing_tradingview_symbol_contract():
+    artifact = _artifact()
+
+    payload = build_pine_bridge_payload(artifact)
+    fields = payload.split("|")
+
+    assert fields[0] == "SUN/USDT:USDT"
+    assert fields[1] == build_tradingview_symbol(
+        "SUN/USDT:USDT"
+    )
+    assert fields[1] == "BINANCE:SUNUSDT.P"
+    assert len(fields) == 13
