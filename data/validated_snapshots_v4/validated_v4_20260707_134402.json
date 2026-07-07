@@ -1,0 +1,853 @@
+{
+  "controlled_top10": [
+    {
+      "symbol": "SUN/USDT:USDT",
+      "python_score": 89.7,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2032,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 1.8378,
+      "oi_status": "OK",
+      "oi_class": "STRONG",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "SUN/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 89.7,
+      "reference_price": 0.018,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 286,
+        "swing_high_index": 290,
+        "swing_low_at": "2026-07-05 04:00:00",
+        "swing_high_at": "2026-07-05 20:00:00",
+        "swing_low": 0.016879,
+        "swing_high": 0.018093,
+        "levels": {
+          "-0.27": 0.01842078,
+          "0.0": 0.018093,
+          "0.5": 0.017486,
+          "0.618": 0.017342748,
+          "0.786": 0.017138796,
+          "1.0": 0.016879
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.017138796,
+          "price_high": 0.017342748
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.01842078
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.016879
+        }
+      }
+    },
+    {
+      "symbol": "HUMA/USDT:USDT",
+      "python_score": 88.07,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.3718,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": -0.1734,
+      "oi_status": "OK",
+      "oi_class": "SOFT",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "HUMA/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 88.07,
+      "reference_price": 0.023315,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 289,
+        "swing_high_index": 291,
+        "swing_low_at": "2026-07-05 16:00:00",
+        "swing_high_at": "2026-07-06 00:00:00",
+        "swing_low": 0.022044,
+        "swing_high": 0.023357,
+        "levels": {
+          "-0.27": 0.023711509999999998,
+          "0.0": 0.023357,
+          "0.5": 0.0227005,
+          "0.618": 0.022545566,
+          "0.786": 0.022324982,
+          "1.0": 0.022044
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.022324982,
+          "price_high": 0.022545566
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.023711509999999998
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.022044
+        }
+      }
+    },
+    {
+      "symbol": "CELO/USDT:USDT",
+      "python_score": 88.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.0759,
+      "volume_status": "OK",
+      "volume_class": "NORMAL",
+      "oi_change_pct": -0.2891,
+      "oi_status": "OK",
+      "oi_class": "SOFT",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "symbol": "CELO/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "MODERATE",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": -1,
+      "final_rank_score": 87.9,
+      "reference_price": 0.07115,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 286,
+        "swing_high_index": 290,
+        "swing_low_at": "2026-07-05 04:00:00",
+        "swing_high_at": "2026-07-05 20:00:00",
+        "swing_low": 0.06379,
+        "swing_high": 0.07001,
+        "levels": {
+          "-0.27": 0.0716894,
+          "0.0": 0.07001,
+          "0.5": 0.0669,
+          "0.618": 0.06616604,
+          "0.786": 0.06512108,
+          "1.0": 0.06379
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.06512108,
+          "price_high": 0.06616604
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.0716894
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.06379
+        }
+      }
+    },
+    {
+      "symbol": "WLFI/USDT:USDT",
+      "python_score": 87.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2034,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.001,
+      "oi_status": "OK",
+      "oi_class": "SUPPORTIVE",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "WLFI/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 87.9,
+      "reference_price": 0.06052,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 281,
+        "swing_high_index": 288,
+        "swing_low_at": "2026-07-04 08:00:00",
+        "swing_high_at": "2026-07-05 12:00:00",
+        "swing_low": 0.0554,
+        "swing_high": 0.06069,
+        "levels": {
+          "-0.27": 0.0621183,
+          "0.0": 0.06069,
+          "0.5": 0.058045,
+          "0.618": 0.05742078,
+          "0.786": 0.056532059999999995,
+          "1.0": 0.0554
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.056532059999999995,
+          "price_high": 0.05742078
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.0621183
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.0554
+        }
+      }
+    },
+    {
+      "symbol": "LDO/USDT:USDT",
+      "python_score": 87.8,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2248,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.0688,
+      "oi_status": "OK",
+      "oi_class": "SUPPORTIVE",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "LDO/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 87.8,
+      "reference_price": 0.2863,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 294,
+        "swing_high_index": 296,
+        "swing_low_at": "2026-07-06 12:00:00",
+        "swing_high_at": "2026-07-06 20:00:00",
+        "swing_low": 0.2603,
+        "swing_high": 0.2879,
+        "levels": {
+          "-0.27": 0.295352,
+          "0.0": 0.2879,
+          "0.5": 0.2741,
+          "0.618": 0.2708432,
+          "0.786": 0.26620639999999995,
+          "1.0": 0.2603
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.26620639999999995,
+          "price_high": 0.2708432
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.295352
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.2603
+        }
+      }
+    },
+    {
+      "symbol": "2Z/USDT:USDT",
+      "python_score": 88.53,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 0.6524,
+      "volume_status": "OK",
+      "volume_class": "WEAK",
+      "oi_change_pct": 0.3596,
+      "oi_status": "OK",
+      "oi_class": "STRONG",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "symbol": "2Z/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "MODERATE",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": -1,
+      "final_rank_score": 87.53,
+      "reference_price": 0.07226,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 281,
+        "swing_high_index": 287,
+        "swing_low_at": "2026-07-04 08:00:00",
+        "swing_high_at": "2026-07-05 08:00:00",
+        "swing_low": 0.06601,
+        "swing_high": 0.073,
+        "levels": {
+          "-0.27": 0.07488729999999999,
+          "0.0": 0.073,
+          "0.5": 0.069505,
+          "0.618": 0.06868018,
+          "0.786": 0.06750586,
+          "1.0": 0.06601
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.06750586,
+          "price_high": 0.06868018
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.07488729999999999
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.06601
+        }
+      }
+    },
+    {
+      "symbol": "USELESS/USDT:USDT",
+      "python_score": 88.2,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 0.2893,
+      "volume_status": "OK",
+      "volume_class": "WEAK",
+      "oi_change_pct": 0.017,
+      "oi_status": "OK",
+      "oi_class": "SUPPORTIVE",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "symbol": "USELESS/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "MODERATE",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": -1,
+      "final_rank_score": 87.2,
+      "reference_price": 0.09483,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 294,
+        "swing_high_index": 296,
+        "swing_low_at": "2026-07-06 12:00:00",
+        "swing_high_at": "2026-07-06 20:00:00",
+        "swing_low": 0.0872,
+        "swing_high": 0.10212,
+        "levels": {
+          "-0.27": 0.1061484,
+          "0.0": 0.10212,
+          "0.5": 0.09466,
+          "0.618": 0.09289944,
+          "0.786": 0.09039288,
+          "1.0": 0.0872
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.09039288,
+          "price_high": 0.09289944
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.1061484
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.0872
+        }
+      }
+    },
+    {
+      "symbol": "CHIP/USDT:USDT",
+      "python_score": 89.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 4.157,
+      "volume_status": "OK",
+      "volume_class": "STRONG",
+      "oi_change_pct": -1.9193,
+      "oi_status": "OK",
+      "oi_class": "WEAK",
+      "participation": "MIXED",
+      "ai_validation": {
+        "symbol": "CHIP/USDT:USDT",
+        "status": "CONFLICT",
+        "false_breakout_risk": "MEDIUM",
+        "confluence": "WEAK",
+        "reason_code": "MIXED_PARTICIPATION"
+      },
+      "validation_adjustment": -7,
+      "final_rank_score": 82.9,
+      "reference_price": 0.03547,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 294,
+        "swing_high_index": 295,
+        "swing_low_at": "2026-07-06 12:00:00",
+        "swing_high_at": "2026-07-06 16:00:00",
+        "swing_low": 0.02996,
+        "swing_high": 0.03376,
+        "levels": {
+          "-0.27": 0.034786,
+          "0.0": 0.03376,
+          "0.5": 0.03186,
+          "0.618": 0.0314116,
+          "0.786": 0.0307732,
+          "1.0": 0.02996
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.0307732,
+          "price_high": 0.0314116
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.034786
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.02996
+        }
+      }
+    },
+    {
+      "symbol": "ZAMA/USDT:USDT",
+      "python_score": 89.67,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 0.8719,
+      "volume_status": "OK",
+      "volume_class": "NORMAL",
+      "oi_change_pct": -0.3919,
+      "oi_status": "OK",
+      "oi_class": "WEAK",
+      "participation": "MIXED",
+      "ai_validation": {
+        "symbol": "ZAMA/USDT:USDT",
+        "status": "CONFLICT",
+        "false_breakout_risk": "MEDIUM",
+        "confluence": "WEAK",
+        "reason_code": "MIXED_PARTICIPATION"
+      },
+      "validation_adjustment": -7,
+      "final_rank_score": 82.67,
+      "reference_price": 0.03416,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 288,
+        "swing_high_index": 296,
+        "swing_low_at": "2026-07-05 12:00:00",
+        "swing_high_at": "2026-07-06 20:00:00",
+        "swing_low": 0.03115,
+        "swing_high": 0.03543,
+        "levels": {
+          "-0.27": 0.0365856,
+          "0.0": 0.03543,
+          "0.5": 0.03329,
+          "0.618": 0.03278496,
+          "0.786": 0.03206592,
+          "1.0": 0.03115
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.03206592,
+          "price_high": 0.03278496
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.0365856
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.03115
+        }
+      }
+    },
+    {
+      "symbol": "VANRY/USDT:USDT",
+      "python_score": 88.5,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.4816,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": -5.9541,
+      "oi_status": "OK",
+      "oi_class": "WEAK",
+      "participation": "MIXED",
+      "ai_validation": {
+        "symbol": "VANRY/USDT:USDT",
+        "status": "CONFLICT",
+        "false_breakout_risk": "MEDIUM",
+        "confluence": "WEAK",
+        "reason_code": "MIXED_PARTICIPATION"
+      },
+      "validation_adjustment": -7,
+      "final_rank_score": 81.5,
+      "reference_price": 0.007607,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 292,
+        "swing_high_index": 294,
+        "swing_low_at": "2026-07-06 04:00:00",
+        "swing_high_at": "2026-07-06 12:00:00",
+        "swing_low": 0.004889,
+        "swing_high": 0.00985,
+        "levels": {
+          "-0.27": 0.01118947,
+          "0.0": 0.00985,
+          "0.5": 0.007369499999999999,
+          "0.618": 0.006784102,
+          "0.786": 0.005950654,
+          "1.0": 0.004889
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.005950654,
+          "price_high": 0.006784102
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.01118947
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.004889
+        }
+      }
+    }
+  ],
+  "final_top5": [
+    {
+      "symbol": "SUN/USDT:USDT",
+      "python_score": 89.7,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2032,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 1.8378,
+      "oi_status": "OK",
+      "oi_class": "STRONG",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "SUN/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 89.7,
+      "reference_price": 0.018,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 286,
+        "swing_high_index": 290,
+        "swing_low_at": "2026-07-05 04:00:00",
+        "swing_high_at": "2026-07-05 20:00:00",
+        "swing_low": 0.016879,
+        "swing_high": 0.018093,
+        "levels": {
+          "-0.27": 0.01842078,
+          "0.0": 0.018093,
+          "0.5": 0.017486,
+          "0.618": 0.017342748,
+          "0.786": 0.017138796,
+          "1.0": 0.016879
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.017138796,
+          "price_high": 0.017342748
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.01842078
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.016879
+        }
+      }
+    },
+    {
+      "symbol": "HUMA/USDT:USDT",
+      "python_score": 88.07,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.3718,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": -0.1734,
+      "oi_status": "OK",
+      "oi_class": "SOFT",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "HUMA/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 88.07,
+      "reference_price": 0.023315,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 289,
+        "swing_high_index": 291,
+        "swing_low_at": "2026-07-05 16:00:00",
+        "swing_high_at": "2026-07-06 00:00:00",
+        "swing_low": 0.022044,
+        "swing_high": 0.023357,
+        "levels": {
+          "-0.27": 0.023711509999999998,
+          "0.0": 0.023357,
+          "0.5": 0.0227005,
+          "0.618": 0.022545566,
+          "0.786": 0.022324982,
+          "1.0": 0.022044
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.022324982,
+          "price_high": 0.022545566
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.023711509999999998
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.022044
+        }
+      }
+    },
+    {
+      "symbol": "CELO/USDT:USDT",
+      "python_score": 88.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.0759,
+      "volume_status": "OK",
+      "volume_class": "NORMAL",
+      "oi_change_pct": -0.2891,
+      "oi_status": "OK",
+      "oi_class": "SOFT",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "symbol": "CELO/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "MODERATE",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": -1,
+      "final_rank_score": 87.9,
+      "reference_price": 0.07115,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 286,
+        "swing_high_index": 290,
+        "swing_low_at": "2026-07-05 04:00:00",
+        "swing_high_at": "2026-07-05 20:00:00",
+        "swing_low": 0.06379,
+        "swing_high": 0.07001,
+        "levels": {
+          "-0.27": 0.0716894,
+          "0.0": 0.07001,
+          "0.5": 0.0669,
+          "0.618": 0.06616604,
+          "0.786": 0.06512108,
+          "1.0": 0.06379
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.06512108,
+          "price_high": 0.06616604
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.0716894
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.06379
+        }
+      }
+    },
+    {
+      "symbol": "WLFI/USDT:USDT",
+      "python_score": 87.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2034,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.001,
+      "oi_status": "OK",
+      "oi_class": "SUPPORTIVE",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "WLFI/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 87.9,
+      "reference_price": 0.06052,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 281,
+        "swing_high_index": 288,
+        "swing_low_at": "2026-07-04 08:00:00",
+        "swing_high_at": "2026-07-05 12:00:00",
+        "swing_low": 0.0554,
+        "swing_high": 0.06069,
+        "levels": {
+          "-0.27": 0.0621183,
+          "0.0": 0.06069,
+          "0.5": 0.058045,
+          "0.618": 0.05742078,
+          "0.786": 0.056532059999999995,
+          "1.0": 0.0554
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.056532059999999995,
+          "price_high": 0.05742078
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.0621183
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.0554
+        }
+      }
+    },
+    {
+      "symbol": "LDO/USDT:USDT",
+      "python_score": 87.8,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2248,
+      "volume_status": "OK",
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.0688,
+      "oi_status": "OK",
+      "oi_class": "SUPPORTIVE",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "symbol": "LDO/USDT:USDT",
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      },
+      "validation_adjustment": 0,
+      "final_rank_score": 87.8,
+      "reference_price": 0.2863,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "golden_zone": {
+        "direction": "BULLISH",
+        "swing_low_index": 294,
+        "swing_high_index": 296,
+        "swing_low_at": "2026-07-06 12:00:00",
+        "swing_high_at": "2026-07-06 20:00:00",
+        "swing_low": 0.2603,
+        "swing_high": 0.2879,
+        "levels": {
+          "-0.27": 0.295352,
+          "0.0": 0.2879,
+          "0.5": 0.2741,
+          "0.618": 0.2708432,
+          "0.786": 0.26620639999999995,
+          "1.0": 0.2603
+        },
+        "entry_zone": {
+          "level_from": 0.618,
+          "level_to": 0.786,
+          "price_low": 0.26620639999999995,
+          "price_high": 0.2708432
+        },
+        "take_profit": {
+          "level": -0.27,
+          "price": 0.295352
+        },
+        "stop_loss": {
+          "level": 1.0,
+          "price": 0.2603
+        }
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 2557,
+    "completion_tokens": 613,
+    "total_tokens": 3170,
+    "cache_hit_tokens": 1152,
+    "cache_miss_tokens": 1405
+  }
+}
