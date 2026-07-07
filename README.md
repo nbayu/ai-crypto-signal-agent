@@ -117,3 +117,23 @@ Already resolved horizons are skipped. Only eligible unresolved horizons are add
 The same explicit entry artifact may therefore be run after H4, again after H8, and again after H12.
 
 Automatic scheduling and automatic artifact discovery are not enabled in the current Forward Test workflow.
+
+## TradingView Watchlist Export
+
+Each successful production scanner run automatically exports the final Top 5 watchlist for TradingView.
+
+Source artifact:
+
+    data/top5_watchlist_v4/latest.json
+
+TradingView import file:
+
+    data/top5_watchlist_v4/tradingview_watchlist.txt
+
+The export preserves the final Top 5 ranking order.
+
+Binance USDT perpetual symbols are normalized to TradingView format:
+
+    BTC/USDT:USDT -> BINANCE:BTCUSDT.P
+
+The TradingView watchlist file is derived only from the official Top 5 artifact. It does not change scanner logic, scoring, ranking, quality thresholds, Golden Zone logic, or Forward Test behavior.

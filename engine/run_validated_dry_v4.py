@@ -9,6 +9,9 @@ from engine.final_reporter_v4 import print_final_report_v4
 from engine.top5_watchlist_artifact_v4 import (
     save_top5_watchlist_artifact,
 )
+from engine.tradingview_watchlist_export_v4 import (
+    export_tradingview_watchlist,
+)
 
 
 def save_snapshot(out):
@@ -39,6 +42,10 @@ outcome_path = save_outcome_snapshot(
 )
 watchlist_path = save_top5_watchlist_artifact(
     out["final_top5"]
+)
+tradingview_watchlist_path = export_tradingview_watchlist(
+    watchlist_path,
+    "data/top5_watchlist_v4/tradingview_watchlist.txt",
 )
 
 print_final_report_v4(
