@@ -28,6 +28,8 @@ def build_golden_zone_skill(
         "direction": fibonacci["direction"],
         "swing_low_index": swing_pair["swing_low_index"],
         "swing_high_index": swing_pair["swing_high_index"],
+        "swing_low_at": swing_pair["swing_low_at"],
+        "swing_high_at": swing_pair["swing_high_at"],
         "swing_low": fibonacci["swing_low"],
         "swing_high": fibonacci["swing_high"],
         "levels": fibonacci["levels"],

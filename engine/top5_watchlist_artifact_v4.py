@@ -7,6 +7,15 @@ WATCHLIST_DIRECTORY = Path("data/top5_watchlist_v4")
 WATCHLIST_FILENAME = "latest.json"
 
 
+def serialize_artifact_value(value):
+    isoformat = getattr(value, "isoformat", None)
+
+    if callable(isoformat):
+        return isoformat()
+
+    return str(value)
+
+
 def build_top5_watchlist_artifact(final_top5):
     setups = []
 
@@ -42,7 +51,7 @@ def save_top5_watchlist_artifact(final_top5):
         json.dumps(
             artifact,
             indent=2,
-            default=str,
+            default=serialize_artifact_value,
         )
     )
 

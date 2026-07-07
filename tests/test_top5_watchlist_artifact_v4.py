@@ -91,3 +91,40 @@ def test_save_writes_latest_json(tmp_path, monkeypatch):
     assert saved["setups"][0]["golden_zone"] == (
         final_top5[0]["golden_zone"]
     )
+
+
+def test_save_serializes_swing_timestamps_as_iso_strings(
+    tmp_path,
+    monkeypatch,
+):
+    import pandas as pd
+
+    monkeypatch.setattr(
+        artifact_module,
+        "WATCHLIST_DIRECTORY",
+        tmp_path,
+    )
+
+    final_top5 = [
+        _make_row("TESTUSDT", 91.5),
+    ]
+    golden_zone = final_top5[0]["golden_zone"]
+
+    golden_zone["swing_low_at"] = pd.Timestamp(
+        "2026-07-01T08:00:00"
+    )
+    golden_zone["swing_high_at"] = pd.Timestamp(
+        "2026-07-01T16:00:00"
+    )
+
+    path = save_top5_watchlist_artifact(final_top5)
+
+    saved = json.loads(path.read_text())
+    saved_zone = saved["setups"][0]["golden_zone"]
+
+    assert saved_zone["swing_low_at"] == (
+        "2026-07-01T08:00:00"
+    )
+    assert saved_zone["swing_high_at"] == (
+        "2026-07-01T16:00:00"
+    )

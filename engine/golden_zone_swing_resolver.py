@@ -45,6 +45,8 @@ def resolve_golden_zone_swing_pair(
                 "direction": direction,
                 "swing_low_index": low_index,
                 "swing_high_index": high_index,
+                "swing_low_at": df["timestamp"].iloc[low_index],
+                "swing_high_at": df["timestamp"].iloc[high_index],
                 "swing_low": swing_low_price,
                 "swing_high": swing_high_price,
             }
@@ -80,6 +82,8 @@ def resolve_golden_zone_swing_pair(
                 "direction": direction,
                 "swing_low_index": low_index,
                 "swing_high_index": high_index,
+                "swing_low_at": df["timestamp"].iloc[low_index],
+                "swing_high_at": df["timestamp"].iloc[high_index],
                 "swing_low": swing_low_price,
                 "swing_high": swing_high_price,
             }
