@@ -561,6 +561,12 @@ def resolve_entry_artifact(
     )
 
     if not eligible:
+        if not resolution_path.exists():
+            write_resolution_state_atomic(
+                resolution_path,
+                resolution_state,
+            )
+
         return {
             "entry_path": str(entry_path),
             "resolution_path": str(resolution_path),
