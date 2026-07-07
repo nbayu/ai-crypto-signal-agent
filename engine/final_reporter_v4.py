@@ -4,7 +4,11 @@ import json
 SEPARATOR_WIDTH = 120
 
 
-def render_final_report_v4(out, snapshot_path=None):
+def render_final_report_v4(
+    out,
+    snapshot_path=None,
+    evidence_path=None,
+):
     controlled_top10 = out["controlled_top10"]
     final_top5 = out["final_top5"]
     usage = out["usage"]
@@ -16,6 +20,11 @@ def render_final_report_v4(out, snapshot_path=None):
             "",
             f"SNAPSHOT SAVED: {snapshot_path}",
         ])
+
+    if evidence_path is not None:
+        lines.append(
+            f"PRODUCTION EVIDENCE SAVED: {evidence_path}"
+        )
 
     lines.extend([
         "",
@@ -93,10 +102,15 @@ def render_final_report_v4(out, snapshot_path=None):
     return "\n".join(lines)
 
 
-def print_final_report_v4(out, snapshot_path=None):
+def print_final_report_v4(
+    out,
+    snapshot_path=None,
+    evidence_path=None,
+):
     print(
         render_final_report_v4(
             out,
             snapshot_path=snapshot_path,
+            evidence_path=evidence_path,
         )
     )

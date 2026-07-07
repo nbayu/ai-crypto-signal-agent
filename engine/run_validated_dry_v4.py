@@ -15,6 +15,9 @@ from engine.pre_delivery_flow_v4 import (
 from engine.pre_delivery_market_data_v4 import (
     get_closed_ohlcv_for_pre_delivery,
 )
+from engine.production_evidence_v4 import (
+    save_production_evidence,
+)
 
 
 def save_snapshot(out):
@@ -62,7 +65,19 @@ tradingview_watchlist_path = delivery_out[
     "tradingview_watchlist_path"
 ]
 
+evidence_path = save_production_evidence(
+    created_at=datetime.now().isoformat(),
+    validated_snapshot_path=snapshot_path,
+    outcome_entry_path=outcome_path,
+    raw_top5_path=watchlist_path,
+    pre_delivery_path=delivery_artifact_path,
+    tradingview_watchlist_path=(
+        tradingview_watchlist_path
+    ),
+)
+
 print_final_report_v4(
     out,
     snapshot_path=snapshot_path,
+    evidence_path=evidence_path,
 )
