@@ -118,22 +118,41 @@ The same explicit entry artifact may therefore be run after H4, again after H8, 
 
 Automatic scheduling and automatic artifact discovery are not enabled in the current Forward Test workflow.
 
+## Pre-Delivery Validation
+
+Each successful production scanner run first preserves the raw Top 5 scanner artifact:
+
+    data/top5_watchlist_v4/latest.json
+
+Before delivery, every setup is validated against current closed 4H candles.
+
+A setup remains delivery eligible only when:
+
+- its historical lifecycle is still actionable
+- it has not been superseded by a replacement swing pair
+
+The filtered delivery artifact is written to:
+
+    data/pre_delivery_v4/latest.json
+
+The raw Top 5 artifact remains unchanged as scanner evidence.
+
+Pre-delivery validation does not change scanner logic, scoring, ranking, quality thresholds, Golden Zone logic, or Forward Test behavior.
+
 ## TradingView Watchlist Export
 
-Each successful production scanner run automatically exports the final Top 5 watchlist for TradingView.
+Each successful production scanner run automatically exports only delivery-eligible setups to TradingView.
 
 Source artifact:
 
-    data/top5_watchlist_v4/latest.json
+    data/pre_delivery_v4/latest.json
 
 TradingView import file:
 
     data/top5_watchlist_v4/tradingview_watchlist.txt
 
-The export preserves the final Top 5 ranking order.
+The export preserves the original scanner ranking order among eligible setups. It does not rerank the filtered results.
 
 Binance USDT perpetual symbols are normalized to TradingView format:
 
     BTC/USDT:USDT -> BINANCE:BTCUSDT.P
-
-The TradingView watchlist file is derived only from the official Top 5 artifact. It does not change scanner logic, scoring, ranking, quality thresholds, Golden Zone logic, or Forward Test behavior.
