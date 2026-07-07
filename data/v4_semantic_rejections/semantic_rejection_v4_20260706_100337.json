@@ -1,0 +1,28 @@
+{
+  "event_type": "SEMANTIC_VALIDATION_REJECTION",
+  "symbol": "BNB/USDT:USDT",
+  "errors": [
+    "bos=True cannot receive BREAKOUT_UNCONFIRMED"
+  ],
+  "candidate": {
+    "symbol": "BNB/USDT:USDT",
+    "python_score": 90.87,
+    "trend": "UPTREND",
+    "bos": true,
+    "choch": false,
+    "volume_ratio": 0.8699,
+    "volume_status": "OK",
+    "volume_class": "NORMAL",
+    "oi_change_pct": -0.183,
+    "oi_status": "OK",
+    "oi_class": "SOFT",
+    "participation": "NEUTRAL"
+  },
+  "invalid_validation": {
+    "symbol": "BNB/USDT:USDT",
+    "status": "CONFLICT",
+    "false_breakout_risk": "MEDIUM",
+    "confluence": "MODERATE",
+    "reason_code": "BREAKOUT_UNCONFIRMED"
+  }
+}

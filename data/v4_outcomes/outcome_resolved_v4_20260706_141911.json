@@ -1,0 +1,191 @@
+{
+  "snapshot_type": "v4_forward_outcome_resolution",
+  "schema_version": 1,
+  "entry_artifact": "outcome_entry_v4_20260706_141911.json",
+  "entry_snapshot_type": "v4_outcome_tracker_entry",
+  "entry_schema_version": 1,
+  "entry_captured_at": "2026-07-06T14:19:11.994572",
+  "reference_candle_at": "2026-07-06T08:00:00",
+  "candidates": [
+    {
+      "symbol": "SUN/USDT:USDT",
+      "reference_price": 0.017823,
+      "resolved_horizons": {
+        "h4": {
+          "horizon": "h4",
+          "target_at": "2026-07-06T16:00:00+00:00",
+          "return_price": 0.017744,
+          "return_pct": -0.44324748919934986,
+          "mfe_price": 0.01784,
+          "mfe_pct": 0.0953823710935442,
+          "mae_price": 0.017619,
+          "mae_pct": -1.1445884531223638
+        },
+        "h8": {
+          "horizon": "h8",
+          "target_at": "2026-07-06T20:00:00+00:00",
+          "return_price": 0.017791,
+          "return_pct": -0.17954328676428322,
+          "mfe_price": 0.01784,
+          "mfe_pct": 0.0953823710935442,
+          "mae_price": 0.017619,
+          "mae_pct": -1.1445884531223638
+        },
+        "h12": {
+          "horizon": "h12",
+          "target_at": "2026-07-07T00:00:00+00:00",
+          "return_price": 0.017776,
+          "return_pct": -0.26370420243504444,
+          "mfe_price": 0.017883,
+          "mfe_pct": 0.3366436626830449,
+          "mae_price": 0.017619,
+          "mae_pct": -1.1445884531223638
+        }
+      }
+    },
+    {
+      "symbol": "TRIA/USDT:USDT",
+      "reference_price": 0.0274,
+      "resolved_horizons": {
+        "h4": {
+          "horizon": "h4",
+          "target_at": "2026-07-06T16:00:00+00:00",
+          "return_price": 0.02991,
+          "return_pct": 9.160583941605838,
+          "mfe_price": 0.03023,
+          "mfe_pct": 10.32846715328466,
+          "mae_price": 0.02705,
+          "mae_pct": -1.2773722627737238
+        },
+        "h8": {
+          "horizon": "h8",
+          "target_at": "2026-07-06T20:00:00+00:00",
+          "return_price": 0.03115,
+          "return_pct": 13.686131386861323,
+          "mfe_price": 0.0316,
+          "mfe_pct": 15.328467153284686,
+          "mae_price": 0.02705,
+          "mae_pct": -1.2773722627737238
+        },
+        "h12": {
+          "horizon": "h12",
+          "target_at": "2026-07-07T00:00:00+00:00",
+          "return_price": 0.03265,
+          "return_pct": 19.160583941605825,
+          "mfe_price": 0.03324,
+          "mfe_pct": 21.313868613138688,
+          "mae_price": 0.02705,
+          "mae_pct": -1.2773722627737238
+        }
+      }
+    },
+    {
+      "symbol": "ZRO/USDT:USDT",
+      "reference_price": 0.9734,
+      "resolved_horizons": {
+        "h4": {
+          "horizon": "h4",
+          "target_at": "2026-07-06T16:00:00+00:00",
+          "return_price": 0.9909,
+          "return_pct": 1.7978220669817135,
+          "mfe_price": 0.9936,
+          "mfe_pct": 2.0752003287445975,
+          "mae_price": 0.9376,
+          "mae_pct": -3.6778302855968836
+        },
+        "h8": {
+          "horizon": "h8",
+          "target_at": "2026-07-06T20:00:00+00:00",
+          "return_price": 1.0222,
+          "return_pct": 5.013355249640439,
+          "mfe_price": 1.0427,
+          "mfe_pct": 7.119375385247584,
+          "mae_price": 0.9376,
+          "mae_pct": -3.6778302855968836
+        },
+        "h12": {
+          "horizon": "h12",
+          "target_at": "2026-07-07T00:00:00+00:00",
+          "return_price": 1.0155,
+          "return_pct": 4.325046229710305,
+          "mfe_price": 1.0598,
+          "mfe_pct": 8.876104376412574,
+          "mae_price": 0.9376,
+          "mae_pct": -3.6778302855968836
+        }
+      }
+    },
+    {
+      "symbol": "PYTH/USDT:USDT",
+      "reference_price": 0.0437,
+      "resolved_horizons": {
+        "h4": {
+          "horizon": "h4",
+          "target_at": "2026-07-06T16:00:00+00:00",
+          "return_price": 0.04637,
+          "return_pct": 6.1098398169336265,
+          "mfe_price": 0.04643,
+          "mfe_pct": 6.247139588100681,
+          "mae_price": 0.04217,
+          "mae_pct": -3.5011441647597286
+        },
+        "h8": {
+          "horizon": "h8",
+          "target_at": "2026-07-06T20:00:00+00:00",
+          "return_price": 0.04618,
+          "return_pct": 5.675057208237977,
+          "mfe_price": 0.0476,
+          "mfe_pct": 8.924485125858128,
+          "mae_price": 0.04217,
+          "mae_pct": -3.5011441647597286
+        },
+        "h12": {
+          "horizon": "h12",
+          "target_at": "2026-07-07T00:00:00+00:00",
+          "return_price": 0.04549,
+          "return_pct": 4.0961098398169415,
+          "mfe_price": 0.0476,
+          "mfe_pct": 8.924485125858128,
+          "mae_price": 0.04217,
+          "mae_pct": -3.5011441647597286
+        }
+      }
+    },
+    {
+      "symbol": "MON/USDT:USDT",
+      "reference_price": 0.02282,
+      "resolved_horizons": {
+        "h4": {
+          "horizon": "h4",
+          "target_at": "2026-07-06T16:00:00+00:00",
+          "return_price": 0.0244,
+          "return_pct": 6.923751095530251,
+          "mfe_price": 0.02461,
+          "mfe_pct": 7.843996494303251,
+          "mae_price": 0.02204,
+          "mae_pct": -3.4180543382997364
+        },
+        "h8": {
+          "horizon": "h8",
+          "target_at": "2026-07-06T20:00:00+00:00",
+          "return_price": 0.0241,
+          "return_pct": 5.609114811568805,
+          "mfe_price": 0.02461,
+          "mfe_pct": 7.843996494303251,
+          "mae_price": 0.02204,
+          "mae_pct": -3.4180543382997364
+        },
+        "h12": {
+          "horizon": "h12",
+          "target_at": "2026-07-07T00:00:00+00:00",
+          "return_price": 0.02497,
+          "return_pct": 9.421560035056963,
+          "mfe_price": 0.02537,
+          "mfe_pct": 11.17440841367221,
+          "mae_price": 0.02204,
+          "mae_pct": -3.4180543382997364
+        }
+      }
+    }
+  ]
+}

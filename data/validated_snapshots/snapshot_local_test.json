@@ -1,0 +1,23 @@
+{
+  "created_at_utc": "2026-07-06T04:13:37.591258+00:00",
+  "controlled_top10": [
+    {
+      "symbol": "TEST/USDT",
+      "python_score": 90,
+      "volume_spike": 25,
+      "oi_growth": 10,
+      "validation_adjustment": -10,
+      "final_rank_score": 80,
+      "ai_validation": {
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      }
+    }
+  ],
+  "final_top5": [],
+  "usage": {
+    "mock": true
+  }
+}

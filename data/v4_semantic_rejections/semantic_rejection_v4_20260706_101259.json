@@ -1,0 +1,28 @@
+{
+  "event_type": "SEMANTIC_VALIDATION_REJECTION",
+  "symbol": "CAKE/USDT:USDT",
+  "errors": [
+    "bos=True cannot receive BREAKOUT_UNCONFIRMED"
+  ],
+  "candidate": {
+    "symbol": "CAKE/USDT:USDT",
+    "python_score": 89.77,
+    "trend": "UPTREND",
+    "bos": true,
+    "choch": false,
+    "volume_ratio": 0.985,
+    "volume_status": "OK",
+    "volume_class": "NORMAL",
+    "oi_change_pct": 0.3804,
+    "oi_status": "OK",
+    "oi_class": "STRONG",
+    "participation": "NEUTRAL"
+  },
+  "invalid_validation": {
+    "symbol": "CAKE/USDT:USDT",
+    "status": "CONFLICT",
+    "false_breakout_risk": "MEDIUM",
+    "confluence": "MODERATE",
+    "reason_code": "BREAKOUT_UNCONFIRMED"
+  }
+}

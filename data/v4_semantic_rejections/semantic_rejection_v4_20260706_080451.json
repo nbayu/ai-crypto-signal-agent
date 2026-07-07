@@ -1,0 +1,28 @@
+{
+  "event_type": "SEMANTIC_VALIDATION_REJECTION",
+  "symbol": "TRX/USDT:USDT",
+  "errors": [
+    "bos=True cannot receive BREAKOUT_UNCONFIRMED"
+  ],
+  "candidate": {
+    "symbol": "TRX/USDT:USDT",
+    "python_score": 91.6,
+    "trend": "UPTREND",
+    "bos": true,
+    "choch": false,
+    "volume_ratio": 1.1789,
+    "volume_status": "OK",
+    "volume_class": "NORMAL",
+    "oi_change_pct": 0.3203,
+    "oi_status": "OK",
+    "oi_class": "STRONG",
+    "participation": "NEUTRAL"
+  },
+  "invalid_validation": {
+    "symbol": "TRX/USDT:USDT",
+    "status": "CONFLICT",
+    "false_breakout_risk": "MEDIUM",
+    "confluence": "MODERATE",
+    "reason_code": "BREAKOUT_UNCONFIRMED"
+  }
+}

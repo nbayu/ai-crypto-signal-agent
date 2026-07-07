@@ -1,0 +1,489 @@
+[
+  {
+    "call_id": "RC-20260704-053706-273544-XRP",
+    "created_at": "2026-07-04T05:37:06.273544+00:00",
+    "symbol": "XRP/USDT:USDT",
+    "market_snapshot": {
+      "score": 91.6,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 53,
+      "order_blocks": 49,
+      "liquidity": 126,
+      "atr": 0.018407142857142893,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.00029999999999996696,
+      "volume_spike": 0,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 89,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260704-053706-275902-NEAR",
+    "created_at": "2026-07-04T05:37:06.275902+00:00",
+    "symbol": "NEAR/USDT:USDT",
+    "market_snapshot": {
+      "score": 90.43,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 47,
+      "order_blocks": 30,
+      "liquidity": 146,
+      "atr": 0.05642857142857146,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 88,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260704-053706-277176-SUI",
+    "created_at": "2026-07-04T05:37:06.277176+00:00",
+    "symbol": "SUI/USDT:USDT",
+    "market_snapshot": {
+      "score": 89.7,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 44,
+      "order_blocks": 43,
+      "liquidity": 120,
+      "atr": 0.015164285714285701,
+      "distance_ob": 0.0005999999999999339,
+      "distance_fvg": 0.0004999999999999449,
+      "volume_spike": 0,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 88,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260705-031327-779113-TRX",
+    "created_at": "2026-07-05T03:13:27.779113+00:00",
+    "symbol": "TRX/USDT:USDT",
+    "market_snapshot": {
+      "score": 90.4,
+      "entry_score": 78,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 71,
+      "order_blocks": 29,
+      "liquidity": 141,
+      "atr": 0.0014950000000000002,
+      "distance_ob": 0.00021999999999999797,
+      "distance_fvg": 4.0000000000040004e-05,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "WORTH REVIEWING",
+      "confidence": 84,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "Good setup quality"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260705-031327-904839-MEGA",
+    "created_at": "2026-07-05T03:13:27.904839+00:00",
+    "symbol": "MEGA/USDT:USDT",
+    "market_snapshot": {
+      "score": 89.77,
+      "entry_score": 83,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 56,
+      "order_blocks": 37,
+      "liquidity": 142,
+      "atr": 0.002344285714285714,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 40,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 86,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260705-031328-033706-HMSTR",
+    "created_at": "2026-07-05T03:13:28.033706+00:00",
+    "symbol": "HMSTR/USDT:USDT",
+    "market_snapshot": {
+      "score": 89.73,
+      "entry_score": 79,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 51,
+      "order_blocks": 31,
+      "liquidity": 128,
+      "atr": 4.330000000000001e-05,
+      "distance_ob": 3.100000000000021e-06,
+      "distance_fvg": 2.5699999999999974e-05,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "WORTH REVIEWING",
+      "confidence": 84,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "Good setup quality"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260705-031328-159651-VANRY",
+    "created_at": "2026-07-05T03:13:28.159651+00:00",
+    "symbol": "VANRY/USDT:USDT",
+    "market_snapshot": {
+      "score": 88.83,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 43,
+      "order_blocks": 36,
+      "liquidity": 119,
+      "atr": 0.0004416428571428571,
+      "distance_ob": 1.299999999999999e-05,
+      "distance_fvg": 3.099999999999978e-05,
+      "volume_spike": 80,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 87,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260705-031328-291223-JST",
+    "created_at": "2026-07-05T03:13:28.291223+00:00",
+    "symbol": "JST/USDT:USDT",
+    "market_snapshot": {
+      "score": 88.6,
+      "entry_score": 74,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 63,
+      "order_blocks": 27,
+      "liquidity": 144,
+      "atr": 0.0010292857142857167,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "WORTH REVIEWING",
+      "confidence": 81,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "Good setup quality"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260706-025147-633418-ID",
+    "created_at": "2026-07-06T02:51:47.633418+00:00",
+    "symbol": "ID/USDT:USDT",
+    "market_snapshot": {
+      "score": 91.77,
+      "entry_score": 83,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 75,
+      "order_blocks": 38,
+      "liquidity": 142,
+      "atr": 0.0014999999999999998,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 40,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 87,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260706-025147-766958-TRX",
+    "created_at": "2026-07-06T02:51:47.766958+00:00",
+    "symbol": "TRX/USDT:USDT",
+    "market_snapshot": {
+      "score": 90.6,
+      "entry_score": 83,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 72,
+      "order_blocks": 32,
+      "liquidity": 138,
+      "atr": 0.0017599999999999996,
+      "distance_ob": 0.00012000000000000899,
+      "distance_fvg": 0.0,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 86,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260706-025147-891843-PUMP",
+    "created_at": "2026-07-06T02:51:47.891843+00:00",
+    "symbol": "PUMP/USDT:USDT",
+    "market_snapshot": {
+      "score": 90.13,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 56,
+      "order_blocks": 40,
+      "liquidity": 128,
+      "atr": 5.7142857142857155e-05,
+      "distance_ob": 1.0000000000001327e-06,
+      "distance_fvg": 0.0,
+      "volume_spike": 40,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 88,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260706-025148-017121-ADA",
+    "created_at": "2026-07-06T02:51:48.017121+00:00",
+    "symbol": "ADA/USDT:USDT",
+    "market_snapshot": {
+      "score": 89.87,
+      "entry_score": 87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 47,
+      "order_blocks": 35,
+      "liquidity": 130,
+      "atr": 0.005871428571428575,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 0,
+      "oi_growth": 0
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 88,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation",
+        "Open interest not supportive"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  },
+  {
+    "call_id": "RC-20260706-025148-155405-CAKE",
+    "created_at": "2026-07-06T02:51:48.155405+00:00",
+    "symbol": "CAKE/USDT:USDT",
+    "market_snapshot": {
+      "score": 89.77,
+      "entry_score": 83,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "fvg": 67,
+      "order_blocks": 40,
+      "liquidity": 121,
+      "atr": 0.030192857142857115,
+      "distance_ob": 0.0,
+      "distance_fvg": 0.0,
+      "volume_spike": 0,
+      "oi_growth": 100
+    },
+    "research": {
+      "status": "STRONG CANDIDATE",
+      "confidence": 86,
+      "strengths": [
+        "Strong bullish structure",
+        "Structure breakout confirmed",
+        "High-quality setup"
+      ],
+      "risks": [
+        "No volume confirmation"
+      ]
+    },
+    "decision": null,
+    "trade": null,
+    "engine_outcome": null,
+    "trader_outcome": null,
+    "status": "RESEARCHED"
+  }
+]

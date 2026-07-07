@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-07-06T07:03:14.444014",
+  "candidate_count": 10,
+  "participation": {
+    "STRONG": 2,
+    "SUPPORTIVE": 3,
+    "NEUTRAL": 5
+  },
+  "status": {
+    "CLEAR": 8,
+    "CONFLICT": 2
+  },
+  "reason": {
+    "ALIGNED": 8,
+    "MIXED_PARTICIPATION": 2
+  },
+  "penalties": {
+    "0": 5,
+    "-1": 3,
+    "-5": 2
+  },
+  "evidence_pairs": {
+    "STRONG+STRONG->STRONG": 2,
+    "STRONG+SOFT->SUPPORTIVE": 3,
+    "NORMAL+SUPPORTIVE->NEUTRAL": 1,
+    "NORMAL+STRONG->NEUTRAL": 2,
+    "WEAK+STRONG->NEUTRAL": 1,
+    "WEAK+SUPPORTIVE->NEUTRAL": 1
+  },
+  "final_top5": [
+    {
+      "symbol": "ID/USDT:USDT",
+      "python_score": 91.87,
+      "validation_adjustment": 0,
+      "final_rank_score": 91.87,
+      "volume_class": "STRONG",
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "status": "CLEAR",
+      "reason_code": "ALIGNED"
+    },
+    {
+      "symbol": "PUMP/USDT:USDT",
+      "python_score": 90.17,
+      "validation_adjustment": 0,
+      "final_rank_score": 90.17,
+      "volume_class": "STRONG",
+      "oi_class": "SOFT",
+      "participation": "SUPPORTIVE",
+      "status": "CLEAR",
+      "reason_code": "ALIGNED"
+    },
+    {
+      "symbol": "SUN/USDT:USDT",
+      "python_score": 89.7,
+      "validation_adjustment": 0,
+      "final_rank_score": 89.7,
+      "volume_class": "STRONG",
+      "oi_class": "SOFT",
+      "participation": "SUPPORTIVE",
+      "status": "CLEAR",
+      "reason_code": "ALIGNED"
+    },
+    {
+      "symbol": "TRX/USDT:USDT",
+      "python_score": 90.6,
+      "validation_adjustment": -1,
+      "final_rank_score": 89.6,
+      "volume_class": "NORMAL",
+      "oi_class": "SUPPORTIVE",
+      "participation": "NEUTRAL",
+      "status": "CLEAR",
+      "reason_code": "ALIGNED"
+    },
+    {
+      "symbol": "UB/USDT:USDT",
+      "python_score": 88.87,
+      "validation_adjustment": 0,
+      "final_rank_score": 88.87,
+      "volume_class": "STRONG",
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "status": "CLEAR",
+      "reason_code": "ALIGNED"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1977,
+    "completion_tokens": 603,
+    "total_tokens": 2580,
+    "cache_hit_tokens": 1024,
+    "cache_miss_tokens": 953
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "event_type": "SEMANTIC_VALIDATION_REJECTION",
+  "symbol": "VANRY/USDT:USDT",
+  "errors": [
+    "bos=True cannot receive BREAKOUT_UNCONFIRMED"
+  ],
+  "candidate": {
+    "symbol": "VANRY/USDT:USDT",
+    "python_score": 88.3,
+    "trend": "UPTREND",
+    "bos": true,
+    "choch": false,
+    "volume_ratio": 0.8471,
+    "volume_status": "OK",
+    "volume_class": "NORMAL",
+    "oi_change_pct": 4.4458,
+    "oi_status": "OK",
+    "oi_class": "STRONG",
+    "participation": "NEUTRAL"
+  },
+  "invalid_validation": {
+    "symbol": "VANRY/USDT:USDT",
+    "status": "CONFLICT",
+    "false_breakout_risk": "MEDIUM",
+    "confluence": "MODERATE",
+    "reason_code": "BREAKOUT_UNCONFIRMED"
+  }
+}

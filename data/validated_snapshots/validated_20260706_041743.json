@@ -1,0 +1,284 @@
+{
+  "created_at_utc": "2026-07-06T04:17:43.783531+00:00",
+  "controlled_top10": [
+    {
+      "symbol": "ID/USDT:USDT",
+      "python_score": 91.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "ID/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 81.9
+    },
+    {
+      "symbol": "BNB/USDT:USDT",
+      "python_score": 90.93,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "BNB/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.93
+    },
+    {
+      "symbol": "XPT/USDT:USDT",
+      "python_score": 89.57,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": true,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "XPT/USDT:USDT",
+        "status": "CONFLICT",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "STRUCTURE_REVERSAL_CONFLICT"
+      },
+      "validation_adjustment": -9,
+      "final_rank_score": 80.57
+    },
+    {
+      "symbol": "TRX/USDT:USDT",
+      "python_score": 90.5,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "TRX/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.5
+    },
+    {
+      "symbol": "PUMP/USDT:USDT",
+      "python_score": 90.07,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "PUMP/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.07
+    },
+    {
+      "symbol": "CAKE/USDT:USDT",
+      "python_score": 89.87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "CAKE/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 79.87
+    },
+    {
+      "symbol": "EDEN/USDT:USDT",
+      "python_score": 89.6,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 100,
+      "ai_validation": {
+        "symbol": "EDEN/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_VOLUME"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 79.6
+    },
+    {
+      "symbol": "SUN/USDT:USDT",
+      "python_score": 89.6,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 100,
+      "ai_validation": {
+        "symbol": "SUN/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_VOLUME"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 79.6
+    },
+    {
+      "symbol": "CELO/USDT:USDT",
+      "python_score": 88.87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 100,
+      "ai_validation": {
+        "symbol": "CELO/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_VOLUME"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 78.87
+    },
+    {
+      "symbol": "UB/USDT:USDT",
+      "python_score": 88.7,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 100,
+      "ai_validation": {
+        "symbol": "UB/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_VOLUME"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 78.7
+    }
+  ],
+  "final_top5": [
+    {
+      "symbol": "ID/USDT:USDT",
+      "python_score": 91.9,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "ID/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 81.9
+    },
+    {
+      "symbol": "BNB/USDT:USDT",
+      "python_score": 90.93,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "BNB/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.93
+    },
+    {
+      "symbol": "XPT/USDT:USDT",
+      "python_score": 89.57,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": true,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "XPT/USDT:USDT",
+        "status": "CONFLICT",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "STRUCTURE_REVERSAL_CONFLICT"
+      },
+      "validation_adjustment": -9,
+      "final_rank_score": 80.57
+    },
+    {
+      "symbol": "TRX/USDT:USDT",
+      "python_score": 90.5,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "TRX/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.5
+    },
+    {
+      "symbol": "PUMP/USDT:USDT",
+      "python_score": 90.07,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_spike": 0,
+      "oi_growth": 0,
+      "ai_validation": {
+        "symbol": "PUMP/USDT:USDT",
+        "status": "HIGH_RISK",
+        "false_breakout_risk": "HIGH",
+        "confluence": "WEAK",
+        "reason_code": "WEAK_PARTICIPATION"
+      },
+      "validation_adjustment": -10,
+      "final_rank_score": 80.07
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1384,
+    "completion_tokens": 640,
+    "total_tokens": 2024,
+    "cache_hit_tokens": 896,
+    "cache_miss_tokens": 488
+  }
+}
