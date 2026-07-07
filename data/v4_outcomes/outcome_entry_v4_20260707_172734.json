@@ -1,0 +1,117 @@
+{
+  "snapshot_type": "v4_outcome_tracker_entry",
+  "schema_version": 1,
+  "captured_at": "2026-07-07T17:27:34.762832",
+  "candidates": [
+    {
+      "symbol": "TRX/USDT:USDT",
+      "reference_price": 0.33097,
+      "reference_candle_at": "2026-07-07T08:00:00",
+      "python_score": 91.17,
+      "validation_adjustment": -1,
+      "final_rank_score": 90.17,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 0.8866,
+      "volume_class": "NORMAL",
+      "oi_change_pct": 0.226,
+      "oi_class": "SUPPORTIVE",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "MODERATE",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "SUN/USDT:USDT",
+      "reference_price": 0.018323,
+      "reference_candle_at": "2026-07-07T08:00:00",
+      "python_score": 90.0,
+      "validation_adjustment": 0,
+      "final_rank_score": 90.0,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 2.762,
+      "volume_class": "STRONG",
+      "oi_change_pct": 1.4129,
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "CHIP/USDT:USDT",
+      "reference_price": 0.03583,
+      "reference_candle_at": "2026-07-07T08:00:00",
+      "python_score": 89.97,
+      "validation_adjustment": 0,
+      "final_rank_score": 89.97,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 10.7373,
+      "volume_class": "STRONG",
+      "oi_change_pct": 2.1144,
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "BLUR/USDT:USDT",
+      "reference_price": 0.02455,
+      "reference_candle_at": "2026-07-07T08:00:00",
+      "python_score": 89.63,
+      "validation_adjustment": 0,
+      "final_rank_score": 89.63,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 7.9944,
+      "volume_class": "STRONG",
+      "oi_change_pct": 4.9224,
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "JST/USDT:USDT",
+      "reference_price": 0.09358,
+      "reference_candle_at": "2026-07-07T08:00:00",
+      "python_score": 88.8,
+      "validation_adjustment": 0,
+      "final_rank_score": 88.8,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.9955,
+      "volume_class": "STRONG",
+      "oi_change_pct": 0.6458,
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    }
+  ]
+}
