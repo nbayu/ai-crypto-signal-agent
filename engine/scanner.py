@@ -32,7 +32,9 @@ def scan_symbol(symbol):
         if not quality["qualified"]:
             return None, "QUALITY"
 
-        structure = analyze_market_structure(df)
+        closed_df = df.iloc[:-1]
+
+        structure = analyze_market_structure(closed_df)
 
         volume_v2 = volume_metrics_v2(df)
 
