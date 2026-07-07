@@ -10,6 +10,7 @@ from engine.validation_payload_v2 import build_validation_candidate_v2
 
 TOP_N_FOR_VALIDATION = 10
 FINAL_TOP_N = 5
+MIN_FINAL_RANK_SCORE = 80.0
 
 
 def build_validation_payload_v4(results):
@@ -23,6 +24,16 @@ def build_validation_payload_v4(results):
         build_validation_candidate_v2(candidate)
         for candidate in ranked
     ]
+
+
+def build_final_top5(controlled):
+    qualified = [
+        row
+        for row in controlled
+        if row["final_rank_score"] >= MIN_FINAL_RANK_SCORE
+    ]
+
+    return qualified[:FINAL_TOP_N]
 
 
 def run_validated_pipeline_v4(results):
@@ -92,6 +103,6 @@ def run_validated_pipeline_v4(results):
 
     return {
         "controlled_top10": controlled,
-        "final_top5": controlled[:FINAL_TOP_N],
+        "final_top5": build_final_top5(controlled),
         "usage": ai_result["usage"],
     }

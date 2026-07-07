@@ -48,6 +48,11 @@ def render_final_report_v4(out, snapshot_path=None):
         "=" * SEPARATOR_WIDTH,
     ])
 
+    if not final_top5:
+        lines.append(
+            "Tidak ditemukan setup berkualitas hari ini."
+        )
+
     for i, row in enumerate(final_top5, 1):
         ai = row["ai_validation"]
 
