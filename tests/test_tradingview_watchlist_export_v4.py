@@ -56,7 +56,7 @@ def test_build_watchlist_rejects_setup_count_mismatch():
         build_tradingview_watchlist(artifact)
 
 
-def test_export_writes_one_symbol_per_line(tmp_path):
+def test_export_writes_comma_separated_symbols(tmp_path):
     source_path = tmp_path / "latest.json"
     output_path = tmp_path / "tradingview_watchlist.txt"
 
@@ -76,8 +76,8 @@ def test_export_writes_one_symbol_per_line(tmp_path):
 
     assert path == output_path
     assert output_path.read_text() == (
-        "BINANCE:BTCUSDT.P\n"
-        "BINANCE:ETHUSDT.P\n"
+        "BINANCE:BTCUSDT.P,"
+        "BINANCE:ETHUSDT.P"
     )
 
 

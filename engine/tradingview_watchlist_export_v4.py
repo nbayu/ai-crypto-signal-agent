@@ -47,10 +47,7 @@ def export_tradingview_watchlist(
         exist_ok=True,
     )
 
-    content = "".join(
-        f"{symbol}\n"
-        for symbol in watchlist
-    )
+    content = ",".join(watchlist)
 
     output_path.write_text(content)
 
