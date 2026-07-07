@@ -148,3 +148,76 @@ def test_bridge_uses_existing_tradingview_symbol_contract():
     )
     assert fields[1] == "BINANCE:SUNUSDT.P"
     assert len(fields) == 13
+
+
+def test_bridge_artifact_has_explicit_contract_metadata():
+    from engine.pine_bridge_v4 import (
+        build_pine_bridge_artifact,
+    )
+
+    artifact = _artifact()
+    artifact["source_generated_at"] = artifact.pop(
+        "generated_at"
+    )
+    artifact["validated_at"] = "2026-07-07T16:55:47"
+
+    bridge = build_pine_bridge_artifact(artifact)
+
+    assert bridge["snapshot_type"] == "v4_pine_bridge"
+    assert bridge["schema_version"] == 1
+    assert bridge["source_generated_at"] == (
+        "2026-07-07T13:44:02"
+    )
+    assert bridge["validated_at"] == (
+        "2026-07-07T16:55:47"
+    )
+    assert bridge["setup_count"] == 1
+
+
+def test_bridge_artifact_preserves_original_rank():
+    from engine.pine_bridge_v4 import (
+        build_pine_bridge_artifact,
+    )
+
+    artifact = _artifact()
+    artifact["setups"][0]["rank"] = 5
+
+    bridge = build_pine_bridge_artifact(artifact)
+
+    assert bridge["setups"][0]["rank"] == 5
+    assert bridge["setups"][0]["symbol"] == (
+        "SUN/USDT:USDT"
+    )
+
+
+def test_bridge_artifact_rejects_setup_count_mismatch():
+    import pytest
+
+    from engine.pine_bridge_v4 import (
+        build_pine_bridge_artifact,
+    )
+
+    artifact = _artifact()
+    artifact["setup_count"] = 2
+
+    with pytest.raises(
+        ValueError,
+        match="setup_count does not match setups length",
+    ):
+        build_pine_bridge_artifact(artifact)
+
+
+def test_bridge_payload_accepts_bridge_artifact_contract():
+    from engine.pine_bridge_v4 import (
+        build_pine_bridge_artifact,
+        build_pine_bridge_payload,
+    )
+
+    artifact = _artifact()
+    bridge = build_pine_bridge_artifact(artifact)
+
+    payload = build_pine_bridge_payload(bridge)
+
+    assert payload.startswith(
+        "SUN/USDT:USDT|BINANCE:SUNUSDT.P|"
+    )

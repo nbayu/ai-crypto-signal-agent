@@ -10,6 +10,27 @@ def format_pine_bridge_value(value):
     return str(value)
 
 
+def build_pine_bridge_artifact(artifact):
+    setups = artifact["setups"]
+
+    if artifact["setup_count"] != len(setups):
+        raise ValueError(
+            "setup_count does not match setups length"
+        )
+
+    return {
+        "snapshot_type": "v4_pine_bridge",
+        "schema_version": 1,
+        "source_generated_at": artifact.get(
+            "source_generated_at",
+            artifact.get("generated_at"),
+        ),
+        "validated_at": artifact.get("validated_at"),
+        "setup_count": len(setups),
+        "setups": setups,
+    }
+
+
 def build_pine_bridge_payload(artifact):
     lines = []
 
