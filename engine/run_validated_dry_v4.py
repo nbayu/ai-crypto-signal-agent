@@ -5,6 +5,7 @@ from pathlib import Path
 from engine.scanner import scan_market
 from engine.validated_pipeline_v4 import run_validated_pipeline_v4
 from engine.outcome_tracker_v4 import save_outcome_snapshot
+from engine.final_reporter_v4 import print_final_report_v4
 
 
 def save_snapshot(out):
@@ -34,51 +35,7 @@ outcome_path = save_outcome_snapshot(
     out["final_top5"]
 )
 
-print()
-print("SNAPSHOT SAVED:", snapshot_path)
-
-print()
-print("=" * 120)
-print("V4 FULL TOP 10 AUDIT")
-print("=" * 120)
-
-for i, row in enumerate(out["controlled_top10"], 1):
-    ai = row["ai_validation"]
-
-    print(
-        f"{i}. {row['symbol']} | "
-        f"PY {row['python_score']:.2f} | "
-        f"ADJ {row['validation_adjustment']:+} | "
-        f"FINAL {row['final_rank_score']:.2f} | "
-        f"VOL {row['volume_ratio']} {row['volume_class']} | "
-        f"OI {row['oi_change_pct']}% {row['oi_class']} | "
-        f"PART {row['participation']} | "
-        f"{ai['status']} | "
-        f"{ai['false_breakout_risk']} | "
-        f"{ai['confluence']} | "
-        f"{ai['reason_code']}"
-    )
-
-print()
-print("=" * 120)
-print("V4 FINAL TOP 5")
-print("=" * 120)
-
-for i, row in enumerate(out["final_top5"], 1):
-    ai = row["ai_validation"]
-
-    print(
-        f"{i}. {row['symbol']} | "
-        f"PY {row['python_score']:.2f} | "
-        f"ADJ {row['validation_adjustment']:+} | "
-        f"FINAL {row['final_rank_score']:.2f} | "
-        f"PART {row['participation']} | "
-        f"{ai['status']} | "
-        f"{ai['reason_code']}"
-    )
-
-print()
-print("=" * 120)
-print("V4 LLM USAGE")
-print("=" * 120)
-print(json.dumps(out["usage"], indent=2))
+print_final_report_v4(
+    out,
+    snapshot_path=snapshot_path,
+)
