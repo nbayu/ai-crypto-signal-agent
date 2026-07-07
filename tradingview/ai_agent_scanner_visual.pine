@@ -1,0 +1,275 @@
+//@version=6
+indicator(
+    "AI Agent Scanner Fibonacci",
+    shorttitle="AI Fib",
+    overlay=true,
+    max_boxes_count=50,
+    max_lines_count=100,
+    max_labels_count=50
+)
+
+// Visual scope:
+// Golden Zone Fibonacci only.
+//
+// Architecture:
+// - Python remains the scanner source of truth.
+// - Pine Script mirrors the active Golden Zone logic.
+// - No FVG, SMC, or Supply & Demand rendering.
+
+
+// -----------------------------------------------------------------------------
+// GOLDEN ZONE FIBONACCI CORE
+// Mirrors active Python Golden Zone logic.
+// -----------------------------------------------------------------------------
+
+showGoldenZone = input.bool(
+    true,
+    "Show Golden Zone",
+    group="Golden Zone"
+)
+
+// Trend mirror: engine/market_structure.py
+// Matches pandas ewm(span=N).mean() default adjusted weighting.
+pandasEwm(src, span) =>
+    alpha = 2.0 / (span + 1.0)
+    decay = 1.0 - alpha
+    var float weightedSum = na
+    var float weightSum = na
+
+    weightedSum := na(weightedSum[1]) ? src : src + decay * weightedSum[1]
+    weightSum := na(weightSum[1]) ? 1.0 : 1.0 + decay * weightSum[1]
+
+    weightedSum / weightSum
+
+ema20 = pandasEwm(close, 20)
+ema50 = pandasEwm(close, 50)
+
+trendUp = ema20 > ema50
+trendDown = ema20 < ema50
+
+// Swing mirror: left=2, right=2
+pivotHigh = ta.pivothigh(high, 2, 2)
+pivotLow = ta.pivotlow(low, 2, 2)
+
+var int[] swingHighIndices = array.new_int()
+var float[] swingHighPrices = array.new_float()
+var int[] swingLowIndices = array.new_int()
+var float[] swingLowPrices = array.new_float()
+
+if barstate.isconfirmed
+    if not na(pivotHigh)
+        array.push(swingHighIndices, bar_index - 2)
+        array.push(swingHighPrices, pivotHigh)
+
+    if not na(pivotLow)
+        array.push(swingLowIndices, bar_index - 2)
+        array.push(swingLowPrices, pivotLow)
+
+// Resolved active swing pair
+var string fibDirection = ""
+var int fibLowIndex = na
+var int fibHighIndex = na
+var float fibLow = na
+var float fibHigh = na
+
+fibDirection := ""
+fibLowIndex := na
+fibHighIndex := na
+fibLow := na
+fibHigh := na
+
+if trendUp and array.size(swingHighIndices) > 0 and array.size(swingLowIndices) > 0
+    pairResolved = false
+
+    for h = array.size(swingHighIndices) - 1 to 0
+        candidateHighIndex = array.get(swingHighIndices, h)
+        candidateHighPrice = array.get(swingHighPrices, h)
+
+        for l = array.size(swingLowIndices) - 1 to 0
+            candidateLowIndex = array.get(swingLowIndices, l)
+
+            if candidateLowIndex < candidateHighIndex
+                candidateLowPrice = array.get(swingLowPrices, l)
+
+                if candidateHighPrice > candidateLowPrice
+                    fibDirection := "BULLISH"
+                    fibLowIndex := candidateLowIndex
+                    fibHighIndex := candidateHighIndex
+                    fibLow := candidateLowPrice
+                    fibHigh := candidateHighPrice
+                    pairResolved := true
+
+                break
+
+        if pairResolved
+            break
+
+if trendDown and array.size(swingHighIndices) > 0 and array.size(swingLowIndices) > 0
+    pairResolved = false
+
+    for l = array.size(swingLowIndices) - 1 to 0
+        candidateLowIndex = array.get(swingLowIndices, l)
+        candidateLowPrice = array.get(swingLowPrices, l)
+
+        for h = array.size(swingHighIndices) - 1 to 0
+            candidateHighIndex = array.get(swingHighIndices, h)
+
+            if candidateHighIndex < candidateLowIndex
+                candidateHighPrice = array.get(swingHighPrices, h)
+
+                if candidateHighPrice > candidateLowPrice
+                    fibDirection := "BEARISH"
+                    fibLowIndex := candidateLowIndex
+                    fibHighIndex := candidateHighIndex
+                    fibLow := candidateLowPrice
+                    fibHigh := candidateHighPrice
+                    pairResolved := true
+
+                break
+
+        if pairResolved
+            break
+
+fibRange = fibHigh - fibLow
+
+fibPrice(level) =>
+    fibDirection == "BULLISH" ?
+        fibHigh - fibRange * level :
+        fibLow + fibRange * level
+
+fibNeg027 = fibPrice(-0.27)
+fib0 = fibPrice(0.0)
+fib05 = fibPrice(0.5)
+fib0618 = fibPrice(0.618)
+fib0786 = fibPrice(0.786)
+fib1 = fibPrice(1.0)
+
+entryLow = math.min(fib0618, fib0786)
+entryHigh = math.max(fib0618, fib0786)
+takeProfit = fibNeg027
+stopLoss = fib1
+
+// -----------------------------------------------------------------------------
+// GOLDEN ZONE VISUAL
+// Single active Fibonacci setup only.
+// -----------------------------------------------------------------------------
+
+validFib = (
+    showGoldenZone
+    and fibDirection != ""
+    and not na(fibLow)
+    and not na(fibHigh)
+)
+
+var box goldenZoneBox = na
+var line fibAnchorLine = na
+var line fibZeroLine = na
+var line fibMidLine = na
+var line fibOneLine = na
+var line fibTpLine = na
+var label fibDirectionLabel = na
+
+if barstate.islast
+    if not na(goldenZoneBox)
+        box.delete(goldenZoneBox)
+
+    if not na(fibAnchorLine)
+        line.delete(fibAnchorLine)
+
+    if not na(fibZeroLine)
+        line.delete(fibZeroLine)
+
+    if not na(fibMidLine)
+        line.delete(fibMidLine)
+
+    if not na(fibOneLine)
+        line.delete(fibOneLine)
+
+    if not na(fibTpLine)
+        line.delete(fibTpLine)
+
+    if not na(fibDirectionLabel)
+        label.delete(fibDirectionLabel)
+
+    if validFib
+        zoneLeft = math.min(fibLowIndex, fibHighIndex)
+        visualRight = bar_index + 20
+
+        goldenZoneBox := box.new(
+            left=zoneLeft,
+            top=entryHigh,
+            right=visualRight,
+            bottom=entryLow,
+            xloc=xloc.bar_index,
+            border_color=color.new(color.orange, 0),
+            bgcolor=color.new(color.orange, 82),
+            force_overlay=true
+        )
+
+        fibAnchorLine := line.new(
+            x1=fibLowIndex,
+            y1=fibLow,
+            x2=fibHighIndex,
+            y2=fibHigh,
+            xloc=xloc.bar_index,
+            color=color.new(color.white, 20),
+            width=2,
+            force_overlay=true
+        )
+
+        fibZeroLine := line.new(
+            x1=zoneLeft,
+            y1=fib0,
+            x2=visualRight,
+            y2=fib0,
+            xloc=xloc.bar_index,
+            color=color.new(color.gray, 35),
+            style=line.style_dotted,
+            force_overlay=true
+        )
+
+        fibMidLine := line.new(
+            x1=zoneLeft,
+            y1=fib05,
+            x2=visualRight,
+            y2=fib05,
+            xloc=xloc.bar_index,
+            color=color.new(color.yellow, 20),
+            style=line.style_dotted,
+            force_overlay=true
+        )
+
+        fibOneLine := line.new(
+            x1=zoneLeft,
+            y1=fib1,
+            x2=visualRight,
+            y2=fib1,
+            xloc=xloc.bar_index,
+            color=color.new(color.red, 10),
+            style=line.style_dashed,
+            force_overlay=true
+        )
+
+        fibTpLine := line.new(
+            x1=zoneLeft,
+            y1=takeProfit,
+            x2=visualRight,
+            y2=takeProfit,
+            xloc=xloc.bar_index,
+            color=color.new(color.green, 10),
+            style=line.style_dashed,
+            force_overlay=true
+        )
+
+        fibDirectionLabel := label.new(
+            x=visualRight,
+            y=entryHigh,
+            text=fibDirection + " GZ",
+            xloc=xloc.bar_index,
+            yloc=yloc.price,
+            style=label.style_label_left,
+            textcolor=color.white,
+            color=color.new(color.orange, 20),
+            size=size.small,
+            force_overlay=true
+        )
