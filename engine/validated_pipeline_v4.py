@@ -36,6 +36,11 @@ def run_validated_pipeline_v4(results):
         for row in results
     }
 
+    golden_zone_map = {
+        row["symbol"]: row.get("golden_zone")
+        for row in results
+    }
+
     candidates = build_validation_payload_v4(results)
 
     if not candidates:
@@ -80,6 +85,7 @@ def run_validated_pipeline_v4(results):
         row = dict(controlled_row)
         row["reference_price"] = reference_price_map[symbol]
         row["reference_candle_at"] = reference_candle_at_map[symbol]
+        row["golden_zone"] = golden_zone_map[symbol]
         enriched_controlled.append(row)
 
     controlled = enriched_controlled

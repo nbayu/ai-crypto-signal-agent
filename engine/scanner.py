@@ -22,6 +22,7 @@ from engine.smc import (
 from engine.scoring import calculate_score
 from engine.quality_filter import check_quality
 from engine.mtf import mtf_confirm
+from engine.golden_zone_skill import build_golden_zone_skill
 
 
 def scan_symbol(symbol):
@@ -35,6 +36,11 @@ def scan_symbol(symbol):
         closed_df = df.iloc[:-1]
 
         structure = analyze_market_structure(closed_df)
+
+        golden_zone = build_golden_zone_skill(
+            closed_df,
+            structure["trend"],
+        )
 
         volume_v2 = volume_metrics_v2(df)
 
@@ -54,6 +60,7 @@ def scan_symbol(symbol):
             "mtf_score": mtf["score"],
             "bos": structure["bos"],
             "choch": structure["choch"],
+            "golden_zone": golden_zone,
             "quality": quality["score"],
             "fvg": len(detect_fvg(df)),
             "order_blocks": len(active_obs),
