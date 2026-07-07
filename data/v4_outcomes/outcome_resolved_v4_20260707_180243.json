@@ -1,0 +1,36 @@
+{
+  "snapshot_type": "v4_forward_outcome_resolution",
+  "schema_version": 1,
+  "entry_artifact": "outcome_entry_v4_20260707_180243.json",
+  "entry_snapshot_type": "v4_outcome_tracker_entry",
+  "entry_schema_version": 1,
+  "entry_captured_at": "2026-07-07T18:02:43.624709",
+  "reference_candle_at": "2026-07-07T12:00:00",
+  "candidates": [
+    {
+      "symbol": "CHIP/USDT:USDT",
+      "reference_price": 0.03707,
+      "resolved_horizons": {}
+    },
+    {
+      "symbol": "PLTR/USDT:USDT",
+      "reference_price": 135.46,
+      "resolved_horizons": {}
+    },
+    {
+      "symbol": "TRX/USDT:USDT",
+      "reference_price": 0.3316,
+      "resolved_horizons": {}
+    },
+    {
+      "symbol": "SUN/USDT:USDT",
+      "reference_price": 0.018703,
+      "resolved_horizons": {}
+    },
+    {
+      "symbol": "WAL/USDT:USDT",
+      "reference_price": 0.03389,
+      "resolved_horizons": {}
+    }
+  ]
+}
