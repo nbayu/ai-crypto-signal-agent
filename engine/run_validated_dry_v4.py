@@ -9,8 +9,11 @@ from engine.final_reporter_v4 import print_final_report_v4
 from engine.top5_watchlist_artifact_v4 import (
     save_top5_watchlist_artifact,
 )
-from engine.tradingview_watchlist_export_v4 import (
-    export_tradingview_watchlist,
+from engine.pre_delivery_flow_v4 import (
+    run_pre_delivery_flow,
+)
+from engine.pre_delivery_market_data_v4 import (
+    get_closed_ohlcv_for_pre_delivery,
 )
 
 
@@ -43,10 +46,21 @@ outcome_path = save_outcome_snapshot(
 watchlist_path = save_top5_watchlist_artifact(
     out["final_top5"]
 )
-tradingview_watchlist_path = export_tradingview_watchlist(
+delivery_out = run_pre_delivery_flow(
     watchlist_path,
     "data/top5_watchlist_v4/tradingview_watchlist.txt",
+    closed_candle_provider=(
+        get_closed_ohlcv_for_pre_delivery
+    ),
+    validated_at=datetime.now().isoformat(),
 )
+
+delivery_artifact_path = delivery_out[
+    "delivery_artifact_path"
+]
+tradingview_watchlist_path = delivery_out[
+    "tradingview_watchlist_path"
+]
 
 print_final_report_v4(
     out,

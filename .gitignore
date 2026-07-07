@@ -15,3 +15,6 @@ backups/
 
 # Mutable TradingView delivery artifacts
 data/top5_watchlist_v4/
+
+# Mutable pre-delivery artifacts
+data/pre_delivery_v4/
