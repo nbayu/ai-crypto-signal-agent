@@ -152,3 +152,34 @@ def validate_semantic_consistency(candidate, validation):
         )
 
     return True
+
+
+def normalize_impossible_reason_code(candidate, validation):
+    normalized = dict(validation)
+
+    reason = normalized["reason_code"]
+    participation = candidate["participation"]
+
+    impossible = (
+        (
+            reason == "BREAKOUT_UNCONFIRMED"
+            and candidate["bos"] is True
+        )
+        or (
+            reason == "STRUCTURE_REVERSAL_CONFLICT"
+            and candidate["choch"] is not True
+        )
+        or (
+            reason == "MIXED_PARTICIPATION"
+            and participation != "MIXED"
+        )
+        or (
+            reason == "WEAK_PARTICIPATION"
+            and participation != "WEAK"
+        )
+    )
+
+    if impossible:
+        normalized["reason_code"] = "MULTIPLE_CONFLICTS"
+
+    return normalized

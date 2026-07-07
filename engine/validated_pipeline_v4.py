@@ -3,6 +3,7 @@ import json
 from engine.deepseek_validator_v4 import validate_candidates
 from engine.validation_control import apply_validation_control
 from engine.validation_semantic_guard_v4 import (
+    normalize_impossible_reason_code,
     validate_semantic_consistency,
 )
 from engine.validation_payload_v2 import build_validation_candidate_v2
@@ -77,9 +78,24 @@ def run_validated_pipeline_v4(results):
             "DeepSeek output missing validations list"
         )
 
+    candidate_map = {
+        candidate["symbol"]: candidate
+        for candidate in candidates
+    }
+
+    normalized_validations = [
+        normalize_impossible_reason_code(
+            candidate_map[validation["symbol"]],
+            validation,
+        )
+        if validation["symbol"] in candidate_map
+        else validation
+        for validation in validations
+    ]
+
     controlled = apply_validation_control(
         candidates,
-        validations,
+        normalized_validations,
         semantic_guard=validate_semantic_consistency,
     )
 
