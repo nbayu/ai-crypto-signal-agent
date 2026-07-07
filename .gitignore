@@ -12,3 +12,6 @@ backups/
 .env.*
 *.key
 *.pem
+
+# Mutable TradingView delivery artifacts
+data/top5_watchlist_v4/

@@ -1,0 +1,117 @@
+{
+  "snapshot_type": "v4_outcome_tracker_entry",
+  "schema_version": 1,
+  "captured_at": "2026-07-07T12:47:17.049208",
+  "candidates": [
+    {
+      "symbol": "BLUR/USDT:USDT",
+      "reference_price": 0.02001,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "python_score": 89.73,
+      "validation_adjustment": 0,
+      "final_rank_score": 89.73,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 5.7597,
+      "volume_class": "STRONG",
+      "oi_change_pct": 3.1573,
+      "oi_class": "STRONG",
+      "participation": "STRONG",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "SUN/USDT:USDT",
+      "reference_price": 0.018,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "python_score": 89.7,
+      "validation_adjustment": 0,
+      "final_rank_score": 89.7,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2032,
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 4.9409,
+      "oi_class": "STRONG",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "AAVE/USDT:USDT",
+      "reference_price": 93.41,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "python_score": 88.87,
+      "validation_adjustment": 0,
+      "final_rank_score": 88.87,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.2758,
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.4839,
+      "oi_class": "STRONG",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "HUMA/USDT:USDT",
+      "reference_price": 0.023315,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "python_score": 88.37,
+      "validation_adjustment": 0,
+      "final_rank_score": 88.37,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 1.3718,
+      "volume_class": "SUPPORTIVE",
+      "oi_change_pct": 0.1419,
+      "oi_class": "SUPPORTIVE",
+      "participation": "SUPPORTIVE",
+      "ai_validation": {
+        "status": "CLEAR",
+        "false_breakout_risk": "LOW",
+        "confluence": "STRONG",
+        "reason_code": "ALIGNED"
+      }
+    },
+    {
+      "symbol": "2Z/USDT:USDT",
+      "reference_price": 0.07226,
+      "reference_candle_at": "2026-07-07T04:00:00",
+      "python_score": 88.53,
+      "validation_adjustment": -5,
+      "final_rank_score": 83.53,
+      "trend": "UPTREND",
+      "bos": true,
+      "choch": false,
+      "volume_ratio": 0.6524,
+      "volume_class": "WEAK",
+      "oi_change_pct": 0.5676,
+      "oi_class": "STRONG",
+      "participation": "NEUTRAL",
+      "ai_validation": {
+        "status": "CONFLICT",
+        "false_breakout_risk": "MEDIUM",
+        "confluence": "MODERATE",
+        "reason_code": "MULTIPLE_CONFLICTS"
+      }
+    }
+  ]
+}
