@@ -14,15 +14,28 @@ FINAL_TOP_N = 5
 MIN_FINAL_RANK_SCORE = 80.0
 
 
-def build_validation_payload_v4(results):
+def build_validation_payload_v4(
+    results,
+    *,
+    oi_provider=None,
+):
     ranked = sorted(
         results,
         key=lambda x: x["score"],
         reverse=True,
     )[:TOP_N_FOR_VALIDATION]
 
+    if oi_provider is None:
+        return [
+            build_validation_candidate_v2(candidate)
+            for candidate in ranked
+        ]
+
     return [
-        build_validation_candidate_v2(candidate)
+        build_validation_candidate_v2(
+            candidate,
+            oi_provider=oi_provider,
+        )
         for candidate in ranked
     ]
 
@@ -37,7 +50,12 @@ def build_final_top5(controlled):
     return qualified[:FINAL_TOP_N]
 
 
-def run_validated_pipeline_v4(results):
+def run_validated_pipeline_v4(
+    results,
+    *,
+    validator=None,
+    oi_provider=None,
+):
     reference_price_map = {
         row["symbol"]: row["reference_price"]
         for row in results
@@ -53,7 +71,13 @@ def run_validated_pipeline_v4(results):
         for row in results
     }
 
-    candidates = build_validation_payload_v4(results)
+    if oi_provider is None:
+        candidates = build_validation_payload_v4(results)
+    else:
+        candidates = build_validation_payload_v4(
+            results,
+            oi_provider=oi_provider,
+        )
 
     if not candidates:
         return {
@@ -62,7 +86,13 @@ def run_validated_pipeline_v4(results):
             "usage": {},
         }
 
-    ai_result = validate_candidates(candidates)
+    resolved_validator = (
+        validate_candidates
+        if validator is None
+        else validator
+    )
+
+    ai_result = resolved_validator(candidates)
 
     try:
         parsed = json.loads(ai_result["content"])

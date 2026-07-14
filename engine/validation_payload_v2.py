@@ -2,7 +2,11 @@ from engine.open_interest_v2 import open_interest_metrics_v2
 from engine.evidence_classifier_v2 import classify_participation
 
 
-def build_validation_candidate_v2(candidate):
+def build_validation_candidate_v2(
+    candidate,
+    *,
+    oi_provider=None,
+):
     """
     Build one bounded V4 validation candidate.
 
@@ -19,7 +23,13 @@ def build_validation_candidate_v2(candidate):
     volume_ratio = candidate.get("volume_ratio")
     volume_status = candidate.get("volume_v2_status")
 
-    oi = open_interest_metrics_v2(
+    resolved_oi_provider = (
+        open_interest_metrics_v2
+        if oi_provider is None
+        else oi_provider
+    )
+
+    oi = resolved_oi_provider(
         candidate["symbol"]
     )
 
