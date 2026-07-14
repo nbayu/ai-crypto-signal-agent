@@ -25,8 +25,27 @@ def run_pre_delivery_flow(
     *,
     closed_candle_provider,
     validated_at,
+    delivery_artifact_saver=None,
+    tradingview_exporter=None,
+    pine_delivery_saver=None,
 ):
     source_path = Path(source_path)
+
+    resolved_delivery_artifact_saver = (
+        save_pre_delivery_artifact
+        if delivery_artifact_saver is None
+        else delivery_artifact_saver
+    )
+    resolved_tradingview_exporter = (
+        export_tradingview_watchlist
+        if tradingview_exporter is None
+        else tradingview_exporter
+    )
+    resolved_pine_delivery_saver = (
+        save_pine_delivery_artifact
+        if pine_delivery_saver is None
+        else pine_delivery_saver
+    )
 
     source_artifact = json.loads(
         source_path.read_text()
@@ -39,13 +58,13 @@ def run_pre_delivery_flow(
     )
 
     delivery_artifact_path = (
-        save_pre_delivery_artifact(
+        resolved_delivery_artifact_saver(
             delivery_artifact
         )
     )
 
     tradingview_watchlist_path = (
-        export_tradingview_watchlist(
+        resolved_tradingview_exporter(
             delivery_artifact_path,
             tradingview_output_path,
         )
@@ -64,7 +83,7 @@ def run_pre_delivery_flow(
     (
         pine_bridge_artifact_path,
         pine_delivery_payload_path,
-    ) = save_pine_delivery_artifact(
+    ) = resolved_pine_delivery_saver(
         pine_bridge_artifact,
         pine_delivery_payload,
     )

@@ -16,7 +16,18 @@ def serialize_artifact_value(value):
     return str(value)
 
 
-def build_top5_watchlist_artifact(final_top5):
+def build_top5_watchlist_artifact(
+    final_top5,
+    *,
+    now_provider=None,
+):
+    resolved_now_provider = (
+        datetime.now
+        if now_provider is None
+        else now_provider
+    )
+    generated_at = resolved_now_provider().isoformat()
+
     setups = []
 
     for rank, row in enumerate(final_top5, 1):
@@ -32,7 +43,7 @@ def build_top5_watchlist_artifact(final_top5):
         })
 
     return {
-        "generated_at": datetime.now().isoformat(),
+        "generated_at": generated_at,
         "setup_count": len(setups),
         "setups": setups,
     }
