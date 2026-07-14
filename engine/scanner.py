@@ -23,6 +23,7 @@ from engine.scoring import calculate_score
 from engine.quality_filter import check_quality
 from engine.mtf import mtf_confirm
 from engine.golden_zone_skill import build_golden_zone_skill
+from engine.scanner_score_adjustment import apply_scanner_score_adjustment
 
 
 def scan_symbol(symbol):
@@ -78,13 +79,11 @@ def scan_symbol(symbol):
         }
 
         result["score"] = calculate_score(result)
-
-        if result["distance_ob"] > result["atr"] * 2:
-            result["score"] -= 8
-        elif result["distance_ob"] > result["atr"]:
-            result["score"] -= 4
-
-        result["score"] = max(0, result["score"])
+        result["score"] = apply_scanner_score_adjustment(
+            result["score"],
+            result["distance_ob"],
+            result["atr"],
+        )
 
         result["entry_score"] = calculate_entry_score(result)
 
