@@ -2,7 +2,7 @@
 
 ## Status
 
-DESIGN FROZEN — IMPLEMENTATION NOT YET AUTHORIZED
+DESIGN FROZEN — AMENDED; IMPLEMENTATION REQUIRES RED CHARACTERIZATION
 
 ## 1. Phase Identity
 
@@ -103,7 +103,14 @@ admission state.
 
 ## 5. Versioned Replay Bundle Contract
 
-The minimum conceptual replay bundle contains:
+The only executable Replay V4 bundle contract is **schema version 2**.
+The committed schema version 1 is retained as historical evidence of the
+initial contract, but it is legacy and non-executable because it cannot
+represent the complete master-engine boundary. Corrected validation and
+execution must reject version 1 rather than silently reinterpret it as
+version 2.
+
+The minimum schema-version-2 replay bundle contains:
 
 - `schema_version`;
 - `fixture_id`;
@@ -113,15 +120,83 @@ The minimum conceptual replay bundle contains:
 - `fixed_execution_time`;
 - `execution_configuration`;
 - `scanner_results`;
+- `recorded_open_interest`;
 - `recorded_validator_response`;
 - `recorded_validator_usage`, when applicable;
 - `pre_delivery_closed_candles`;
 - expected semantic-contract metadata;
 - an optional expected normalized-result hash.
 
-The implementation design must freeze an exact JSON schema before the
-runner is implemented. The schema must distinguish source metadata,
-deterministic execution inputs, and optional comparison expectations.
+The corrected replay-contract implementation must freeze the exact
+schema-version-2 JSON shape before the runner is implemented. The schema
+must distinguish source metadata, deterministic execution inputs, and
+optional comparison expectations.
+
+Each recorded scanner-result row must represent the complete post-scanner
+boundary consumed by the real master-engine validation and downstream
+artifact flow. The exact schema must include at least:
+
+- `symbol`;
+- `score`;
+- `direction`;
+- `entry`;
+- `stop_loss`;
+- `take_profit`;
+- `reference_price`;
+- `reference_candle_at`;
+- `golden_zone`;
+- `trend`;
+- `bos`;
+- `choch`;
+- `volume_ratio`;
+- `volume_v2_status`.
+
+Recorded scanner values preserve their existing production meanings and
+must not be recalculated during replay. `golden_zone` must preserve the
+complete existing structure required by pre-delivery and Pine consumers,
+including its direction, swing identities and timestamps, levels, entry
+zone, take-profit data, and stop-loss data. Phase 06 does not define a
+simplified Golden Zone representation.
+
+Unknown scanner-row fields fail closed unless an exact schema amendment
+authorizes them. Applicable timestamps must be deterministic and
+timezone-aware. Numeric values must be finite, and booleans must not be
+accepted as numbers. Replay normalization orders scanner rows by score
+descending and symbol ascending as a replay-only deterministic tie rule;
+it does not change scanner production ordering or concurrency behavior.
+
+`recorded_open_interest` is required validation-time provider input. It
+must contain exactly one entry for every scanner symbol and no extra
+symbols. Each entry records finite `current_oi`, `previous_oi`, and
+`oi_change_pct` audit values together with the production-compatible
+`oi_score` and `data_status` fields consumed by
+`build_validation_candidate_v2()`. The schema must use the existing
+provider field names for the values passed into candidate construction;
+an adapter must not invent a second status vocabulary.
+
+Recorded OI is not scanner OHLCV replay. It must pass through the real
+`classify_participation()` semantics. The replay bundle must not inject
+`volume_class`, `oi_class`, `participation`, or another final candidate
+classification in place of those calculations.
+
+The recorded validator response must contain production-compatible
+validation entries for the actual replay candidates. It supplies the
+`content` parsed by the real pipeline; it does not supply controlled rows,
+ranking results, or a final Top-5 result. Recorded usage may include the
+complete current provider shape:
+
+- `prompt_tokens`;
+- `completion_tokens`;
+- `total_tokens`;
+- `cache_hit_tokens`;
+- `cache_miss_tokens`.
+
+Every supplied usage value must be a non-negative, non-boolean integer.
+`total_tokens` must follow the current production provider contract.
+Optional cache fields must follow the current provider's absent-field
+normalization and must not be guessed from other token counts. Recorded
+validator content and usage must be internally consistent with the exact
+candidate set and provider result contract.
 
 The following bundle rules are locked:
 
@@ -140,6 +215,10 @@ The following bundle rules are locked:
 - UUIDs and wall-clock-generated replay identity are prohibited.
 - A supplied identity must match its deterministic derivation or fail
   closed.
+- Scanner-symbol coverage across recorded OI, validator entries, and
+  pre-delivery candles must be exact and internally consistent.
+- Missing recorded OI or validator data must never cause a live provider
+  fallback.
 
 The source bundle bytes must not be rewritten, normalized in place, or
 otherwise mutated by loading, validation, execution, or comparison.
@@ -198,6 +277,13 @@ The recorded validator response must be consumed exactly through an
 explicit, default-preserving validator injection seam. The production
 default remains unchanged for non-replay callers.
 
+Validation-time open-interest input must be consumed through an explicit,
+default-preserving provider seam. Replay must not call Binance or HTTP for
+OI data, and missing or invalid recorded OI must fail closed without an
+ambient-provider fallback. The recorded provider supplies raw
+production-compatible OI metrics; real candidate construction and
+`classify_participation()` remain authoritative.
+
 Module-level monkeypatching is permitted in characterization tests only.
 It is prohibited as the production replay execution mechanism.
 
@@ -235,9 +321,9 @@ classification. Replay outputs must not be named, formatted, or located in
 a manner that could reasonably be mistaken for production evidence,
 forward-test evidence, or live delivery output.
 
-## 9. Allowed New Files
+## 9. Allowed Phase 06 and Compatibility Files
 
-The planned Phase 06 file surface is locked to:
+The new or revised Phase 06 file surface is locked to:
 
 - `engine/replay_contract_v4.py`
 - `engine/replay_runner_v4.py`
@@ -247,19 +333,106 @@ The planned Phase 06 file surface is locked to:
 - `tests/test_replay_artifact_v4.py`
 - `tests/fixtures/replay_v4/`
 
-Additional new files require a documented design-freeze amendment before
-implementation.
+The only existing production compatibility files authorized are:
+
+- `engine/validation_payload_v2.py`;
+- `engine/validated_pipeline_v4.py`;
+- `engine/pre_delivery_flow_v4.py`;
+- `engine/top5_watchlist_artifact_v4.py`.
+
+No other new file or existing production-module change is authorized
+without another documented design-freeze amendment. In particular,
+`engine/master_engine_v4.py` requires no signature or sequencing change;
+its existing outer scanner, pipeline, saver, pre-delivery, evidence, and
+clock dependency seams are sufficient.
+
+Modification remains explicitly prohibited for:
+
+- `engine/scanner.py` and scanner helpers;
+- `engine/stateful_worker_v4.py`;
+- `engine/quota_slot_worker_v4.py` and quota-slot core;
+- Telegram application, transport, runtime, and SDK modules;
+- `engine/production_evidence_v4.py`;
+- forward-test modules;
+- live-trading or exchange-execution modules.
 
 ## 10. Conditional Compatibility Changes
 
-Only default-preserving compatibility seams, backed by characterization
-tests, may be added to:
+Only the following default-preserving compatibility seams, backed by RED
+characterization tests, may be added.
 
-- `engine/validated_pipeline_v4.py`;
-- artifact saver modules directly used by `run_master_engine_v4()`;
-- pre-delivery modules directly used by `run_master_engine_v4()`;
-- production-evidence composition dependencies directly required for
-  isolated replay output.
+`engine/validation_payload_v2.py` may change only to support:
+
+```python
+build_validation_candidate_v2(
+    candidate,
+    *,
+    oi_provider=None,
+)
+```
+
+`engine/validated_pipeline_v4.py` may pass that dependency through and
+accept the recorded validator provider through:
+
+```python
+build_validation_payload_v4(
+    results,
+    *,
+    oi_provider=None,
+)
+
+run_validated_pipeline_v4(
+    results,
+    *,
+    validator=None,
+    oi_provider=None,
+)
+```
+
+When omitted, `oi_provider` and `validator` must resolve the existing
+module-global live defaults at call time. Existing callers and
+monkeypatch-based tests must remain compatible. The real candidate
+builder, participation classifier, validator parser, normalization,
+validation control, semantic guard, ranking, and final Top-5 selection
+must execute. Provider exceptions retain existing propagation behavior.
+No final candidate, controlled result, or final pipeline result may be
+injected.
+
+`engine/pre_delivery_flow_v4.py` may accept only the smallest saver seams
+needed for isolated output, conceptually:
+
+```python
+run_pre_delivery_flow(
+    ...,
+    delivery_artifact_saver=None,
+    tradingview_exporter=None,
+    pine_delivery_saver=None,
+)
+```
+
+Exact names must follow repository conventions at implementation time.
+Omitted dependencies resolve the current production functions at call
+time and preserve current production paths. Existing step order remains
+unchanged. Real lifecycle and supersession logic execute with the
+recorded closed-candle provider. Saver failures propagate, and no later
+saver may run after an earlier saver fails.
+
+`engine/top5_watchlist_artifact_v4.py` may accept only a fixed-clock
+builder seam, conceptually:
+
+```python
+build_top5_watchlist_artifact(
+    final_top5,
+    *,
+    now_provider=None,
+)
+```
+
+The omitted clock preserves current ambient production behavior. Replay
+injects a clock derived from `ReplayBundleV4.fixed_execution_time` so
+`generated_at` is deterministic. Formatting, fields, and path-writing
+behavior remain unchanged, and no replay branch may be added to the
+builder.
 
 Each compatibility change must:
 
@@ -270,6 +443,8 @@ Each compatibility change must:
 - avoid duplicating production orchestration;
 - introduce only explicit dependency, clock, saver, or output-root seams;
 - retain existing public behavior when the new optional seam is not used.
+- resolve optional production dependencies at call time so existing
+  module-global monkeypatch seams continue to work.
 
 No scanner provider refactor is authorized in the initial Phase 06 scope.
 The master engine's existing scanner-callable seam is sufficient for the
@@ -305,7 +480,9 @@ Replay must fail closed for:
 - invalid schema;
 - missing bundle fields;
 - unsupported schema version;
+- legacy schema version 1 presented for execution;
 - malformed scanner rows;
+- missing, malformed, or symbol-incomplete recorded OI;
 - invalid recorded validator response;
 - missing pre-delivery candles;
 - output-root collision with prohibited paths;
@@ -353,7 +530,23 @@ Phase 06 tests must prove:
 24. duplicate replay artifacts are not created;
 25. equal-score ordering behavior is explicit and deterministic;
 26. semantic mismatches are reported exactly and deterministically;
-27. the full canonical regression remains green.
+27. schema version 1 is not silently accepted as the corrected complete
+    replay boundary;
+28. schema version 2 contains complete pipeline-compatible scanner rows;
+29. recorded OI has exact scanner-symbol coverage;
+30. the recorded OI provider drives the real participation classifier;
+31. recorded validator content covers the actual candidates;
+32. cache usage metadata follows the current provider contract;
+33. omitted dependencies preserve current live provider behavior;
+34. injected providers are called exactly once according to the real flow;
+35. provider exceptions propagate unchanged;
+36. injected pre-delivery savers preserve existing order;
+37. saver failure prevents every later saver invocation;
+38. the fixed clock controls replay-visible Top-5 generation time;
+39. no live network method or socket is called;
+40. `run_master_engine_v4()` remains unchanged and is invoked exactly once
+    by the future replay runner;
+41. the full canonical regression remains green.
 
 The integration tests must exercise the real master-engine orchestration,
 real validation control, real semantic guard, and real pre-delivery
@@ -393,17 +586,30 @@ Phase 06 explicitly prohibits:
 
 ## 15. Commit Plan
 
-The planned Phase 06 commit sequence is locked as:
+The amended Phase 06 commit sequence is locked as:
 
 1. `docs: freeze replay framework design`
-2. `test: define replay bundle contract`
-3. `feat: add replay bundle validation`
-4. `test: characterize deterministic provider seams`
-5. `refactor: add replay-safe dependency injection seams`
-6. `test: define master engine replay orchestration`
-7. `feat: add deterministic replay runner`
-8. `test: lock replay isolation and idempotency`
-9. `feat: add replay artifact comparison`
+2. `feat: add replay bundle contract`
+3. `docs: amend replay boundary compatibility`
+4. `test: characterize replay provider seams`
+5. `refactor: inject validation replay providers`
+6. `refactor: inject replay-safe delivery seams`
+7. `feat: correct replay bundle boundary contract`
+8. `test: define master engine replay orchestration`
+9. `feat: add deterministic replay runner`
+10. `test: lock replay isolation and idempotency`
+11. `feat: add replay artifact comparison`
+
+Commits 1 and 2 already exist as:
+
+- `10dbb12 docs: freeze replay framework design`;
+- `d36963b feat: add replay bundle contract`.
+
+The corrected bundle commit must preserve schema-version governance and
+default behavior outside replay. It changes the executable schema to
+version 2. Version 1 remains legacy and non-executable and must be
+rejected by corrected execution validation. No implementation may
+silently reinterpret a version-1 payload as version 2.
 
 The final checkpoint PDF is not a repository commit unless separately
 authorized by the Project Owner.
@@ -412,7 +618,10 @@ authorized by the Project Owner.
 
 Phase 06 may lock only when:
 
-- the replay-bundle schema is versioned and frozen;
+- replay-bundle schema version 2 is frozen as the only executable
+  boundary and version 1 is rejected as legacy/non-executable;
+- scanner rows, recorded OI, validator content, validator usage, and
+  candle coverage are complete and mutually consistent;
 - `run_replay_v4()` invokes the real master engine exactly once;
 - real validation and pre-delivery semantics execute;
 - replay execution is network-isolated;
@@ -435,6 +644,11 @@ Phase 06 may lock only when:
 - Existing repository snapshots do not contain sufficient raw market inputs
   for truthful scanner replay.
 - Initial Phase 06 begins from recorded scanner-result rows.
+- The committed schema version 1 contract is incomplete for the actual
+  pipeline and is retained only as legacy development history; it is not
+  executable replay input.
+- Validation-time OI is a separate recorded provider input and does not
+  make Phase 06 a raw scanner or OHLCV replay.
 - Replay equivalence applies only to the frozen replay boundary.
 - Replay does not prove live-market reproducibility.
 - Replay does not measure trading performance.
@@ -442,3 +656,131 @@ Phase 06 may lock only when:
 
 These limitations are part of the public replay contract and must remain
 visible in replay manifests, operator documentation, and compliance review.
+
+## 18. Replay Boundary Compatibility Amendment
+
+The Step 07 deterministic provider-seam audit compared the committed
+Replay V4 bundle contract with the real master-engine, validation-payload,
+validated-pipeline, pre-delivery, Top-5, and evidence boundaries. It found
+that schema version 1 could not represent a complete executable replay:
+its scanner rows omitted required pipeline and Golden Zone fields, it had
+no validation-time OI provider input, and its recorded validator response
+and usage did not match the candidates and complete provider result shape.
+
+This amendment corrects Phase 06 replay input completeness. It does not
+expand Phase 06 into raw OHLCV scanner replay, alter scanner calculations,
+or change master-engine sequencing. It does not authorize stateful-worker,
+quota-slot, Telegram, deployment, forward-test, production-evidence, or
+live-trading changes. Existing Phase 00–05 behavior remains protected.
+
+The committed Replay V4 contract implementation, tests, and fixture must
+be revised in a separately reviewed compatibility commit. That correction
+must implement schema version 2 as the only executable replay contract.
+Schema version 1 is legacy/non-executable and must be rejected rather than
+silently upgraded or reinterpreted.
+
+### 18.1 Complete Recorded Scanner Boundary
+
+Schema version 2 records the complete post-scanner boundary consumed by
+the real master-engine flow. At minimum each row contains `symbol`,
+`score`, `direction`, `entry`, `stop_loss`, `take_profit`,
+`reference_price`, `reference_candle_at`, `golden_zone`, `trend`, `bos`,
+`choch`, `volume_ratio`, and `volume_v2_status`.
+
+The exact scanner-row schema is closed. Unknown fields fail unless a later
+schema amendment authorizes them. Values retain existing production
+meanings and are not recomputed. Relevant timestamps are deterministic and
+timezone-aware, numeric values are finite with booleans rejected, and
+replay-only normalization is score descending then symbol ascending.
+
+The complete existing Golden Zone structure required by pre-delivery and
+Pine consumers must be preserved. This amendment does not define or permit
+a simplified replacement.
+
+### 18.2 Recorded Validation-Time Open Interest
+
+Schema version 2 requires `recorded_open_interest` with exactly one entry
+per scanner symbol and no additional symbols. Each entry preserves finite
+`current_oi`, `previous_oi`, and `oi_change_pct` audit values and the
+production-compatible `oi_score` and `data_status` values exposed to the
+existing candidate builder.
+
+The provider is called deterministically according to existing candidate
+construction. No Binance, HTTP, ambient-provider, retry, or fallback path
+is permitted. Recorded OI passes through real
+`classify_participation()` semantics; a final participation classification
+must not be injected. Missing or malformed OI fails before replay output
+mutation. This is recorded validation-time provider input, not scanner
+OHLCV replay.
+
+### 18.3 Recorded Validator Compatibility
+
+Recorded validator content must contain entries for the actual replay
+candidates and retain the production content shape consumed by the real
+parser. Real reason normalization, semantic consistency checks, validation
+control, ranking, and final Top-5 construction must execute. A final
+validated result may not be injected.
+
+When recorded usage is present it may include `prompt_tokens`,
+`completion_tokens`, `total_tokens`, `cache_hit_tokens`, and
+`cache_miss_tokens`. Values are non-negative, non-boolean integers,
+`total_tokens` follows the actual provider contract, and absent optional
+cache fields follow current production normalization rather than guessed
+values. Live DeepSeek or OpenAI fallback remains prohibited.
+
+### 18.4 Authorized Default-Preserving Seams
+
+The amendment narrowly authorizes:
+
+- `engine/validation_payload_v2.py` for an optional call-time
+  `oi_provider` in `build_validation_candidate_v2()`;
+- `engine/validated_pipeline_v4.py` for optional call-time `validator`
+  and `oi_provider` pass-through;
+- `engine/pre_delivery_flow_v4.py` for call-time delivery-artifact,
+  TradingView-exporter, and Pine-delivery saver dependencies;
+- `engine/top5_watchlist_artifact_v4.py` for a call-time `now_provider`
+  used only by the pure Top-5 builder.
+
+Omitted dependencies preserve current module-global production defaults,
+paths, exception behavior, and monkeypatch compatibility. No replay branch,
+final-result injection, scanner change, caching, retry, or fallback is
+authorized.
+
+`engine/master_engine_v4.py` requires no change. Its existing outer
+dependency seams compose the recorded scanner provider, recorded validator
+and OI pipeline, recorded candle provider, fixed clock, replay-only savers,
+and replay evidence dependency while retaining the real master-engine call
+and step order.
+
+### 18.5 Replay Artifact and Evidence Classification
+
+Replay must not call `save_production_evidence()`. The master-engine
+evidence call point remains exercised through an injected replay-only
+dependency classified exactly as:
+
+```text
+classification = "REPLAY"
+boundary = "MASTER_ENGINE_RECORDED_INPUT"
+```
+
+Replay output uses a deterministic replay identity beneath a
+caller-supplied replay root. It must not use `production_run_v4` naming,
+production evidence directory structures or manifests, production
+`latest.json` aliases, or any location that could be mistaken for
+production evidence. Publication occurs only after successful execution
+and semantic verification, and every manifest states explicitly that the
+output is not production evidence.
+
+### 18.6 Amendment Resolution and Remaining Exclusions
+
+This amendment resolves the incomplete scanner-row schema, missing
+validation-time OI, incomplete validator response and usage contract,
+previously unauthorized validation-payload seam, incomplete Golden Zone
+contract, pre-delivery saver authorization, and Top-5 fixed-clock
+authorization.
+
+It does not authorize raw scanner replay, historical OHLCV reconstruction,
+scanner refactoring, general atomic hardening of production savers, lazy
+scanner or CCXT import redesign, production deployment, stateful-worker
+replay, quota replay, Telegram replay, forward-test execution, automatic
+trading, or exchange order execution.
