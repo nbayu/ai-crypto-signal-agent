@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import importlib
 import json
 import math
@@ -6,10 +7,9 @@ from pathlib import Path
 
 import pytest
 
+import engine.replay_contract_v4 as replay_contract_module
 from engine.replay_contract_v4 import (
     REPLAY_BUNDLE_SCHEMA_VERSION,
-    ReplayBundleValidationError,
-    ReplayBundleV4,
     calculate_replay_bundle_hash_v4,
     canonicalize_replay_bundle_v4,
     derive_replay_fixture_id_v4,
@@ -31,38 +31,41 @@ def _raw_bundle():
     return json.loads(FIXTURE_PATH.read_text())
 
 
-def _validated_bundle():
-    return validate_replay_bundle_v4(_raw_bundle())
-
-
 def _assert_invalid(mutator):
     candidate = _raw_bundle()
     mutator(candidate)
-    with pytest.raises(ReplayBundleValidationError):
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
         validate_replay_bundle_v4(candidate)
 
 
-def test_public_schema_version_and_valid_bundle_contract():
-    assert REPLAY_BUNDLE_SCHEMA_VERSION == 1
-    bundle = _validated_bundle()
+def test_public_schema_version_is_two_and_v1_fixture_is_legacy():
+    historical = _raw_bundle()
+    source_before = copy.deepcopy(historical)
 
-    assert isinstance(bundle, ReplayBundleV4)
-    assert bundle.schema_version == 1
-    assert bundle.source_commit == _raw_bundle()["source_commit"]
-    assert bundle.scanner_results
-    assert bundle.recorded_validator_response
-    assert bundle.pre_delivery_closed_candles
+    assert REPLAY_BUNDLE_SCHEMA_VERSION == 2
+    assert historical["schema_version"] == 1
+
+    failures = []
+    for _ in range(2):
+        with pytest.raises(
+            replay_contract_module.ReplayBundleValidationError
+        ) as exc_info:
+            validate_replay_bundle_v4(historical)
+        failures.append(str(exc_info.value))
+
+    assert failures == ["Invalid replay bundle", "Invalid replay bundle"]
+    assert "migrat" not in failures[0].casefold()
+    assert "upgrad" not in failures[0].casefold()
+    assert historical == source_before
 
 
-def test_valid_bundle_preserves_source_bytes_and_returns_immutable_contract():
+def test_v1_fixture_bytes_are_preserved_when_loading_is_rejected():
     source_before = FIXTURE_PATH.read_bytes()
-    bundle = load_replay_bundle_v4(FIXTURE_PATH)
 
+    assert json.loads(source_before)["schema_version"] == 1
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        load_replay_bundle_v4(FIXTURE_PATH)
     assert FIXTURE_PATH.read_bytes() == source_before
-    with pytest.raises((AttributeError, TypeError)):
-        bundle.source_commit = "changed"
-    with pytest.raises((AttributeError, TypeError)):
-        bundle.scanner_results[0]["score"] = 0
 
 
 @pytest.mark.parametrize(
@@ -96,30 +99,21 @@ def test_source_metadata_and_timestamps_are_strict(field, value):
     _assert_invalid(lambda bundle: bundle.update({field: value}))
 
 
-def test_identity_and_hash_derivation_are_deterministic_and_content_based():
-    first_raw = _raw_bundle()
-    second_raw = copy.deepcopy(first_raw)
-    first = _validated_bundle()
-    second = validate_replay_bundle_v4(second_raw)
-
-    assert derive_replay_fixture_id_v4(first_raw) == (
-        derive_replay_fixture_id_v4(second_raw)
-    )
-    assert derive_replay_id_v4(first) == derive_replay_id_v4(second)
-    assert calculate_replay_bundle_hash_v4(first) == (
-        calculate_replay_bundle_hash_v4(second)
+def test_v1_canonicalization_and_identity_are_not_executable():
+    historical = _raw_bundle()
+    source_before = copy.deepcopy(historical)
+    operations = (
+        canonicalize_replay_bundle_v4,
+        calculate_replay_bundle_hash_v4,
+        derive_replay_fixture_id_v4,
+        derive_replay_id_v4,
     )
 
-    changed = copy.deepcopy(first_raw)
-    changed["scanner_results"][0]["score"] += 1
-    changed_bundle = validate_replay_bundle_v4(changed)
+    for operation in operations:
+        with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+            operation(historical)
 
-    assert derive_replay_fixture_id_v4(changed) != (
-        derive_replay_fixture_id_v4(first_raw)
-    )
-    assert calculate_replay_bundle_hash_v4(changed_bundle) != (
-        calculate_replay_bundle_hash_v4(first)
-    )
+    assert historical == source_before
 
 
 def test_execution_configuration_is_strictly_typed():
@@ -162,18 +156,20 @@ def test_scanner_result_rows_fail_closed_when_malformed(mutator):
     _assert_invalid(mutator)
 
 
-def test_scanner_result_equal_scores_use_symbol_tie_breaker():
+def test_v1_scanner_rows_remain_historical_but_are_not_executable():
     bundle = _raw_bundle()
     bundle["scanner_results"][0]["score"] = 90
     bundle["scanner_results"][1]["score"] = 90
     bundle["scanner_results"].reverse()
+    source_before = copy.deepcopy(bundle)
 
-    validated = validate_replay_bundle_v4(bundle)
-
-    assert [row["symbol"] for row in validated.scanner_results] == [
-        "BTC/USDT:USDT",
+    assert [row["symbol"] for row in bundle["scanner_results"]] == [
         "ETH/USDT:USDT",
+        "BTC/USDT:USDT",
     ]
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        validate_replay_bundle_v4(bundle)
+    assert bundle == source_before
 
 
 @pytest.mark.parametrize(
@@ -191,13 +187,16 @@ def test_recorded_validator_response_is_required_and_strict(mutator):
     _assert_invalid(mutator)
 
 
-def test_recorded_validator_usage_is_optional_and_normalizes_to_none():
+def test_v1_optional_usage_shape_does_not_restore_execution():
     bundle = _raw_bundle()
     bundle.pop("recorded_validator_usage")
+    source_before = copy.deepcopy(bundle)
 
-    validated = validate_replay_bundle_v4(bundle)
-
-    assert validated.recorded_validator_usage is None
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        validate_replay_bundle_v4(bundle)
+    assert bundle == source_before
+    assert "recorded_validator_usage" not in bundle
+    assert "recorded_open_interest" not in bundle
 
 
 @pytest.mark.parametrize(
@@ -275,46 +274,49 @@ def test_secrets_and_production_paths_are_prohibited(mutator):
     _assert_invalid(mutator)
 
 
-def test_canonicalization_is_utf8_stable_and_mapping_order_independent():
+def test_v1_raw_json_is_stable_but_active_canonicalization_rejects_it():
     original = _raw_bundle()
     reordered = {
         key: original[key]
         for key in reversed(list(original))
     }
+    original_before = copy.deepcopy(original)
+    reordered_before = copy.deepcopy(reordered)
 
-    canonical_original = canonicalize_replay_bundle_v4(original)
-    canonical_reordered = canonicalize_replay_bundle_v4(reordered)
+    raw_original = json.dumps(original, sort_keys=True, separators=(",", ":"))
+    raw_reordered = json.dumps(reordered, sort_keys=True, separators=(",", ":"))
+    assert raw_original == raw_reordered
 
-    assert isinstance(canonical_original, bytes)
-    assert canonical_original == canonical_reordered
-    assert canonical_original.decode("utf-8")
-    assert b"\n" not in canonical_original
-    assert b": " not in canonical_original
-    assert b", " not in canonical_original
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        canonicalize_replay_bundle_v4(original)
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        canonicalize_replay_bundle_v4(reordered)
+    assert original == original_before
+    assert reordered == reordered_before
 
 
-def test_hash_is_lowercase_sha256_and_changes_with_semantic_input():
-    bundle = _validated_bundle()
-    digest = calculate_replay_bundle_hash_v4(bundle)
+def test_v1_raw_fixture_hash_is_stable_but_replay_hashing_is_rejected():
+    source_before = FIXTURE_PATH.read_bytes()
+    digest = hashlib.sha256(source_before).hexdigest()
 
     assert len(digest) == 64
     assert digest == digest.lower()
     assert all(character in "0123456789abcdef" for character in digest)
+    assert hashlib.sha256(FIXTURE_PATH.read_bytes()).hexdigest() == digest
 
-    changed = copy.deepcopy(_raw_bundle())
-    changed["execution_configuration"]["limit"] += 1
-    changed_bundle = validate_replay_bundle_v4(changed)
-    assert calculate_replay_bundle_hash_v4(changed_bundle) != digest
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        calculate_replay_bundle_hash_v4(_raw_bundle())
+    assert FIXTURE_PATH.read_bytes() == source_before
 
 
-def test_loading_valid_json_does_not_create_output_paths(tmp_path):
+def test_loading_v1_json_rejects_without_creating_output_paths(tmp_path):
     source = tmp_path / "bundle.json"
     source.write_bytes(FIXTURE_PATH.read_bytes())
     source_before = source.read_bytes()
 
-    loaded = load_replay_bundle_v4(source)
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+        load_replay_bundle_v4(source)
 
-    assert isinstance(loaded, ReplayBundleV4)
     assert source.read_bytes() == source_before
     assert list(tmp_path.iterdir()) == [source]
 
@@ -324,25 +326,40 @@ def test_file_loading_fails_closed_for_invalid_json_or_top_level(payload, tmp_pa
     path = tmp_path / "invalid.json"
     path.write_text(payload)
 
-    with pytest.raises(ReplayBundleValidationError):
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
         load_replay_bundle_v4(path)
 
 
 def test_file_loading_rejects_missing_file_and_directory(tmp_path):
-    with pytest.raises(ReplayBundleValidationError):
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
         load_replay_bundle_v4(tmp_path / "missing.json")
 
     directory = tmp_path / "bundle-directory"
     directory.mkdir()
-    with pytest.raises(ReplayBundleValidationError):
+    with pytest.raises(replay_contract_module.ReplayBundleValidationError):
         load_replay_bundle_v4(directory)
 
 
-def test_validation_does_not_read_environment_or_touch_output_paths(tmp_path, monkeypatch):
+def test_v1_rejection_does_not_mutate_source_or_touch_output_paths(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.chdir(tmp_path)
-    bundle = validate_replay_bundle_v4(_raw_bundle())
+    historical = _raw_bundle()
+    source_before = copy.deepcopy(historical)
 
-    assert isinstance(bundle, ReplayBundleV4)
+    for _ in range(2):
+        with pytest.raises(replay_contract_module.ReplayBundleValidationError):
+            validate_replay_bundle_v4(historical)
+
+    assert historical == source_before
+    assert historical["schema_version"] == 1
+    assert "recorded_open_interest" not in historical
+    assert all(
+        "reference_price" not in row
+        for row in historical["scanner_results"]
+    )
+    assert "cache_hit_tokens" not in historical["recorded_validator_usage"]
     assert list(tmp_path.iterdir()) == []
 
 
