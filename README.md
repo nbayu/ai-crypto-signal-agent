@@ -156,3 +156,34 @@ The export preserves the original scanner ranking order among eligible setups. I
 Binance USDT perpetual symbols are normalized to TradingView format:
 
     BTC/USDT:USDT -> BINANCE:BTCUSDT.P
+
+## V4 Master Engine Boundary
+
+The canonical production orchestration entrypoint is:
+
+    ./run_scanner.sh
+
+The script delegates to:
+
+    python -m engine.run_validated_dry_v4
+
+`engine.run_validated_dry_v4` is intentionally a thin CLI wrapper around:
+
+    engine.master_engine_v4.run_master_engine_v4()
+
+`run_master_engine_v4()` is the canonical production orchestration boundary for the V4 scanner delivery path. It owns the ordered production flow:
+
+1. scan the market through the scanner facade;
+2. run the validated V4 pipeline;
+3. save the validated snapshot;
+4. save the forward outcome entry snapshot;
+5. save the raw Top 5 watchlist artifact;
+6. run the pre-delivery validation and TradingView/Pine bridge artifact flow;
+7. save immutable production evidence;
+8. return all generated paths and the validated output.
+
+Production callers such as Telegram commands, future schedulers, or other operator interfaces must call the master engine boundary instead of reimplementing the production flow or calling lower-level artifact writers directly.
+
+`engine.v4_baseline_collector` remains a separate baseline-analysis tool. It may call `scan_market()` directly because it does not run the production delivery path, does not create production evidence, and has separate semantic-rejection capture behavior.
+
+The scanner remains a public facade and orchestration boundary for scanner-level responsibilities. Production integration must not bypass or duplicate scanner internals.
