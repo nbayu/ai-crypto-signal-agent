@@ -475,6 +475,71 @@ def test_runner_invokes_injected_master_once_with_complete_dependencies(
     assert isinstance(result, ReplayExecutionResultV4)
 
 
+@pytest.mark.parametrize(
+    "master_result",
+    [
+        pytest.param({"metric": float("nan")}, id="nan"),
+        pytest.param({"metric": float("inf")}, id="positive-infinity"),
+        pytest.param({"metric": float("-inf")}, id="negative-infinity"),
+        pytest.param(
+            {"one": {"two": [0, {"three": float("nan")}]}},
+            id="deeply-nested-non-finite",
+        ),
+    ],
+)
+def test_injected_master_non_finite_result_fails_without_success(
+    bundle,
+    tmp_path,
+    master_result,
+):
+    output_root = tmp_path / "replay-output"
+    calls = []
+
+    def master_engine_probe(**dependencies):
+        calls.append(dependencies)
+        return copy.deepcopy(master_result)
+
+    with pytest.raises(ReplayExecutionError) as exc_info:
+        run_replay_v4(
+            bundle,
+            output_root,
+            master_engine_runner=master_engine_probe,
+        )
+
+    assert str(exc_info.value) == "Replay master-engine execution failed"
+    assert "nan" not in str(exc_info.value).casefold()
+    assert "infinity" not in str(exc_info.value).casefold()
+    assert len(calls) == 1
+    assert set(calls[0]) == MASTER_DEPENDENCIES
+    assert not tuple(output_root.rglob("replay_*.json"))
+    assert not tuple(output_root.rglob("replay_*.txt"))
+    assert not tuple(output_root.rglob("replay_manifest.json"))
+    assert not tuple(output_root.rglob("latest*"))
+
+
+def test_injected_master_finite_nested_result_remains_valid(bundle, tmp_path):
+    finite_result = {
+        "values": [0.0, -0.0, 1.25, -2.5, 1.7976931348623157e308],
+        "nested": {"finite": [42.125, -999.75]},
+    }
+    calls = []
+
+    def master_engine_probe(**dependencies):
+        calls.append(dependencies)
+        return copy.deepcopy(finite_result)
+
+    result = run_replay_v4(
+        bundle,
+        tmp_path / "replay-output",
+        master_engine_runner=master_engine_probe,
+    )
+
+    assert len(calls) == 1
+    assert _thaw(result.normalized_master_result) == finite_result
+    assert result.classification == CLASSIFICATION
+    assert result.boundary == BOUNDARY
+
+
 def test_scanner_provider_returns_fresh_mutable_normalized_rows(
     bundle,
     tmp_path,

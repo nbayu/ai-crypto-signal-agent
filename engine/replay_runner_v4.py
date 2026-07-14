@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import inspect
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -123,6 +124,8 @@ def run_replay_v4(
                 "now_provider": lambda: fixed_now,
             },
         )
+        normalized_master_result = _normalize_master_result(master_result, root)
+        _validate_finite_master_result(normalized_master_result)
     except ReplayExecutionError:
         raise
     except Exception as exc:
@@ -136,9 +139,7 @@ def run_replay_v4(
         bundle_hash=bundle_hash,
         fixed_execution_time=bundle.fixed_execution_time,
         output_root=root,
-        normalized_master_result=_freeze(
-            _normalize_master_result(master_result, root)
-        ),
+        normalized_master_result=_freeze(normalized_master_result),
         classification=_CLASSIFICATION,
         boundary=_BOUNDARY,
     )
@@ -500,6 +501,20 @@ def _normalize_result_key(key: Any) -> str:
     if key == "take_profit":
         return "target"
     return str(key)
+
+
+def _validate_finite_master_result(value: Any) -> None:
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("Non-finite replay master result")
+        return
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            _validate_finite_master_result(nested)
+        return
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            _validate_finite_master_result(nested)
 
 
 def _freeze(value: Any):

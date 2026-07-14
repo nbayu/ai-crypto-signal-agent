@@ -611,6 +611,7 @@ def _canonical_bytes(value: Any) -> bytes:
         _thaw(value),
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
 
 

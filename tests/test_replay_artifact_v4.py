@@ -206,6 +206,60 @@ def _publication_file_state(publication_root):
     }
 
 
+def _write_nonstandard_completed_publication(result, final_root):
+    final_path = _final_path(final_root, result)
+    final_path.mkdir(parents=True)
+    inventory = []
+    for source in _artifact_files(result):
+        relative_path = source.relative_to(result.output_root).as_posix()
+        payload = source.read_bytes()
+        destination = final_path / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+        inventory.append(
+            {
+                "relative_path": relative_path,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+            }
+        )
+    semantic_payload = {
+        "replay_id": result.replay_id,
+        "fixture_id": result.fixture_id,
+        "bundle_hash": result.bundle_hash,
+        "fixed_execution_time": result.fixed_execution_time,
+        "classification": result.classification,
+        "boundary": result.boundary,
+        "normalized_master_result": _thaw(result.normalized_master_result),
+    }
+    result_hash = hashlib.sha256(
+        json.dumps(
+            semantic_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    manifest = {
+        "manifest_version": 1,
+        "classification": CLASSIFICATION,
+        "boundary": BOUNDARY,
+        "replay_id": result.replay_id,
+        "fixture_id": result.fixture_id,
+        "bundle_hash": result.bundle_hash,
+        "result_hash": result_hash,
+        "fixed_execution_time": result.fixed_execution_time,
+        "source_replay_schema_version": REPLAY_BUNDLE_SCHEMA_VERSION,
+        "artifacts": sorted(inventory, key=lambda item: item["relative_path"]),
+        "completion_state": "COMPLETE",
+        "non_production_notice": NON_PRODUCTION_NOTICE,
+    }
+    (final_path / MANIFEST_NAME).write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return final_path
+
+
 def _directory_tree_state(root):
     root = Path(root)
     state = []
@@ -386,6 +440,175 @@ def test_result_hash_changes_for_normalized_master_semantics(
     assert calculate_replay_result_hash_v4(first) != (
         calculate_replay_result_hash_v4(second)
     )
+
+
+@pytest.mark.parametrize(
+    "normalized",
+    [
+        pytest.param({"value": float("nan")}, id="nan"),
+        pytest.param({"value": float("inf")}, id="positive-infinity"),
+        pytest.param({"value": float("-inf")}, id="negative-infinity"),
+        pytest.param(
+            {"nested": {"value": float("nan")}},
+            id="nested-mapping-nan",
+        ),
+        pytest.param(
+            {"nested": [0, float("inf")]},
+            id="nested-sequence-infinity",
+        ),
+        pytest.param(
+            {"one": {"two": [{"three": float("-inf")}]}},
+            id="deeply-nested-negative-infinity",
+        ),
+    ],
+)
+def test_result_hash_rejects_non_finite_normalized_master_values(
+    bundle,
+    tmp_path,
+    normalized,
+):
+    result = _make_result(
+        bundle,
+        tmp_path / "runner-output",
+        normalized=normalized,
+    )
+
+    with pytest.raises(ReplayArtifactError) as exc_info:
+        calculate_replay_result_hash_v4(result)
+
+    assert str(exc_info.value) == "Replay artifact hashing failed"
+    assert "nan" not in str(exc_info.value).casefold()
+    assert "infinity" not in str(exc_info.value).casefold()
+
+
+def test_finite_normalized_master_values_remain_hashable(bundle, tmp_path):
+    normalized = {
+        "values": [
+            0.0,
+            -0.0,
+            1.25,
+            -2.5,
+            1.7976931348623157e308,
+        ],
+        "nested": {"finite": [42.125, -999.75]},
+    }
+    result = _make_result(
+        bundle,
+        tmp_path / "runner-output",
+        normalized=normalized,
+    )
+
+    digest = calculate_replay_result_hash_v4(result)
+
+    assert len(digest) == 64
+    assert set(digest) <= set("0123456789abcdef")
+
+
+@pytest.mark.parametrize(
+    "non_finite",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+def test_manifest_rejects_non_finite_result_before_mutating_source(
+    bundle,
+    tmp_path,
+    non_finite,
+):
+    output_root = _write_runner_artifacts(tmp_path / "runner-output")
+    result = _make_result(
+        bundle,
+        output_root,
+        normalized={"out": {"metric": non_finite}},
+    )
+    source_before = _publication_file_state(output_root)
+
+    with pytest.raises(ReplayArtifactError) as exc_info:
+        build_replay_manifest_v4(result, _artifact_files(result))
+
+    assert str(exc_info.value) == "Replay artifact hashing failed"
+    assert _publication_file_state(output_root) == source_before
+
+
+@pytest.mark.parametrize(
+    "non_finite",
+    [
+        pytest.param(float("nan"), id="nan"),
+        pytest.param(float("inf"), id="positive-infinity"),
+        pytest.param(float("-inf"), id="negative-infinity"),
+    ],
+)
+def test_publication_rejects_non_finite_result_before_any_write(
+    bundle,
+    tmp_path,
+    non_finite,
+):
+    output_root = _write_runner_artifacts(tmp_path / "runner-output")
+    result = _make_result(
+        bundle,
+        output_root,
+        normalized={"out": {"metric": non_finite}},
+    )
+    source_before = _publication_file_state(output_root)
+    staging_root = tmp_path / "staging"
+    final_root = tmp_path / "published"
+
+    with pytest.raises(ReplayArtifactError) as exc_info:
+        publish_replay_artifacts_v4(result, staging_root, final_root)
+
+    assert str(exc_info.value) == "Replay artifact hashing failed"
+    assert _publication_file_state(output_root) == source_before
+    assert not staging_root.exists()
+    assert not final_root.exists()
+    assert not _incomplete_path(staging_root, result).exists()
+    assert not _final_path(final_root, result).exists()
+
+
+def test_non_finite_result_cannot_reuse_nonstandard_existing_publication(
+    bundle,
+    tmp_path,
+):
+    output_root = _write_runner_artifacts(tmp_path / "runner-output")
+    result = _make_result(
+        bundle,
+        output_root,
+        normalized={"out": {"metric": float("nan")}},
+    )
+    final_root = tmp_path / "published"
+    final_path = _write_nonstandard_completed_publication(result, final_root)
+    existing_before = _publication_file_state(final_path)
+    source_before = _publication_file_state(output_root)
+    staging_root = tmp_path / "staging"
+
+    with pytest.raises(ReplayArtifactError) as exc_info:
+        publish_replay_artifacts_v4(result, staging_root, final_root)
+
+    assert str(exc_info.value) == "Replay artifact hashing failed"
+    assert _publication_file_state(final_path) == existing_before
+    assert _publication_file_state(output_root) == source_before
+    assert not staging_root.exists()
+    assert not _incomplete_path(staging_root, result).exists()
+
+
+def test_finite_nested_result_remains_publishable(bundle, tmp_path):
+    output_root = _write_runner_artifacts(tmp_path / "runner-output")
+    result = _make_result(
+        bundle,
+        output_root,
+        normalized={
+            "values": [0.0, -0.0, 1.25, -2.5, 1.7976931348623157e308],
+            "nested": {"finite": [42.125, -999.75]},
+        },
+    )
+
+    publication, staging_root, final_root = _publish(result, tmp_path)
+
+    assert publication.reused_existing is False
+    assert publication.final_path == _final_path(final_root, result).resolve()
+    assert publication.manifest_path.is_file()
+    assert not _incomplete_path(staging_root, result).exists()
 
 
 def test_result_hash_uses_no_filesystem_metadata(replay_result):
