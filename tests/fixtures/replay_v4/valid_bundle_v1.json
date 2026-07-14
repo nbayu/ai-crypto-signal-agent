@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "source_commit": "0123456789abcdef0123456789abcdef01234567",
+  "recorded_at": "2026-07-14T10:00:00+00:00",
+  "fixed_execution_time": "2026-07-14T10:05:00+00:00",
+  "execution_configuration": {
+    "timeframe": "4h",
+    "lookback": 300,
+    "limit": 100
+  },
+  "scanner_results": [
+    {
+      "symbol": "BTC/USDT:USDT",
+      "score": 91.5,
+      "direction": "BULLISH",
+      "entry": 60000.0,
+      "stop_loss": 59000.0,
+      "take_profit": 62000.0
+    },
+    {
+      "symbol": "ETH/USDT:USDT",
+      "score": 87.25,
+      "direction": "BEARISH",
+      "entry": 3000.0,
+      "stop_loss": 3100.0,
+      "take_profit": 2800.0
+    }
+  ],
+  "recorded_validator_response": {
+    "content": "{\"validations\":[]}",
+    "decision": "RECORDED_ACCEPT"
+  },
+  "recorded_validator_usage": {
+    "prompt_tokens": 120,
+    "completion_tokens": 30,
+    "total_tokens": 150
+  },
+  "pre_delivery_closed_candles": {
+    "BTC/USDT:USDT": [
+      {
+        "open_time": "2026-07-13T00:00:00+00:00",
+        "open": 59500.0,
+        "high": 60500.0,
+        "low": 59000.0,
+        "close": 60000.0,
+        "volume": 1000.0
+      },
+      {
+        "open_time": "2026-07-13T04:00:00+00:00",
+        "open": 60000.0,
+        "high": 61000.0,
+        "low": 59800.0,
+        "close": 60500.0,
+        "volume": 1100.0
+      }
+    ],
+    "ETH/USDT:USDT": [
+      {
+        "open_time": "2026-07-13T00:00:00+00:00",
+        "open": 3050.0,
+        "high": 3100.0,
+        "low": 2950.0,
+        "close": 3000.0,
+        "volume": 2000.0
+      },
+      {
+        "open_time": "2026-07-13T04:00:00+00:00",
+        "open": 3000.0,
+        "high": 3050.0,
+        "low": 2900.0,
+        "close": 2950.0,
+        "volume": 2100.0
+      }
+    ]
+  },
+  "expected_semantic_contract": {
+    "classification": "REPLAY",
+    "boundary": "MASTER_ENGINE_RECORDED_INPUT"
+  }
+}
