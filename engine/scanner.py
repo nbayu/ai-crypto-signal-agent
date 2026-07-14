@@ -24,6 +24,7 @@ from engine.quality_filter import check_quality
 from engine.mtf import mtf_confirm
 from engine.golden_zone_skill import build_golden_zone_skill
 from engine.scanner_score_adjustment import apply_scanner_score_adjustment
+from engine.scanner_result_builder import build_scanner_result
 
 
 def scan_symbol(symbol):
@@ -52,31 +53,31 @@ def scan_symbol(symbol):
         if not mtf["confirmed"]:
             return None, "MTF"
 
-        result = {
-            "symbol": symbol,
-            "reference_price": float(df["close"].iloc[-2]),
-            "reference_candle_at": df["timestamp"].iloc[-2].isoformat(),
-            "trend": structure["trend"],
-            "mtf": mtf,
-            "mtf_score": mtf["score"],
-            "bos": structure["bos"],
-            "choch": structure["choch"],
-            "golden_zone": golden_zone,
-            "quality": quality["score"],
-            "fvg": len(detect_fvg(df)),
-            "order_blocks": len(active_obs),
-            "liquidity": len(detect_liquidity_sweep(df)),
-            "atr": calculate_atr(df),
-            "distance_ob": distance_to_order_block(df),
-            "distance_fvg": distance_to_fvg(df),
-            "volume": get_volume(symbol),
-            "volume_spike": volume_spike(df),
-            "volume_ratio": volume_v2["volume_ratio"],
-            "volume_v2_score": volume_v2["volume_score"],
-            "volume_v2_status": volume_v2["data_status"],
-            "open_interest": get_open_interest(symbol),
-            "oi_growth": open_interest_growth(symbol),
-        }
+        result = build_scanner_result(
+            symbol=symbol,
+            reference_price=float(df["close"].iloc[-2]),
+            reference_candle_at=df["timestamp"].iloc[-2].isoformat(),
+            trend=structure["trend"],
+            mtf=mtf,
+            mtf_score=mtf["score"],
+            bos=structure["bos"],
+            choch=structure["choch"],
+            golden_zone=golden_zone,
+            quality=quality["score"],
+            fvg=len(detect_fvg(df)),
+            order_blocks=len(active_obs),
+            liquidity=len(detect_liquidity_sweep(df)),
+            atr=calculate_atr(df),
+            distance_ob=distance_to_order_block(df),
+            distance_fvg=distance_to_fvg(df),
+            volume=get_volume(symbol),
+            volume_spike=volume_spike(df),
+            volume_ratio=volume_v2["volume_ratio"],
+            volume_v2_score=volume_v2["volume_score"],
+            volume_v2_status=volume_v2["data_status"],
+            open_interest=get_open_interest(symbol),
+            oi_growth=open_interest_growth(symbol),
+        )
 
         result["score"] = calculate_score(result)
         result["score"] = apply_scanner_score_adjustment(
