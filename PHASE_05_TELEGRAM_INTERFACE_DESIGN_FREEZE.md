@@ -308,6 +308,37 @@ logic, or invoke the real worker outside the Phase 04 wrapper's worker
 callback. Telegram formatting and transport failure still occur after the
 single wrapper call and never trigger another call.
 
+### 12.2 Per-Update Sender Boundary
+
+The default sender is fixed when `TelegramRuntimeV4` composes its
+`TelegramTransportV4`. That is correct for a synchronous sender, but it
+cannot safely support an async SDK handler that must buffer one outgoing
+message and await delivery only after synchronous command handling
+returns. The SDK runner must not mutate that existing transport or reach
+into its private sender state.
+
+Decision: `TelegramRuntimeV4` exposes the additional synchronous method:
+
+`handle_update_with_sender(update, sender)`
+
+`sender` must be callable. For that one dispatch, the runtime constructs a
+fresh `TelegramTransportV4` using its already-composed
+`TelegramApplicationV4`, the supplied sender, and the configured bot
+username. It does not mutate, replace, or otherwise alter the runtime's
+default transport or sender. The existing `handle_update(update)` remains
+backward-compatible and continues to delegate to that default transport.
+
+The per-update method reuses the transport's parsing and safe failure
+normalization; it does not duplicate either. It performs at most one
+application dispatch and, under the transport contract, at most one sender
+call. It adds no retry. A sender failure propagates after that one dispatch
+and never re-runs the application, worker, quota admission, or release.
+
+A future SDK handler creates a fresh buffered sender, calls this method once,
+then awaits network delivery only after synchronous handling returns. The
+SDK runner remains the only SDK-aware layer; no SDK dependency, async code,
+network operation, or global mutable state is added to the runtime.
+
 ## 13. Import-Safety Contract
 
 Importing any Phase 05 application, adapter, configuration, or runtime
@@ -426,7 +457,8 @@ Future implementation uses separate atomic commits in this order:
 4. `feat: add Telegram transport adapter` (including the approved SDK
    dependency only if still necessary);
 5. `feat: add Telegram runtime entrypoint and configuration boundary`;
-6. `test/fix: finalize Telegram interface contracts`.
+6. `docs/feat: add per-update SDK sender boundary`;
+7. `test/fix: finalize Telegram interface contracts`.
 
 This document authorizes none of those implementation commits.
 

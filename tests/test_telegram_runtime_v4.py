@@ -5,7 +5,10 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from engine.quota_slot_worker_v4 import run_quota_slot_worker_v4
-from engine.telegram_application_v4 import TelegramApplicationV4
+from engine.telegram_application_v4 import (
+    TelegramApplicationResponse,
+    TelegramApplicationV4,
+)
 from engine.telegram_runtime_v4 import (
     TelegramRuntimeConfig,
     TelegramRuntimeConfigError,
@@ -49,6 +52,16 @@ def _runtime(config, **overrides):
     }
     dependencies.update(overrides)
     return build_telegram_runtime(config, **dependencies)
+
+
+def _update(text="/status"):
+    return {
+        "message": {
+            "text": text,
+            "from_user": {"id": 123456},
+            "chat": {"id": -100987654321},
+        }
+    }
 
 
 def test_loads_immutable_redacted_runtime_configuration_from_mapping():
@@ -258,6 +271,130 @@ def test_runner_failure_propagates_once_without_token_wrapping():
 
     assert exc_info.value is runner_error
     assert runner_calls == [(TOKEN, runtime.handle_update)]
+
+
+def test_per_update_sender_uses_supplied_sender_without_mutating_default():
+    default_calls = []
+    per_update_calls = []
+    runtime = _runtime(
+        _config(),
+        sender=lambda chat_id, message: default_calls.append((chat_id, message)),
+    )
+    default_transport = runtime.transport
+
+    assert runtime.handle_update_with_sender(
+        _update(),
+        lambda chat_id, message: per_update_calls.append((chat_id, message)),
+    ) is True
+
+    assert per_update_calls == [(-100987654321, "Interface ready.")]
+    assert default_calls == []
+    assert runtime.transport is default_transport
+
+
+def test_default_handle_update_remains_backward_compatible_with_default_sender():
+    default_calls = []
+    runtime = _runtime(
+        _config(),
+        sender=lambda chat_id, message: default_calls.append((chat_id, message)),
+    )
+
+    assert runtime.handle_update(_update()) is True
+
+    assert default_calls == [(-100987654321, "Interface ready.")]
+
+
+def test_per_update_sender_dispatches_the_application_at_most_once():
+    application_calls = []
+    sent = []
+
+    class Application:
+        def dispatch(self, request):
+            application_calls.append(request)
+            return TelegramApplicationResponse(
+                category="STATUS",
+                command="/status",
+                message="Interface ready.",
+            )
+
+    runtime = TelegramRuntimeV4(
+        config=_config(),
+        application=Application(),
+        transport=object(),
+    )
+
+    runtime.handle_update_with_sender(
+        _update(),
+        lambda chat_id, message: sent.append((chat_id, message)),
+    )
+
+    assert len(application_calls) == 1
+    assert sent == [(-100987654321, "Interface ready.")]
+
+
+def test_per_update_sender_failure_propagates_without_retry():
+    sender_calls = []
+    sender_error = RuntimeError("send failure: sk-live-secret")
+    runtime = _runtime(_config())
+
+    def sender(chat_id, message):
+        sender_calls.append((chat_id, message))
+        raise sender_error
+
+    with pytest.raises(RuntimeError) as exc_info:
+        runtime.handle_update_with_sender(_update(), sender)
+
+    assert exc_info.value is sender_error
+    assert sender_calls == [(-100987654321, "Interface ready.")]
+
+
+def test_per_update_sender_preserves_safe_transport_application_failure():
+    sent = []
+
+    class FailingApplication:
+        def dispatch(self, request):
+            raise RuntimeError("Traceback sk-live-secret /private/secret")
+
+    runtime = TelegramRuntimeV4(
+        config=_config(),
+        application=FailingApplication(),
+        transport=object(),
+    )
+
+    runtime.handle_update_with_sender(
+        _update(),
+        lambda chat_id, message: sent.append((chat_id, message)),
+    )
+
+    assert sent == [(-100987654321, "Request could not be completed.")]
+
+
+def test_per_update_senders_are_isolated_between_sequential_calls():
+    first_calls = []
+    second_calls = []
+    runtime = _runtime(_config())
+
+    runtime.handle_update_with_sender(
+        _update(),
+        lambda chat_id, message: first_calls.append((chat_id, message)),
+    )
+    runtime.handle_update_with_sender(
+        _update(),
+        lambda chat_id, message: second_calls.append((chat_id, message)),
+    )
+
+    assert first_calls == [(-100987654321, "Interface ready.")]
+    assert second_calls == [(-100987654321, "Interface ready.")]
+
+
+def test_per_update_sender_validation_does_not_expose_token():
+    runtime = _runtime(_config())
+
+    with pytest.raises(TypeError) as exc_info:
+        runtime.handle_update_with_sender(_update(), None)
+
+    assert TOKEN not in str(exc_info.value)
+    assert TOKEN not in repr(runtime)
 
 
 def test_module_has_no_forbidden_sdk_or_engine_references():

@@ -35,6 +35,16 @@ class TelegramRuntimeV4:
     def handle_update(self, update):
         return self.transport.handle_update(update)
 
+    def handle_update_with_sender(self, update, sender):
+        if not callable(sender):
+            raise TypeError("sender must be callable")
+        transport = TelegramTransportV4(
+            application=self.application,
+            sender=sender,
+            bot_username=self.config.bot_username,
+        )
+        return transport.handle_update(update)
+
     def start(self, sdk_runner):
         return sdk_runner(
             token=self.config.bot_token,
