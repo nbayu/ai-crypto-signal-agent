@@ -25,6 +25,7 @@ from engine.mtf import mtf_confirm
 from engine.golden_zone_skill import build_golden_zone_skill
 from engine.scanner_score_adjustment import apply_scanner_score_adjustment
 from engine.scanner_result_builder import build_scanner_result
+from engine.scanner_market_reporter import print_market_summary
 
 
 def scan_symbol(symbol):
@@ -122,12 +123,6 @@ def scan_market():
 
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    print()
-    print("========== MARKET SUMMARY ==========")
-    print("Scanned  :", total_scanned)
-    print("Rejected :", total_rejected)
-    print("Qualified:", len(results))
-    print("===================================")
-    print()
+    print_market_summary(total_scanned, total_rejected, len(results))
 
     return results
