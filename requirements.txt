@@ -35,6 +35,7 @@ pydantic==2.13.4
 pydantic_core==2.46.4
 pytest==9.1.1
 python-dateutil==2.9.0.post0
+python-telegram-bot==22.8
 requests==2.34.2
 setuptools==82.0.1
 six==1.17.0
