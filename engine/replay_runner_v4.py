@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 import inspect
 import json
+import os
 from pathlib import Path
+import stat
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -32,16 +34,19 @@ from engine.validated_pipeline_v4 import run_validated_pipeline_v4
 
 _CLASSIFICATION = "REPLAY"
 _BOUNDARY = "MASTER_ENGINE_RECORDED_INPUT"
-_PROTECTED_RELATIVE_ROOTS = frozenset(
+_PROTECTED_PATH_PARTS = frozenset(
     {
-        "data/validated_snapshots_v4",
-        "data/v4_outcomes",
-        "data/top5_watchlist_v4",
-        "data/pre_delivery_v4",
-        "data/pine_delivery_v4",
-        "data/production_evidence_v4",
-        "data/quota_slot_v4",
-        "data/worker_state_v4",
+        "production_run_v4",
+        "production_evidence_v4",
+        "validated_snapshots_v4",
+        "v4_outcomes",
+        "top5_watchlist_v4",
+        "pre_delivery_v4",
+        "pine_delivery_v4",
+        "quota_slot_v4",
+        "worker_state_v4",
+        "forward-test",
+        "telegram",
     }
 )
 
@@ -208,23 +213,53 @@ def _validate_output_root(output_root) -> Path:
         raise ReplayExecutionError("Invalid replay output root")
 
     root = Path(output_root)
-    if root.exists() and not root.is_dir():
+    absolute_root = Path(os.path.abspath(root))
+    if _has_protected_path_part(absolute_root):
         raise ReplayExecutionError("Invalid replay output root")
-    if _is_protected_root(root):
-        raise ReplayExecutionError("Invalid replay output root")
-    return root.resolve()
-
-
-def _is_protected_root(root: Path) -> bool:
+    _validate_existing_output_ancestry(absolute_root)
     try:
-        relative = root.resolve().relative_to(Path.cwd().resolve())
-    except ValueError:
-        return False
-    normalized = relative.as_posix().rstrip("/")
-    return any(
-        normalized == protected or normalized.startswith(f"{protected}/")
-        for protected in _PROTECTED_RELATIVE_ROOTS
-    )
+        resolved_root = absolute_root.resolve(strict=False)
+    except OSError as exc:
+        raise ReplayExecutionError("Invalid replay output root") from exc
+    if _has_protected_path_part(resolved_root):
+        raise ReplayExecutionError("Invalid replay output root")
+    return resolved_root
+
+
+def _validate_existing_output_ancestry(path: Path) -> None:
+    existing_ancestor = path
+    while not _lexists(existing_ancestor):
+        parent = existing_ancestor.parent
+        if parent == existing_ancestor:
+            raise ReplayExecutionError("Invalid replay output root")
+        existing_ancestor = parent
+
+    components = []
+    component = existing_ancestor
+    while True:
+        components.append(component)
+        if component.parent == component:
+            break
+        component = component.parent
+
+    try:
+        for component in reversed(components):
+            if stat.S_ISLNK(component.lstat().st_mode):
+                raise ReplayExecutionError("Invalid replay output root")
+        if not stat.S_ISDIR(existing_ancestor.lstat().st_mode):
+            raise ReplayExecutionError("Invalid replay output root")
+    except ReplayExecutionError:
+        raise
+    except OSError as exc:
+        raise ReplayExecutionError("Invalid replay output root") from exc
+
+
+def _has_protected_path_part(path: Path) -> bool:
+    return any(part.casefold() in _PROTECTED_PATH_PARTS for part in path.parts)
+
+
+def _lexists(path: Path) -> bool:
+    return os.path.lexists(path)
 
 
 def _parse_fixed_execution_time(value: str) -> datetime:

@@ -31,6 +31,7 @@ _PROTECTED_PATH_PARTS = frozenset(
         "validated_snapshots_v4",
         "v4_outcomes",
         "top5_watchlist_v4",
+        "pre_delivery_v4",
         "pine_delivery_v4",
         "quota_slot_v4",
         "worker_state_v4",

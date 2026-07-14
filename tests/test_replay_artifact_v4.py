@@ -856,6 +856,7 @@ def test_regular_file_publication_root_is_rejected(replay_result, tmp_path):
         "validated_snapshots_v4",
         "v4_outcomes",
         "top5_watchlist_v4",
+        "pre_delivery_v4",
         "pine_delivery_v4",
         "quota_slot_v4",
         "worker_state_v4",
@@ -933,6 +934,36 @@ def test_final_root_rejects_nonexistent_leaf_beneath_protected_symlink(
     )
 
     assert sentinel.read_bytes() == b"preserve-production-evidence"
+
+
+def test_pre_delivery_alias_is_rejected_without_target_mutation(
+    replay_result,
+    tmp_path,
+    monkeypatch,
+):
+    protected_target = tmp_path / "data" / "pre_delivery_v4"
+    protected_target.mkdir(parents=True)
+    sentinel = protected_target / "sentinel.json"
+    sentinel.write_text('{"production":"sentinel"}', encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "cache"
+    alias.symlink_to(protected_target, target_is_directory=True)
+    final_root = alias / "new-final-root"
+    staging_root = tmp_path / "safe-staging-root"
+    assert not final_root.exists()
+
+    _assert_destination_alias_is_rejected(
+        replay_result,
+        staging_root,
+        final_root,
+        protected_target,
+        monkeypatch,
+    )
+
+    assert sentinel.read_text(encoding="utf-8") == (
+        '{"production":"sentinel"}'
+    )
 
 
 def test_staging_root_rejects_nonexistent_leaf_beneath_quota_symlink(

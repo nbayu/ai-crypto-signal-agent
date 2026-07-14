@@ -65,6 +65,19 @@ MASTER_DEPENDENCIES = {
     "production_evidence_saver",
     "now_provider",
 }
+PROTECTED_ROOT_COMPONENTS = (
+    "production_run_v4",
+    "production_evidence_v4",
+    "validated_snapshots_v4",
+    "v4_outcomes",
+    "top5_watchlist_v4",
+    "pre_delivery_v4",
+    "pine_delivery_v4",
+    "quota_slot_v4",
+    "worker_state_v4",
+    "forward-test",
+    "telegram",
+)
 
 
 @pytest.fixture
@@ -89,6 +102,62 @@ def _thaw(value):
 
 def _path_is_beneath(path, root):
     return Path(path).resolve().is_relative_to(Path(root).resolve())
+
+
+def _directory_tree_state(root):
+    root = Path(root)
+    state = []
+    for path in (root, *sorted(root.rglob("*"))):
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        metadata = path.lstat()
+        if path.is_symlink():
+            kind = "symlink"
+            content = os.readlink(path)
+        elif path.is_file():
+            kind = "file"
+            content = path.read_bytes()
+        elif path.is_dir():
+            kind = "directory"
+            content = None
+        else:
+            kind = "other"
+            content = None
+        state.append((relative, kind, content, metadata.st_mtime_ns))
+    return tuple(state)
+
+
+def _assert_runner_output_root_is_rejected(bundle, output_root, target_root):
+    output_root = Path(output_root)
+    target_root = Path(target_root)
+    master_calls = []
+    target_before = _directory_tree_state(target_root)
+    root_existed = os.path.lexists(output_root)
+    root_was_symlink = output_root.is_symlink()
+    link_target = os.readlink(output_root) if root_was_symlink else None
+
+    def forbidden_master(**dependencies):
+        master_calls.append(dependencies)
+        raise AssertionError("master engine must not run for invalid root")
+
+    with pytest.raises(ReplayExecutionError) as exc_info:
+        run_replay_v4(
+            bundle,
+            output_root,
+            master_engine_runner=forbidden_master,
+        )
+
+    assert str(exc_info.value) == "Invalid replay output root"
+    assert str(output_root) not in str(exc_info.value)
+    assert str(target_root) not in str(exc_info.value)
+    assert master_calls == []
+    assert os.path.lexists(output_root) is root_existed
+    if root_was_symlink:
+        assert output_root.is_symlink()
+        assert os.readlink(output_root) == link_target
+    assert _directory_tree_state(target_root) == target_before
+    assert not tuple(target_root.rglob("replay_*.json"))
+    assert not tuple(target_root.rglob("replay_*.txt"))
+    assert not tuple(target_root.rglob("latest*"))
 
 
 def _invoke_like_master_engine(dependencies):
@@ -229,6 +298,149 @@ def test_protected_production_and_state_roots_are_rejected(
 
     assert calls == []
     assert str(protected_root) not in str(exc_info.value)
+
+
+@pytest.mark.parametrize("protected_component", PROTECTED_ROOT_COMPONENTS)
+def test_representative_protected_root_components_fail_before_execution(
+    bundle,
+    tmp_path,
+    protected_component,
+):
+    target = tmp_path / "protected" / protected_component
+    target.mkdir(parents=True)
+    sentinel = target / "sentinel.bin"
+    sentinel.write_bytes(b"protected-state-must-not-change")
+    output_root = target / "replay-output"
+    assert not output_root.exists()
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_bytes() == b"protected-state-must-not-change"
+
+
+def test_direct_output_root_symlink_to_external_directory_is_rejected(
+    bundle,
+    tmp_path,
+):
+    target = tmp_path / "external-target"
+    target.mkdir()
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("external target unchanged", encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    output_root = caller / "output-alias"
+    output_root.symlink_to(target, target_is_directory=True)
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_text(encoding="utf-8") == "external target unchanged"
+
+
+def test_direct_output_root_symlink_to_protected_directory_is_rejected(
+    bundle,
+    tmp_path,
+):
+    target = tmp_path / "data" / "pre_delivery_v4"
+    target.mkdir(parents=True)
+    sentinel = target / "sentinel.json"
+    sentinel.write_text('{"production":"sentinel"}', encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    output_root = caller / "output-alias"
+    output_root.symlink_to(target, target_is_directory=True)
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_text(encoding="utf-8") == (
+        '{"production":"sentinel"}'
+    )
+
+
+def test_nonexistent_output_leaf_beneath_immediate_symlink_is_rejected(
+    bundle,
+    tmp_path,
+):
+    target = tmp_path / "external-target"
+    target.mkdir()
+    sentinel = target / "sentinel.bin"
+    sentinel.write_bytes(b"unchanged")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "alias"
+    alias.symlink_to(target, target_is_directory=True)
+    output_root = alias / "nonexistent-output"
+    assert not output_root.exists()
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_bytes() == b"unchanged"
+
+
+def test_deep_output_root_ancestry_checks_every_symlink_component(
+    bundle,
+    tmp_path,
+):
+    target = tmp_path / "external-target"
+    target.mkdir()
+    sentinel = target / "sentinel.bin"
+    sentinel.write_bytes(b"unchanged")
+    caller = tmp_path / "caller" / "safe" / "deeper"
+    caller.mkdir(parents=True)
+    alias = caller / "alias"
+    alias.symlink_to(target, target_is_directory=True)
+    output_root = alias / "nested" / "nonexistent-output"
+    assert not output_root.exists()
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_bytes() == b"unchanged"
+
+
+@pytest.mark.parametrize(
+    "protected_component",
+    ["pre_delivery_v4", "forward-test", "telegram"],
+)
+def test_harmless_output_alias_to_protected_target_is_rejected(
+    bundle,
+    tmp_path,
+    protected_component,
+):
+    target = tmp_path / "protected" / protected_component
+    target.mkdir(parents=True)
+    sentinel = target / "sentinel.bin"
+    sentinel.write_bytes(b"protected-target-unchanged")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "cache"
+    alias.symlink_to(target, target_is_directory=True)
+    output_root = alias / "output"
+    assert not output_root.exists()
+
+    _assert_runner_output_root_is_rejected(bundle, output_root, target)
+
+    assert sentinel.read_bytes() == b"protected-target-unchanged"
+
+
+def test_ordinary_nested_output_root_without_symlinks_is_allowed(
+    bundle,
+    tmp_path,
+):
+    output_root = tmp_path / "caller" / "safe" / "nested" / "replay-output"
+
+    result = run_replay_v4(
+        bundle,
+        output_root,
+        master_engine_runner=_invoke_like_master_engine,
+    )
+
+    assert result.classification == CLASSIFICATION
+    assert result.boundary == BOUNDARY
+    assert Path(result.output_root) == output_root.resolve()
+    assert all(
+        _path_is_beneath(path, output_root)
+        for path in output_root.rglob("*")
+        if path.is_file()
+    )
 
 
 def test_master_engine_runner_is_keyword_only_and_must_be_callable(
