@@ -260,6 +260,54 @@ completion. It reports or logs them only through a future approved
 operator mechanism and must never rerun the worker, reacquire quota, or
 retry a scan automatically.
 
+### 12.1 Failure-Classification Decoration
+
+The existing Phase 04 wrapper accepts its injected downstream callable
+through the keyword parameter named `worker` (not `worker_fn`). It
+propagates a bare release exception after worker success, but preserves a
+worker exception as primary and raises that same exception from the
+release exception when both fail. A caller cannot safely distinguish bare
+worker and bare release failures without an explicit boundary marker.
+
+For Phase 05, the pure application service supplies a decorated worker
+through that existing `worker` injection parameter when calling
+`run_quota_slot_worker_v4(...)`. The decorator calls the separately
+injected real Phase 03 worker exactly once. If the real worker raises,
+the decorator raises a private Phase 05 worker-failure marker from the
+original exception. The marker stores that original exception in a
+private attribute for internal diagnostics only; it is not a public
+Telegram API and is never rendered to a user.
+
+The application classifies a wrapper outcome in this order:
+
+1. `QuotaSlotRejected` is handled first by its stable Phase 04 reason
+   code; it is never classified as a release failure.
+2. A private worker marker whose `__cause__` is the original worker
+   exception is `WORKER_FAILED`.
+3. A private worker marker whose `__cause__` is a release exception is
+   `WORKER_AND_RELEASE_FAILED`.
+4. A non-marker exception escaping only after the decorated worker
+   returned successfully is `RELEASE_FAILED`.
+5. Any exception outside that wrapper/decorator execution shape is
+   `INTERNAL_ERROR`.
+
+The service records privately whether the decorated worker returned, so
+step 4 does not infer failure type from exception text, paths, traceback
+content, or arbitrary third-party exception classes. In a dual failure,
+Phase 04's `raise worker_error from release_error` replaces the marker's
+original `__cause__` with the release exception; the marker's private
+original-worker attribute retains the original exception for approved
+internal diagnostics. The service must not inspect or serialize either
+exception's message, representation, traceback, path, or secret-bearing
+data.
+
+This decoration changes neither Phase 04 acquisition, quota consumption,
+release-in-`finally`, exception precedence, nor retry behavior. It does
+not modify `engine/quota_slot_worker_v4.py`, duplicate quota/release
+logic, or invoke the real worker outside the Phase 04 wrapper's worker
+callback. Telegram formatting and transport failure still occur after the
+single wrapper call and never trigger another call.
+
 ## 13. Import-Safety Contract
 
 Importing any Phase 05 application, adapter, configuration, or runtime
@@ -373,11 +421,12 @@ or master-engine execution.
 Future implementation uses separate atomic commits in this order:
 
 1. `docs: freeze Telegram interface design`;
-2. `feat: add pure Telegram command service`;
-3. `feat: add Telegram transport adapter` (including the approved SDK
+2. `docs: clarify Telegram failure classification`;
+3. `feat: add pure Telegram command service`;
+4. `feat: add Telegram transport adapter` (including the approved SDK
    dependency only if still necessary);
-4. `feat: add Telegram runtime entrypoint and configuration boundary`;
-5. `test/fix: finalize Telegram interface contracts`.
+5. `feat: add Telegram runtime entrypoint and configuration boundary`;
+6. `test/fix: finalize Telegram interface contracts`.
 
 This document authorizes none of those implementation commits.
 
