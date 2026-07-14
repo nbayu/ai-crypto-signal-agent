@@ -206,6 +206,68 @@ def _publication_file_state(publication_root):
     }
 
 
+def _directory_tree_state(root):
+    root = Path(root)
+    state = []
+    for path in (root, *sorted(root.rglob("*"))):
+        relative = "." if path == root else path.relative_to(root).as_posix()
+        metadata = path.lstat()
+        if path.is_symlink():
+            kind = "symlink"
+            content = os.readlink(path)
+        elif path.is_file():
+            kind = "file"
+            content = path.read_bytes()
+        elif path.is_dir():
+            kind = "directory"
+            content = None
+        else:
+            kind = "other"
+            content = None
+        state.append((relative, kind, content, metadata.st_mtime_ns))
+    return tuple(state)
+
+
+def _assert_destination_alias_is_rejected(
+    replay_result,
+    staging_root,
+    final_root,
+    alias_target,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        runner_module,
+        "run_replay_v4",
+        _fail_if_called("replay runner"),
+    )
+    monkeypatch.setattr(
+        master_module,
+        "run_master_engine_v4",
+        _fail_if_called("master engine"),
+    )
+    before = _directory_tree_state(alias_target)
+
+    with pytest.raises(ReplayArtifactError) as exc_info:
+        publish_replay_artifacts_v4(
+            replay_result,
+            staging_root,
+            final_root,
+        )
+
+    message = str(exc_info.value)
+    assert message == "Invalid replay artifact path"
+    assert str(staging_root) not in message
+    assert str(final_root) not in message
+    assert str(alias_target) not in message
+    assert not Path(staging_root).exists()
+    assert not Path(final_root).exists()
+    assert not _incomplete_path(staging_root, replay_result).exists()
+    assert not _final_path(final_root, replay_result).exists()
+    assert _directory_tree_state(alias_target) == before
+    assert not tuple(Path(alias_target).rglob(MANIFEST_NAME))
+    assert not tuple(Path(alias_target).rglob("latest*"))
+
+
 def _publish(replay_result, tmp_path):
     staging_root = tmp_path / "staging"
     final_root = tmp_path / "published"
@@ -843,6 +905,145 @@ def test_symlink_staging_and_final_roots_are_rejected(
         )
 
     assert list(external.iterdir()) == []
+
+
+def test_final_root_rejects_nonexistent_leaf_beneath_protected_symlink(
+    replay_result,
+    tmp_path,
+    monkeypatch,
+):
+    protected_target = tmp_path / "data" / "production_evidence_v4"
+    protected_target.mkdir(parents=True)
+    sentinel = protected_target / "sentinel.bin"
+    sentinel.write_bytes(b"preserve-production-evidence")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "cache"
+    alias.symlink_to(protected_target, target_is_directory=True)
+    final_root = alias / "new-final-root"
+    staging_root = tmp_path / "safe-staging-root"
+    assert not final_root.exists()
+
+    _assert_destination_alias_is_rejected(
+        replay_result,
+        staging_root,
+        final_root,
+        protected_target,
+        monkeypatch,
+    )
+
+    assert sentinel.read_bytes() == b"preserve-production-evidence"
+
+
+def test_staging_root_rejects_nonexistent_leaf_beneath_quota_symlink(
+    replay_result,
+    tmp_path,
+    monkeypatch,
+):
+    protected_target = tmp_path / "state" / "quota_slot_v4"
+    protected_target.mkdir(parents=True)
+    sentinel = protected_target / "quota-state.json"
+    sentinel.write_bytes(b'{"remaining":7}')
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "scratch"
+    alias.symlink_to(protected_target, target_is_directory=True)
+    staging_root = alias / "new-staging-root"
+    final_root = tmp_path / "safe-final-root"
+    assert not staging_root.exists()
+
+    _assert_destination_alias_is_rejected(
+        replay_result,
+        staging_root,
+        final_root,
+        protected_target,
+        monkeypatch,
+    )
+
+    assert sentinel.read_bytes() == b'{"remaining":7}'
+
+
+def test_destination_root_rejects_nonprotected_ancestor_symlink(
+    replay_result,
+    tmp_path,
+    monkeypatch,
+):
+    external_target = tmp_path / "external-target"
+    external_target.mkdir()
+    sentinel = external_target / "sentinel.txt"
+    sentinel.write_text("external bytes stay unchanged", encoding="utf-8")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    alias = caller / "ordinary-cache"
+    alias.symlink_to(external_target, target_is_directory=True)
+    final_root = alias / "publication-root"
+    staging_root = tmp_path / "safe-staging-root"
+    assert not final_root.exists()
+
+    _assert_destination_alias_is_rejected(
+        replay_result,
+        staging_root,
+        final_root,
+        external_target,
+        monkeypatch,
+    )
+
+    assert sentinel.read_text(encoding="utf-8") == (
+        "external bytes stay unchanged"
+    )
+
+
+def test_nested_destination_ancestry_checks_every_symlink_component(
+    replay_result,
+    tmp_path,
+    monkeypatch,
+):
+    protected_target = tmp_path / "state" / "worker_state_v4"
+    protected_target.mkdir(parents=True)
+    sentinel = protected_target / "worker-state.json"
+    sentinel.write_text('{"status":"idle"}', encoding="utf-8")
+    nested_caller = tmp_path / "caller" / "safe" / "level-two"
+    nested_caller.mkdir(parents=True)
+    alias = nested_caller / "archive"
+    alias.symlink_to(protected_target, target_is_directory=True)
+    final_root = alias / "nested" / "nonexistent-leaf"
+    staging_root = tmp_path / "safe" / "nested" / "staging-root"
+    assert not final_root.exists()
+
+    _assert_destination_alias_is_rejected(
+        replay_result,
+        staging_root,
+        final_root,
+        protected_target,
+        monkeypatch,
+    )
+
+    assert sentinel.read_text(encoding="utf-8") == '{"status":"idle"}'
+
+
+def test_ordinary_nested_publication_roots_without_symlinks_are_allowed(
+    replay_result,
+    tmp_path,
+):
+    staging_root = tmp_path / "caller" / "safe" / "nested-staging"
+    final_root = tmp_path / "caller" / "safe" / "nested-final"
+
+    publication = publish_replay_artifacts_v4(
+        replay_result,
+        staging_root,
+        final_root,
+    )
+
+    assert isinstance(publication, ReplayArtifactPublicationV4)
+    assert publication.classification == CLASSIFICATION
+    assert publication.boundary == BOUNDARY
+    assert publication.final_path == _final_path(
+        final_root,
+        replay_result,
+    ).resolve()
+    assert publication.final_path.is_dir()
+    assert publication.manifest_path.is_file()
+    assert not _incomplete_path(staging_root, replay_result).exists()
 
 
 def test_nested_symlink_escape_in_runner_inventory_is_rejected(

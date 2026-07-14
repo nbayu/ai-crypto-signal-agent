@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -282,9 +283,43 @@ def _validate_publication_root(value) -> Path:
     path = Path(value)
     if _has_protected_path_part(path):
         raise ReplayArtifactError("Invalid replay artifact path")
-    if _lexists(path) and (path.is_symlink() or not path.is_dir()):
+    absolute_path = path if path.is_absolute() else Path.cwd() / path
+    _validate_existing_publication_ancestry(absolute_path)
+    try:
+        resolved_path = absolute_path.resolve(strict=False)
+    except OSError as exc:
+        raise ReplayArtifactError("Invalid replay artifact path") from exc
+    if _has_protected_path_part(resolved_path):
         raise ReplayArtifactError("Invalid replay artifact path")
-    return path.resolve()
+    return resolved_path
+
+
+def _validate_existing_publication_ancestry(path: Path) -> None:
+    existing_ancestor = path
+    while not _lexists(existing_ancestor):
+        parent = existing_ancestor.parent
+        if parent == existing_ancestor:
+            raise ReplayArtifactError("Invalid replay artifact path")
+        existing_ancestor = parent
+
+    components = []
+    component = existing_ancestor
+    while True:
+        components.append(component)
+        if component.parent == component:
+            break
+        component = component.parent
+
+    try:
+        for component in reversed(components):
+            if stat.S_ISLNK(component.lstat().st_mode):
+                raise ReplayArtifactError("Invalid replay artifact path")
+        if not stat.S_ISDIR(existing_ancestor.lstat().st_mode):
+            raise ReplayArtifactError("Invalid replay artifact path")
+    except ReplayArtifactError:
+        raise
+    except OSError as exc:
+        raise ReplayArtifactError("Invalid replay artifact path") from exc
 
 
 def _validate_source_root(value) -> Path:
