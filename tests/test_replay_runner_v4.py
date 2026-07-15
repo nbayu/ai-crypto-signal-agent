@@ -248,6 +248,68 @@ def _assert_runner_output_root_is_rejected(bundle, output_root, target_root):
     assert not tuple(target_root.rglob("latest*"))
 
 
+def _capture_output_root_initialization_failures(
+    bundle,
+    output_root,
+    failures,
+    monkeypatch,
+):
+    output_root = Path(output_root).resolve()
+    parent = output_root.parent
+    parent_before = _directory_tree_state(parent)
+    mkdir_calls = []
+    injected_master_calls = []
+    default_master_calls = []
+    returned_results = []
+    errors = []
+    filesystem_states = []
+
+    def failing_mkdir(path, mode=0o777, parents=False, exist_ok=False):
+        mkdir_calls.append((Path(path), mode, parents, exist_ok))
+        if Path(path) != output_root:
+            raise AssertionError("replay must not fall back to another root")
+        raise failures[len(mkdir_calls) - 1]
+
+    def injected_master(**dependencies):
+        injected_master_calls.append(dependencies)
+        raise AssertionError("injected master must not run when mkdir fails")
+
+    def default_master(**dependencies):
+        default_master_calls.append(dependencies)
+        raise AssertionError("default master must not run when mkdir fails")
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    monkeypatch.setattr(runner_module, "run_master_engine_v4", default_master)
+
+    for _ in failures:
+        result = None
+        error = None
+        try:
+            result = run_replay_v4(
+                bundle,
+                output_root,
+                master_engine_runner=injected_master,
+            )
+        except Exception as exc:
+            error = exc
+        returned_results.append(result)
+        errors.append(error)
+        filesystem_states.append(_directory_tree_state(parent))
+
+    assert mkdir_calls == [
+        (output_root, 0o777, True, True)
+        for _ in failures
+    ]
+    assert injected_master_calls == []
+    assert default_master_calls == []
+    assert returned_results == [None] * len(failures)
+    assert filesystem_states == [parent_before] * len(failures)
+    assert not output_root.exists()
+    _assert_no_replay_completion(output_root)
+
+    return errors
+
+
 def _invoke_like_master_engine(dependencies):
     results = dependencies["scanner"]()
     out = dependencies["pipeline"](results)
@@ -356,6 +418,82 @@ def test_file_output_root_is_rejected_before_master_engine(bundle, tmp_path):
 
     assert output_file.read_text(encoding="utf-8") == "sentinel"
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "failure_kind",
+    [
+        "permission-error",
+        "generic-oserror",
+        "sensitive-absolute-path",
+        "secret-token-canaries",
+    ],
+)
+def test_output_root_mkdir_failure_is_safely_rejected(
+    bundle,
+    tmp_path,
+    monkeypatch,
+    failure_kind,
+):
+    parent = tmp_path / "safe-parent"
+    parent.mkdir()
+    output_root = (parent / "sensitive-output-root").resolve()
+    canaries = ("TOKEN_CANARY_38G2", "API_KEY_CANARY_38G2")
+
+    if failure_kind == "permission-error":
+        failure = PermissionError("synthetic mkdir permission failure")
+    elif failure_kind == "generic-oserror":
+        failure = OSError("synthetic mkdir operating-system failure")
+    elif failure_kind == "sensitive-absolute-path":
+        failure = OSError(f"cannot create replay root: {output_root}")
+    else:
+        failure = OSError(f"credentials: {canaries[0]} {canaries[1]}")
+
+    error, = _capture_output_root_initialization_failures(
+        bundle,
+        output_root,
+        (failure,),
+        monkeypatch,
+    )
+
+    assert error is not None
+    assert str(output_root) not in str(error)
+    for canary in canaries:
+        assert canary not in str(error)
+    assert isinstance(error, ReplayExecutionError)
+    assert str(error) == "Invalid replay output root"
+    assert error.__cause__ is failure
+
+
+def test_output_root_mkdir_failure_is_deterministic(
+    bundle,
+    tmp_path,
+    monkeypatch,
+):
+    parent = tmp_path / "safe-parent"
+    parent.mkdir()
+    output_root = (parent / "sensitive-output-root").resolve()
+    canaries = ("TOKEN_CANARY_38G2", "API_KEY_CANARY_38G2")
+    raw_message = f"{output_root} {canaries[0]} {canaries[1]} errno=13 pid=999"
+    failures = tuple(OSError(raw_message) for _ in range(5))
+
+    errors = _capture_output_root_initialization_failures(
+        bundle,
+        output_root,
+        failures,
+        monkeypatch,
+    )
+    messages = [str(error) for error in errors]
+
+    assert all(str(output_root) not in message for message in messages)
+    assert all(
+        canary not in message
+        for canary in canaries
+        for message in messages
+    )
+    assert {type(error) for error in errors} == {ReplayExecutionError}
+    assert messages == ["Invalid replay output root"] * 5
+    assert [error.__cause__ for error in errors] == list(failures)
 
 
 @pytest.mark.parametrize(

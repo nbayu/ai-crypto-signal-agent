@@ -97,7 +97,10 @@ def run_replay_v4(
     closed_candle_provider = _build_closed_candle_provider(bundle)
     pipeline = _build_pipeline(validator, oi_provider)
 
-    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ReplayExecutionError("Invalid replay output root") from exc
     paths = _ReplayPaths(root)
     snapshot_saver = _build_snapshot_saver(paths)
     outcome_saver = _build_outcome_saver(paths, bundle.fixed_execution_time)
