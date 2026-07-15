@@ -14,6 +14,7 @@ from engine.shadow_release_runner_v1 import (
 
 
 SOURCE_COMMIT = "a" * 40
+_DEFAULT_ADAPTER = object()
 
 
 def source_publication_ref(**overrides):
@@ -134,8 +135,8 @@ def run_shadow(
     *,
     envelope=None,
     shadow_run_id=None,
-    expected_adapter=None,
-    observed_adapter=None,
+    expected_adapter=_DEFAULT_ADAPTER,
+    observed_adapter=_DEFAULT_ADAPTER,
     versions=None,
     **overrides,
 ):
@@ -147,12 +148,12 @@ def run_shadow(
         ),
         "expected_adapter": (
             (lambda forwarded: copy.deepcopy(forwarded["expected_decision"]))
-            if expected_adapter is None
+            if expected_adapter is _DEFAULT_ADAPTER
             else expected_adapter
         ),
         "observed_adapter": (
             (lambda forwarded: copy.deepcopy(forwarded["expected_decision"]))
-            if observed_adapter is None
+            if observed_adapter is _DEFAULT_ADAPTER
             else observed_adapter
         ),
         "component_versions": (
