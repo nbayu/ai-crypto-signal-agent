@@ -946,3 +946,94 @@ RED tests may now assert these contracts exactly.
 The amendment does not authorize implementation before the RED contract
 suite is reviewed, committed, and proven to fail solely because the reserved
 Phase 07 production modules do not yet exist.
+
+## 20. Contract Amendment V2 — Acknowledgment Source Identity Binding
+
+Status: FROZEN AMENDMENT
+
+Purpose: Bind every persisted acknowledgment to its authoritative source
+publication identity so cross-signal validation remains deterministic after
+serialization.
+
+This amendment supersedes only the exact acknowledgment object shape in
+Section 19.9. All other acknowledgment semantics remain unchanged.
+
+### 20.1 Canonical Acknowledgment Shape
+
+`acknowledgment` is either null or an object containing exactly:
+
+- `signal_id`
+- `delivery_id`
+- `event_id`
+- `event_type`
+- `published_at`
+- `acknowledged_at`
+- `acknowledgment_latency_ms`
+- `source`
+
+Allowed `event_type` values remain:
+
+- `ENTRY_REPORTED`
+- `SKIP_REPORTED`
+
+### 20.2 Source Identity Rules
+
+- `signal_id` must exactly equal
+  `source_publication_ref.signal_id`.
+- `delivery_id` must exactly equal
+  `source_publication_ref.delivery_id`.
+- Both fields are opaque, non-empty strings.
+- Phase 07 must not derive, normalize, renumber, or reinterpret them.
+- An acknowledgment whose source identity differs from the target
+  observation must be rejected.
+- Two acknowledgments with different `signal_id` or `delivery_id` are
+  conflicting even when event fields and timestamps are otherwise equal.
+
+### 20.3 Idempotency Identity
+
+The canonical acknowledgment identity is:
+
+```text
+(signal_id, delivery_id, event_id)
+```
+
+Rules:
+
+identical canonical acknowledgment objects are idempotent;
+reuse of the same identity with different event content is rejected;
+a second acknowledgment with a different identity is rejected because
+the first valid acknowledgment remains canonical;
+persisted validation must use serialized fields only;
+hidden metadata, object identity, process-local registries, and ambient
+state are prohibited.
+
+### 20.4 Exact Latency Rule
+
+Latency remains:
+
+acknowledgment_latency_ms =
+  acknowledged_at - published_at
+
+measured as an exact non-negative integer millisecond difference.
+
+published_at must equal the source publication timestamp.
+
+### 20.5 Observation Attachment Rule
+
+When attaching an acknowledgment to an observation:
+
+acknowledgment signal_id must equal observation signal_id;
+acknowledgment delivery_id must equal
+observation source_publication_ref.delivery_id;
+mismatches are rejected before content hashing;
+acknowledgment attachment does not create ACTIVE, CLOSED, or any
+authoritative position transition.
+
+### 20.6 Amendment Lock
+
+RED acknowledgment tests may now assert cross-signal and cross-delivery
+rejection using persisted canonical data.
+
+No acknowledgment implementation is authorized before the corrected RED
+suite is committed and proven to fail only because the reserved module does
+not yet exist.
