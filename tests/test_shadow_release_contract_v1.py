@@ -599,7 +599,6 @@ def test_failed_run_requires_classified_safe_failure_evidence():
 @pytest.mark.parametrize(
     "failure",
     [
-        None,
         {"primary_code": "UNKNOWN", "component": "x", "message": "x"},
         {
             "primary_code": "SOURCE_AUTHORITY_MISSING",
@@ -614,15 +613,59 @@ def test_failed_run_requires_classified_safe_failure_evidence():
     ],
 )
 def test_failure_evidence_is_closed_and_safe(failure):
-    if failure is None:
-        kwargs = {"observed": semantic_projection(
-            validated_pipeline={"final_top5": []}
-        )}
-    else:
-        kwargs = {"failure": failure}
+    kwargs = {"failure": failure}
 
     with pytest.raises(ShadowReleaseContractError):
         build_run(**kwargs)
+
+
+def test_mismatch_with_none_failure_is_valid():
+    observed = semantic_projection(
+        validated_pipeline={"final_top5": []}
+    )
+    result = build_run(observed=observed, failure=None)
+
+    assert set(result) == {
+        "schema_version",
+        "schema_name",
+        "classification",
+        "execution_boundary",
+        "capital_exposure",
+        "order_execution",
+        "position_authority",
+        "shadow_run_id",
+        "source_commit",
+        "source_evaluation_id",
+        "mode",
+        "market_identity",
+        "outcome_kind",
+        "source_publication_ref",
+        "serialized_input_hash",
+        "expected_decision",
+        "expected_decision_hash",
+        "observed_decision",
+        "observed_decision_hash",
+        "comparison",
+        "component_versions",
+        "evaluation_started_at",
+        "evaluation_completed_at",
+        "started_at",
+        "completed_at",
+        "operational_duration_ms",
+        "failure",
+        "content_hash",
+    }
+    assert result["comparison"] == {
+        "outcome": "MISMATCH",
+        "primary_code": "DECISION_MISMATCH",
+        "secondary_codes": [],
+    }
+    assert result["failure"] is None
+
+    # Verify completed deterministic artifact: content_hash matches on duplicate build
+    second_result = build_run(observed=observed, failure=None)
+    assert result == second_result
+    assert result["content_hash"] == second_result["content_hash"]
 
 
 def test_builder_and_comparator_do_not_mutate_caller_owned_nested_values():
