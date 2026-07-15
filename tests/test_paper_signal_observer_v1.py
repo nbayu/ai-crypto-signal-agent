@@ -528,6 +528,7 @@ def test_observer_output_is_deterministic_for_identical_inputs():
                 candle(
                     open_time="2026-07-15T12:00:00Z",
                     close_time="2026-07-15T12:05:00Z",
+                    open_price=106.0,
                     high=111.0,
                     low=105.0,
                     close=109.0,
