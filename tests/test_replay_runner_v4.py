@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 from dataclasses import FrozenInstanceError
+from datetime import datetime
 from importlib import util as importlib_util
 from pathlib import Path
 from types import MappingProxyType
@@ -102,6 +103,93 @@ def _thaw(value):
 
 def _path_is_beneath(path, root):
     return Path(path).resolve().is_relative_to(Path(root).resolve())
+
+
+def _minimal_master_result(output_root):
+    output_root = Path(output_root)
+    return {
+        "results": [],
+        "out": {"final_top5": []},
+        "snapshot_path": output_root / "replay_validated_snapshot.json",
+        "outcome_path": output_root / "replay_outcome.json",
+        "watchlist_path": output_root / "replay_top5_watchlist.json",
+        "delivery_out": {},
+        "evidence_path": output_root / "replay_evidence.json",
+    }
+
+
+def _expected_normalized_minimal_master_result():
+    return {
+        "results": [],
+        "out": {"final_top5": []},
+        "snapshot_path": "replay_validated_snapshot.json",
+        "outcome_path": "replay_outcome.json",
+        "watchlist_path": "replay_top5_watchlist.json",
+        "delivery_out": {},
+        "evidence_path": "replay_evidence.json",
+    }
+
+
+def _assert_no_replay_completion(output_root):
+    output_root = Path(output_root)
+    assert not tuple(output_root.rglob("replay_*.json"))
+    assert not tuple(output_root.rglob("replay_*.txt"))
+    assert not tuple(output_root.rglob("*manifest*"))
+    assert not tuple(output_root.rglob("latest*"))
+    assert not tuple(
+        path
+        for path in output_root.rglob("*")
+        if path.is_file() or path.is_symlink()
+    )
+
+
+def _assert_invalid_master_result(
+    bundle,
+    output_root,
+    master_result,
+    *,
+    cleanup=None,
+):
+    calls = []
+    returned_result = None
+    execution_error = None
+
+    def master_engine_probe(**dependencies):
+        calls.append(dependencies)
+        return master_result
+
+    try:
+        try:
+            returned_result = run_replay_v4(
+                bundle,
+                output_root,
+                master_engine_runner=master_engine_probe,
+            )
+        except ReplayExecutionError as exc:
+            execution_error = exc
+
+        assert len(calls) == 1
+        assert set(calls[0]) == MASTER_DEPENDENCIES
+        _assert_no_replay_completion(output_root)
+        assert returned_result is None
+        assert execution_error is not None
+        assert str(execution_error)
+        assert str(output_root) not in str(execution_error)
+        assert "sensitive-master-result-value" not in str(execution_error)
+    finally:
+        if cleanup is not None:
+            cleanup()
+
+    return execution_error
+
+
+class _CustomAwaitable:
+    def __await__(self):
+        return iter(())
+
+
+async def _coroutine_master_result():
+    return None
 
 
 def _directory_tree_state(root):
@@ -476,6 +564,136 @@ def test_runner_invokes_injected_master_once_with_complete_dependencies(
 
 
 @pytest.mark.parametrize(
+    "master_result_factory",
+    [
+        pytest.param(lambda root: None, id="none"),
+        pytest.param(lambda root: True, id="true"),
+        pytest.param(lambda root: False, id="false"),
+        pytest.param(lambda root: 7, id="integer"),
+        pytest.param(lambda root: 7.25, id="finite-float"),
+        pytest.param(
+            lambda root: "sensitive-master-result-value",
+            id="string",
+        ),
+        pytest.param(lambda root: b"bytes", id="bytes"),
+        pytest.param(lambda root: [], id="list"),
+        pytest.param(lambda root: (), id="tuple"),
+        pytest.param(lambda root: set(), id="set"),
+        pytest.param(lambda root: (value for value in ()), id="generator"),
+        pytest.param(lambda root: object(), id="object"),
+        pytest.param(lambda root: root / "path-result", id="path"),
+        pytest.param(
+            lambda root: datetime(2026, 7, 15, 12, 0, 0),
+            id="datetime",
+        ),
+    ],
+)
+def test_injected_master_invalid_top_level_type_is_rejected(
+    bundle,
+    tmp_path,
+    master_result_factory,
+):
+    output_root = tmp_path / "replay-output"
+    master_result = master_result_factory(output_root)
+    cleanup = getattr(master_result, "close", None)
+
+    _assert_invalid_master_result(
+        bundle,
+        output_root,
+        master_result,
+        cleanup=cleanup if callable(cleanup) else None,
+    )
+
+
+@pytest.mark.parametrize("awaitable_kind", ["coroutine", "custom-awaitable"])
+def test_injected_master_awaitable_result_is_rejected(
+    bundle,
+    tmp_path,
+    awaitable_kind,
+):
+    output_root = tmp_path / "replay-output"
+    awaitable = (
+        _coroutine_master_result()
+        if awaitable_kind == "coroutine"
+        else _CustomAwaitable()
+    )
+    cleanup = getattr(awaitable, "close", None)
+
+    _assert_invalid_master_result(
+        bundle,
+        output_root,
+        awaitable,
+        cleanup=cleanup if callable(cleanup) else None,
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_shape",
+    [
+        "empty-mapping",
+        "arbitrary-finite-mapping",
+        "missing-required-fields",
+        "only-one-required-field",
+        "required-field-wrong-type",
+        "unexpected-semantic-shape",
+    ],
+)
+def test_injected_master_invalid_mapping_shape_is_rejected(
+    bundle,
+    tmp_path,
+    invalid_shape,
+):
+    output_root = tmp_path / "replay-output"
+    master_result = _minimal_master_result(output_root)
+
+    if invalid_shape == "empty-mapping":
+        master_result = {}
+    elif invalid_shape == "arbitrary-finite-mapping":
+        master_result = {"arbitrary": {"finite": [0, 1.25, -7]}}
+    elif invalid_shape == "missing-required-fields":
+        del master_result["evidence_path"]
+    elif invalid_shape == "only-one-required-field":
+        master_result = {"results": []}
+    elif invalid_shape == "required-field-wrong-type":
+        master_result["results"] = {}
+    elif invalid_shape == "unexpected-semantic-shape":
+        master_result["out"] = []
+
+    _assert_invalid_master_result(bundle, output_root, master_result)
+
+
+def test_injected_master_minimal_valid_mapping_is_accepted(bundle, tmp_path):
+    output_root = tmp_path / "replay-output"
+    calls = []
+
+    def master_engine_probe(**dependencies):
+        calls.append(dependencies)
+        return _minimal_master_result(output_root)
+
+    result = run_replay_v4(
+        bundle,
+        output_root,
+        master_engine_runner=master_engine_probe,
+    )
+
+    assert len(calls) == 1
+    assert set(calls[0]) == MASTER_DEPENDENCIES
+    assert isinstance(result, ReplayExecutionResultV4)
+    assert _thaw(result.normalized_master_result) == (
+        _expected_normalized_minimal_master_result()
+    )
+    assert result.replay_id == derive_replay_id_v4(bundle)
+    assert result.fixture_id == derive_replay_fixture_id_v4(bundle)
+    assert result.bundle_hash == calculate_replay_bundle_hash_v4(bundle)
+    assert len(result.bundle_hash) == 64
+    assert int(result.bundle_hash, 16) >= 0
+    assert result.fixed_execution_time == bundle.fixed_execution_time
+    assert result.output_root == output_root.resolve()
+    assert result.classification == CLASSIFICATION
+    assert result.boundary == BOUNDARY
+
+
+@pytest.mark.parametrize(
     "master_result",
     [
         pytest.param({"metric": float("nan")}, id="nan"),
@@ -497,7 +715,9 @@ def test_injected_master_non_finite_result_fails_without_success(
 
     def master_engine_probe(**dependencies):
         calls.append(dependencies)
-        return copy.deepcopy(master_result)
+        valid_result = _minimal_master_result(output_root)
+        valid_result["metric"] = copy.deepcopy(master_result)
+        return valid_result
 
     with pytest.raises(ReplayExecutionError) as exc_info:
         run_replay_v4(
@@ -518,10 +738,16 @@ def test_injected_master_non_finite_result_fails_without_success(
 
 
 def test_injected_master_finite_nested_result_remains_valid(bundle, tmp_path):
-    finite_result = {
-        "values": [0.0, -0.0, 1.25, -2.5, 1.7976931348623157e308],
-        "nested": {"finite": [42.125, -999.75]},
-    }
+    output_root = tmp_path / "replay-output"
+    finite_result = _minimal_master_result(output_root)
+    finite_result["values"] = [
+        0.0,
+        -0.0,
+        1.25,
+        -2.5,
+        1.7976931348623157e308,
+    ]
+    finite_result["nested"] = {"finite": [42.125, -999.75]}
     calls = []
 
     def master_engine_probe(**dependencies):
@@ -530,14 +756,68 @@ def test_injected_master_finite_nested_result_remains_valid(bundle, tmp_path):
 
     result = run_replay_v4(
         bundle,
-        tmp_path / "replay-output",
+        output_root,
         master_engine_runner=master_engine_probe,
     )
 
     assert len(calls) == 1
-    assert _thaw(result.normalized_master_result) == finite_result
+    normalized = _expected_normalized_minimal_master_result()
+    normalized["values"] = finite_result["values"]
+    normalized["nested"] = finite_result["nested"]
+    assert _thaw(result.normalized_master_result) == normalized
     assert result.classification == CLASSIFICATION
     assert result.boundary == BOUNDARY
+
+
+def test_injected_master_cyclic_mapping_is_rejected_deterministically(
+    bundle,
+    tmp_path,
+):
+    first_root = tmp_path / "first-replay-output"
+    master_result = _minimal_master_result(first_root)
+    master_result["cycle"] = master_result
+
+    first_error = _assert_invalid_master_result(
+        bundle,
+        first_root,
+        master_result,
+    )
+
+    second_root = tmp_path / "second-replay-output"
+    repeated_result = _minimal_master_result(second_root)
+    repeated_result["cycle"] = repeated_result
+    second_error = _assert_invalid_master_result(
+        bundle,
+        second_root,
+        repeated_result,
+    )
+
+    assert str(first_error) == str(second_error)
+
+
+def test_injected_master_unsupported_nested_value_is_rejected(
+    bundle,
+    tmp_path,
+):
+    output_root = tmp_path / "replay-output"
+    master_result = _minimal_master_result(output_root)
+    master_result["out"]["unsupported"] = object()
+
+    _assert_invalid_master_result(bundle, output_root, master_result)
+
+
+def test_injected_master_nested_awaitable_is_rejected(bundle, tmp_path):
+    output_root = tmp_path / "replay-output"
+    awaitable = _coroutine_master_result()
+    master_result = _minimal_master_result(output_root)
+    master_result["out"]["awaitable"] = awaitable
+
+    _assert_invalid_master_result(
+        bundle,
+        output_root,
+        master_result,
+        cleanup=awaitable.close,
+    )
 
 
 def test_scanner_provider_returns_fresh_mutable_normalized_rows(

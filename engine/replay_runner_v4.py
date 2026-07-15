@@ -1,5 +1,6 @@
 """Deterministic, network-isolated Replay V4 master-engine composition."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 import inspect
@@ -124,6 +125,7 @@ def run_replay_v4(
                 "now_provider": lambda: fixed_now,
             },
         )
+        _validate_master_result_contract(master_result)
         normalized_master_result = _normalize_master_result(master_result, root)
         _validate_finite_master_result(normalized_master_result)
     except ReplayExecutionError:
@@ -482,6 +484,91 @@ def _serialize_value(value: Any):
 
 def _relative_path(path, root: Path) -> str:
     return str(Path(path).resolve().relative_to(root))
+
+
+_MASTER_RESULT_REQUIRED_KEYS = frozenset(
+    {
+        "results",
+        "out",
+        "snapshot_path",
+        "outcome_path",
+        "watchlist_path",
+        "delivery_out",
+        "evidence_path",
+    }
+)
+_MASTER_RESULT_PATH_KEYS = frozenset(
+    {
+        "snapshot_path",
+        "outcome_path",
+        "watchlist_path",
+        "evidence_path",
+    }
+)
+
+
+def _validate_master_result_contract(value: Any) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError("Invalid replay master result")
+    if not _MASTER_RESULT_REQUIRED_KEYS.issubset(value):
+        raise ValueError("Invalid replay master result")
+    if not isinstance(value["results"], list):
+        raise ValueError("Invalid replay master result")
+    if not isinstance(value["out"], Mapping):
+        raise ValueError("Invalid replay master result")
+    if not isinstance(value["delivery_out"], Mapping):
+        raise ValueError("Invalid replay master result")
+    if any(
+        isinstance(value[key], bool)
+        or not isinstance(value[key], (str, Path))
+        for key in _MASTER_RESULT_PATH_KEYS
+    ):
+        raise ValueError("Invalid replay master result")
+
+    _validate_supported_master_result_value(value, active_container_ids=set())
+
+
+def _validate_supported_master_result_value(value: Any, *, active_container_ids: set[int]) -> None:
+    if inspect.isawaitable(value):
+        if inspect.iscoroutine(value):
+            value.close()
+        raise ValueError("Invalid replay master result")
+    if value is None or isinstance(value, (bool, int, float, str, Path)):
+        return
+    if isinstance(value, Mapping):
+        _validate_container_not_cyclic(value, active_container_ids)
+        try:
+            for key, nested in value.items():
+                if not isinstance(key, str):
+                    raise ValueError("Invalid replay master result")
+                _validate_supported_master_result_value(
+                    nested,
+                    active_container_ids=active_container_ids,
+                )
+        finally:
+            active_container_ids.remove(id(value))
+        return
+    if isinstance(value, (list, tuple)):
+        _validate_container_not_cyclic(value, active_container_ids)
+        try:
+            for nested in value:
+                _validate_supported_master_result_value(
+                    nested,
+                    active_container_ids=active_container_ids,
+                )
+        finally:
+            active_container_ids.remove(id(value))
+        return
+    if isinstance(value, Iterator):
+        raise ValueError("Invalid replay master result")
+    raise ValueError("Invalid replay master result")
+
+
+def _validate_container_not_cyclic(value: Any, active_container_ids: set[int]) -> None:
+    value_id = id(value)
+    if value_id in active_container_ids:
+        raise ValueError("Invalid replay master result")
+    active_container_ids.add(value_id)
 
 
 def _normalize_master_result(value: Any, root: Path):
