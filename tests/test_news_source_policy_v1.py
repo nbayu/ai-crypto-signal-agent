@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
@@ -437,19 +436,17 @@ def test_evaluation_timestamp_requires_utc_aware_input():
     )
 
 
-def test_point_in_time_before_publication_is_not_eligible():
-    source = raw_capture(
-        source_overrides={
-            "publication_timestamp_utc": PUBLICATION,
-            "capture_timestamp_utc": CAPTURE,
-            "point_in_time_timestamp_utc": datetime(
-                2026, 7, 16, 11, 59, tzinfo=UTC
-            ),
-        }
+def test_evaluation_before_publication_is_not_eligible():
+    source = raw_capture()
+    decision = evaluate(
+        source_snapshot=source,
+        evaluation=PUBLICATION - timedelta(seconds=1),
     )
-    decision = evaluate(source_snapshot=source)
-    assert decision.decision in {"INVALID", "BLOCKED", "INELIGIBLE"}
-    assert "POINT_IN_TIME_INVALID" in decision.reason_codes
+    assert_decision(
+        decision,
+        "INVALID",
+        "PUBLICATION_TIMESTAMP_IN_FUTURE",
+    )
 
 
 @pytest.mark.parametrize(
@@ -547,10 +544,14 @@ def test_hard_block_precedes_all_ordinary_failure_reasons():
 
 
 def test_identical_evaluations_are_structurally_equal():
-    first = evaluate()
+    capture_a = raw_capture()
+    capture_b = raw_capture()
+    assert capture_a is not capture_b
+    assert capture_a == capture_b
+    first = evaluate(source_snapshot=capture_a, policy=config())
     second = evaluate(
-        source_snapshot=copy.deepcopy(raw_capture()),
-        policy=copy.deepcopy(config()),
+        source_snapshot=capture_b,
+        policy=config(),
     )
     assert first == second
     assert first.to_mapping() == second.to_mapping()
