@@ -366,15 +366,17 @@ def test_payload_unknown_market_and_execution_fields_are_rejected(payload_type):
 
 
 def test_bounded_evidence_is_closed_hash_valid_and_deterministically_ordered():
-    first = _evidence(EVENT_SNAPSHOT_ID, evidence_ref_id="evidence-b", excerpt="B")
-    second = _evidence(EVENT_SNAPSHOT_ID, evidence_ref_id="evidence-a", excerpt="A")
-    result = _project(evidence=[first, second, first])
+    event = _event()
+    snapshot_id = event.event_snapshot_id
+    first = _evidence(snapshot_id, evidence_ref_id="evidence-b", excerpt="B")
+    second = _evidence(snapshot_id, evidence_ref_id="evidence-a", excerpt="A")
+    result = _project(event=event, evidence=[first, second, first])
     evidence = result.deepseek_payload.bounded_evidence
     assert [item["evidence_ref_id"] for item in evidence] == [
         "evidence-a", "evidence-b"
     ]
     assert all(len(item["excerpt_sha256"]) == 64 for item in evidence)
-    assert result == _project(evidence=[second, first])
+    assert result == _project(event=event, evidence=[second, first])
 
 
 def test_bounded_evidence_rejects_forged_hash_and_unknown_fields():
@@ -475,11 +477,12 @@ def test_projection_identity_excludes_counter_and_cache_execution_state():
 
 
 def test_projection_result_is_immutable_and_deeply_detached():
-    evidence = [_evidence(EVENT_SNAPSHOT_ID)]
+    event = _event()
+    evidence = [_evidence(event.event_snapshot_id)]
     task = "Assess canonical facts."
-    result = _project(evidence=evidence, review_task=task)
+    result = _project(event=event, evidence=evidence, review_task=task)
     evidence[0]["excerpt"] = "mutated"
-    evidence.append(_evidence(EVENT_SNAPSHOT_ID, evidence_ref_id="extra"))
+    evidence.append(_evidence(event.event_snapshot_id, evidence_ref_id="extra"))
     assert result.claude_payload.bounded_evidence[0]["excerpt"] != "mutated"
     assert result.claude_payload.review_task == task
     with pytest.raises((AttributeError, TypeError)):
