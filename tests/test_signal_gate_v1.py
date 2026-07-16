@@ -291,6 +291,48 @@ def test_configured_reason_precedence_wins(reason, state, eligibility):
     assert reason in result.reason_codes
 
 
+@pytest.mark.parametrize(
+    ("field", "reason"),
+    [
+        ("fail_closed_reason_codes", "FAIL_CLOSED_ADJUDICATION"),
+        ("blocking_reason_codes", "CRITICAL_MATERIAL_RISK"),
+        ("caution_reason_codes", "INSUFFICIENT_EVIDENCE"),
+    ],
+)
+def test_policy_reason_matchers_accept_reachable_upstream_values(field, reason):
+    policy = _policy(**{field: (reason,)})
+    assert getattr(policy, field) == (reason,)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["fail_closed_reason_codes", "blocking_reason_codes", "caution_reason_codes"],
+)
+def test_policy_reason_matchers_reject_downstream_only_values(field):
+    with pytest.raises(signal_gate.SignalGateError):
+        _policy(**{field: ("NEWS_RISK_CLEAR",)})
+
+
+@pytest.mark.parametrize(
+    ("field", "reason", "state", "eligibility"),
+    [
+        ("fail_closed_reason_codes", "FAIL_CLOSED_ADJUDICATION", "FAIL_CLOSED", "FAIL_CLOSED"),
+        ("blocking_reason_codes", "CRITICAL_MATERIAL_RISK", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
+        ("caution_reason_codes", "INSUFFICIENT_EVIDENCE", "CAUTION", "REQUIRE_NEWS_CAUTION"),
+    ],
+)
+def test_reachable_upstream_reason_precedence_is_separate_from_output(field, reason, state, eligibility):
+    policy = _policy(**{field: (reason,)})
+    result = _evaluate(_risk(reason_codes=(reason,)), policy)
+    assert result.gate_state == state
+    assert result.eligibility_recommendation == eligibility
+    assert result.reason_codes == tuple(
+        code for code in policy.deterministic_reason_order if code in result.reason_codes
+    )
+    if reason != "CRITICAL_MATERIAL_RISK":
+        assert reason not in result.reason_codes
+
+
 def test_l0_route_is_preserved_as_semantic_data():
     result = _evaluate(_risk(route="L0"))
     assert result.route == "L0"
@@ -326,7 +368,7 @@ def test_malformed_or_forged_news_risk_is_rejected(override):
         "final_entity_state": "ACCEPTABLE",
         "final_source_state": "ACCEPTABLE",
         "final_material_risk_state": "NONE",
-        "reason_codes": ("NEWS_RISK_CLEAR",),
+        "reason_codes": ("ADJUDICATION_CONFIRMED",),
         "evidence_refs": ("evidence-001",),
         "structured_explanation": "fixture",
         "news_risk_object_id": None,
