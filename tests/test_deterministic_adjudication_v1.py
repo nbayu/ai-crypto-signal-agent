@@ -184,7 +184,7 @@ def _adjudicate(deepseek=None, decision=None, claude=_AUTO_CLAUDE, policy=None):
     selected_decision = _decision("L1") if decision is None else decision
     selected_claude = (
         None
-        if selected_decision.route == "L0"
+        if claude is _AUTO_CLAUDE and selected_decision.route == "L0"
         else _claude(selected_decision.route)
         if claude is _AUTO_CLAUDE
         else claude
@@ -424,17 +424,17 @@ def test_free_text_is_inert_and_excluded_from_identity():
 
 
 @pytest.mark.parametrize(
-    "overrides",
+    ("decision_overrides", "claude"),
     [
-        {"event_snapshot_id": OTHER_SNAPSHOT_ID},
-        {"deepseek_semantic_result_id": OTHER_SNAPSHOT_ID},
-        {"router_decision_id": OTHER_SNAPSHOT_ID},
-        {"route": "L2"},
+        ({"event_snapshot_id": OTHER_SNAPSHOT_ID}, _AUTO_CLAUDE),
+        ({"deepseek_semantic_result_id": OTHER_SNAPSHOT_ID}, _AUTO_CLAUDE),
+        ({}, _claude(router_decision_id=OTHER_SNAPSHOT_ID)),
+        ({}, _claude("L2")),
     ],
 )
-def test_cross_contract_binding_mismatches_fail_before_adjudication(overrides):
+def test_cross_contract_binding_mismatches_fail_before_adjudication(decision_overrides, claude):
     with pytest.raises(adjudication.DeterministicAdjudicationError):
-        _adjudicate(decision=_decision(**overrides))
+        _adjudicate(decision=_decision(**decision_overrides), claude=claude)
 
 
 @pytest.mark.parametrize("status", ["PROVIDER_REJECTED", "INVALID_RESPONSE", "TRANSIENT_FAILURE", "PERMANENT_FAILURE", "BUDGET_BLOCKED", "ROUTE_BLOCKED", "TOKEN_LIMIT_BLOCKED"])
