@@ -6,7 +6,7 @@ import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import urlsplit, urlunsplit
@@ -23,6 +23,23 @@ from engine.news_event_contract_v1 import (
 
 
 NORMALIZATION_POLICY_VERSION = "news-normalization-policy-v1"
+
+__all__ = (
+    "NewsNormalizationError",
+    "NORMALIZATION_POLICY_VERSION",
+    "NormalizedTextV1",
+    "NormalizationResultV1",
+    "normalize_unicode_text",
+    "normalize_line_endings",
+    "normalize_language_tag",
+    "normalize_identifier",
+    "normalize_canonical_uri",
+    "normalize_metadata",
+    "build_normalized_content_sha256",
+    "build_material_source_metadata_sha256",
+    "build_source_snapshot_ref",
+    "normalize_news_capture",
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LANGUAGE = re.compile(r"^[A-Za-z]{2,3}$")
@@ -483,7 +500,7 @@ def _require_datetime(value: Any) -> datetime:
         raise NewsNormalizationError("point_in_time_timestamp_utc must be UTC")
     if value.utcoffset().total_seconds() != 0:
         raise NewsNormalizationError("point_in_time_timestamp_utc must be UTC")
-    return value.astimezone(value.tzinfo)
+    return value.astimezone(timezone.utc)
 
 
 def _timestamp_text(value: datetime) -> str:
