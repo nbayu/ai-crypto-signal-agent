@@ -81,7 +81,7 @@ def _evidence(
     }
 
 
-def _candidate(**overrides):
+def _candidate_values(**overrides):
     source_text = overrides.pop("source_text", "Alpha protocol")
     values = {
         "candidate_id": "candidate-alpha",
@@ -100,7 +100,11 @@ def _candidate(**overrides):
         "mapping_policy_version": ENTITY_MAPPING_POLICY_VERSION,
     }
     values.update(overrides)
-    return EntityCandidateV1(**values)
+    return values
+
+
+def _candidate(**overrides):
+    return EntityCandidateV1(**_candidate_values(**overrides))
 
 
 def _policy_decision(decision: str = "ELIGIBLE") -> SourcePolicyDecisionV1:
@@ -169,7 +173,10 @@ def test_entity_candidate_rejects_missing_and_unknown_fields():
 
 @pytest.mark.parametrize("entity_type", ["NOT_AN_ENTITY", "digital_asset", " DIGITAL_ASSET"])
 def test_entity_type_is_closed_and_exact(entity_type):
-    expect_mapping_error(EntityCandidateV1, **_candidate(entity_type=entity_type).to_mapping())
+    expect_mapping_error(
+        EntityCandidateV1,
+        **_candidate_values(entity_type=entity_type),
+    )
 
 
 def test_entity_type_vocabulary_is_closed():
@@ -182,7 +189,7 @@ def test_entity_type_vocabulary_is_closed():
 def test_candidate_status_is_closed(status):
     expect_mapping_error(
         EntityCandidateV1,
-        **_candidate(candidate_status=status).to_mapping(),
+        **_candidate_values(candidate_status=status),
     )
 
 
@@ -190,20 +197,17 @@ def test_accepted_candidate_requires_identity_and_no_rejection_reason():
     values = _candidate().to_mapping()
     values["canonical_entity_id"] = None
     expect_mapping_error(EntityCandidateV1, **values)
-    values = _candidate(rejection_reason_codes=["EVIDENCE_INSUFFICIENT"]).to_mapping()
+    values = _candidate().to_mapping()
+    values["rejection_reason_codes"] = ["EVIDENCE_INSUFFICIENT"]
     expect_mapping_error(EntityCandidateV1, **values)
 
 
 def test_rejected_candidate_requires_closed_reason():
-    values = _candidate(
-        candidate_status="REJECTED",
-        rejection_reason_codes=[],
-    ).to_mapping()
+    values = _candidate().to_mapping()
+    values["candidate_status"] = "REJECTED"
+    values["rejection_reason_codes"] = []
     expect_mapping_error(EntityCandidateV1, **values)
-    values = _candidate(
-        candidate_status="REJECTED",
-        rejection_reason_codes=["NOT_A_REASON"],
-    ).to_mapping()
+    values["rejection_reason_codes"] = ["NOT_A_REASON"]
     expect_mapping_error(EntityCandidateV1, **values)
 
 
@@ -214,13 +218,18 @@ def test_ambiguous_candidate_requires_group_and_unresolved_is_not_accepted():
         rejection_reason_codes=["AMBIGUOUS_IDENTITY"],
     )
     assert ambiguous.ambiguity_group_id == "ambiguity-001"
+    values = _candidate().to_mapping()
+    values["candidate_status"] = "AMBIGUOUS"
+    values["rejection_reason_codes"] = ["AMBIGUOUS_IDENTITY"]
     expect_mapping_error(
         EntityCandidateV1,
-        **_candidate(candidate_status="AMBIGUOUS").to_mapping(),
+        **values,
     )
+    values["candidate_status"] = "UNRESOLVED"
+    values["rejection_reason_codes"] = []
     expect_mapping_error(
         EntityCandidateV1,
-        **_candidate(candidate_status="UNRESOLVED").to_mapping(),
+        **values,
     )
 
 
@@ -246,23 +255,19 @@ def test_canonical_ids_use_nfc_and_reject_outer_whitespace():
     first = _candidate(canonical_name=decomposed)
     second = _candidate(canonical_name=precomposed)
     assert first == second
-    expect_mapping_error(
-        EntityCandidateV1,
-        **_candidate(canonical_entity_id=" asset:alpha").to_mapping(),
-    )
+    values = _candidate().to_mapping()
+    values["canonical_entity_id"] = " asset:alpha"
+    expect_mapping_error(EntityCandidateV1, **values)
 
 
 def test_symbol_is_optional_only_for_non_asset_entities():
     protocol = _candidate(entity_type="PROTOCOL", canonical_symbol=None)
     assert protocol.canonical_symbol is None
-    expect_mapping_error(
-        EntityCandidateV1,
-        **_candidate(canonical_symbol="").to_mapping(),
-    )
-    expect_mapping_error(
-        EntityCandidateV1,
-        **_candidate(canonical_symbol=" ALPHA").to_mapping(),
-    )
+    values = _candidate().to_mapping()
+    values["canonical_symbol"] = ""
+    expect_mapping_error(EntityCandidateV1, **values)
+    values["canonical_symbol"] = " ALPHA"
+    expect_mapping_error(EntityCandidateV1, **values)
 
 
 def test_evidence_references_are_closed_ordered_and_detached():
@@ -278,16 +283,19 @@ def test_evidence_references_are_closed_ordered_and_detached():
 
 
 def test_evidence_references_bind_to_one_event_snapshot():
-    expect_mapping_error(
-        EntityCandidateV1,
-        **_candidate(
-            evidence_refs=[_evidence(event_snapshot_id=OTHER_EVENT_SNAPSHOT_ID)]
-        ).to_mapping(),
+    candidate = _candidate(
+        evidence_refs=[_evidence(event_snapshot_id=OTHER_EVENT_SNAPSHOT_ID)]
     )
+    assert candidate.evidence_refs[0]["event_snapshot_id"] == OTHER_EVENT_SNAPSHOT_ID
     expect_mapping_error(
-        EntityCandidateV1,
-        **_candidate(evidence_refs=[{"reference_type": "UNKNOWN"}]).to_mapping(),
+        map_entity_candidates,
+        event_snapshot_id=EVENT_SNAPSHOT_ID,
+        source_policy_decision=_policy_decision(),
+        candidates=[candidate],
     )
+    values = _candidate().to_mapping()
+    values["evidence_refs"] = [{"reference_type": "UNKNOWN"}]
+    expect_mapping_error(EntityCandidateV1, **values)
 
 
 def test_rejection_reason_order_is_closed_and_duplicate_free():
