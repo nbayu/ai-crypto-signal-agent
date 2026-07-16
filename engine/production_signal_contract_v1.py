@@ -169,5 +169,5 @@ def build_no_trade_evaluation(*, source_envelope, recorded_at):
     e=validate_production_signal_input(source_envelope)
     if e["outcome_kind"]!=OUTCOME_NO_TRADE: raise ProductionSignalContractError("not NO_TRADE")
     _utc(recorded_at,"recorded_at")
-    x={"schema_version":1,"schema_name":PRODUCTION_SIGNAL_EVALUATION_SCHEMA,"outcome_kind":OUTCOME_NO_TRADE,"signal_id":None,"delivery_id":None,"source_publication_ref":None,"delivery_state":None}
+    x={"schema_version":1,"schema_name":PRODUCTION_SIGNAL_EVALUATION_SCHEMA,"classification":PRODUCTION_SIGNAL_CLASSIFICATION,"execution_boundary":PRODUCTION_SIGNAL_EXECUTION_BOUNDARY,"capital_exposure":"NONE","order_execution":"PROHIBITED","position_authority":"TELEGRAM_USER_REPORT","source_commit":e["source_commit"],"source_evaluation_id":e["source_evaluation_id"],"mode":e["mode"],"evaluated_at":e["evaluated_at"],"recorded_at":recorded_at,"production_evidence_ref":copy.deepcopy(e["production_evidence_ref"]),"outcome_kind":OUTCOME_NO_TRADE,"signal_id":None,"delivery_id":None,"source_publication_ref":None,"delivery_state":None,"component_versions":copy.deepcopy(e["component_versions"])}
     x["content_hash"]=_hash(x); return x

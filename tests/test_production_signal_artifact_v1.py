@@ -35,7 +35,7 @@ def success(i):
 def failure(i):
     return build_completed_publication(intent=i,delivery_receipt=None,failure={"primary_code":"DELIVERY_ADAPTER_FAILED","component":"delivery_adapter","message":"delivery adapter failed"})
 
-def no_trade(): return build_no_trade_evaluation(source_envelope("NO_TRADE"), recorded_at="2026-07-16T12:01:00Z")
+def no_trade(): return build_no_trade_evaluation(source_envelope=source_envelope("NO_TRADE"), recorded_at="2026-07-16T12:01:00Z")
 def bytes_for(v): return canonical_json_bytes(v)+b"\n"
 
 @pytest.fixture
