@@ -360,9 +360,22 @@ def test_malformed_or_forged_adjudication_is_rejected(override):
         _build(adjudication.DeterministicAdjudicationResultV1(**values))
 
 
-def test_cross_event_binding_is_rejected():
-    with pytest.raises(news_risk.NewsRiskObjectError):
-        _build(_adjudication(event_snapshot_id=OTHER_EVENT))
+def test_valid_event_binding_is_preserved_and_affects_identity():
+    event_a = _build(_adjudication(event_snapshot_id=EVENT))
+    event_b = _build(_adjudication(event_snapshot_id=OTHER_EVENT))
+    assert event_a.event_snapshot_id == EVENT
+    assert event_b.event_snapshot_id == OTHER_EVENT
+    assert event_a.adjudication_result_id != event_b.adjudication_result_id
+    assert event_a.news_risk_object_id != event_b.news_risk_object_id
+
+
+def test_equivalent_event_b_inputs_converge_to_one_identity():
+    first = _build(_adjudication(event_snapshot_id=OTHER_EVENT))
+    second = _build(_adjudication(event_snapshot_id=OTHER_EVENT))
+    assert first.event_snapshot_id == OTHER_EVENT
+    assert second.event_snapshot_id == OTHER_EVENT
+    assert first.adjudication_result_id == second.adjudication_result_id
+    assert first.news_risk_object_id == second.news_risk_object_id
 
 
 def test_identity_is_deterministic_and_manually_recomputable():
