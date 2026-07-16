@@ -190,7 +190,7 @@ def _budget(route: str = "L1", **overrides):
     values = {
         "authorization_id": AUTHORIZATION_ID,
         "policy_version": POLICY_VERSION,
-        "event_snapshot_id": EVENT_SNAPSHOT_ID,
+        "event_snapshot_id": _payload().event_snapshot_id,
         "router_decision_id": DECISION_ID,
         "route": route,
         "model_policy_id": model_policy,
@@ -271,7 +271,16 @@ def _run(*, route="L1", payload=None, decision=None, execution_policy=None, budg
     payload = _payload() if payload is None else payload
     decision = _decision(route, payload) if decision is None else decision
     execution_policy = _execution_policy(route) if execution_policy is None else execution_policy
-    budget = _budget(route) if budget is None else budget
+    budget = (
+        _budget(
+            route,
+            event_snapshot_id=decision.event_snapshot_id,
+            router_decision_id=decision.decision_id,
+            model_policy_id=decision.claude_model_policy_id,
+        )
+        if budget is None
+        else budget
+    )
     transport = _FakeTransport([_response]) if transport is None else transport
     values = {
         "payload": payload,
@@ -397,23 +406,30 @@ def test_route_binding_mismatch_fails_before_transport(kwargs):
     assert transport.requests == []
 
 
-def test_payload_snapshot_and_payload_hash_mismatch_fail_before_transport():
-    payload = _payload()
+def test_payload_snapshot_and_router_decision_binding_mismatch_fail_before_transport():
+    payload = _payload(_event(title="Beta protocol announced"))
     transport = _FakeTransport([_response])
     _error(
         _run,
         payload=payload,
-        decision=_decision(payload=payload, deepseek_payload_sha256=OTHER_SNAPSHOT_ID),
+        decision=_decision(),
         transport=transport,
     )
     assert transport.requests == []
 
 
-@pytest.mark.parametrize("estimate", [8000, 8001, None, True, 1.5, -1])
+@pytest.mark.parametrize("estimate", [8001, None, True, 1.5, -1])
 def test_token_limit_authority_is_closed_before_transport(estimate):
     transport = _FakeTransport([_response])
     _error(_run, transport=transport, claude_input_estimate=estimate)
     assert transport.requests == []
+
+
+def test_token_limit_authority_accepts_exact_hard_boundary():
+    transport = _FakeTransport([_response])
+    run = _run(transport=transport, claude_input_estimate=8000)
+    assert run.final_run_status == "COMPLETED"
+    assert len(transport.requests) == 1
 
 
 def test_cache_structure_is_stable_and_semantic_identity_excludes_cache_state():
@@ -490,12 +506,17 @@ def test_non_retryable_provider_failures_do_not_retry(failure):
     assert run.semantic_result is None
 
 
-@pytest.mark.parametrize("authorized", [False, None])
+@pytest.mark.parametrize("authorized", [False])
 def test_budget_denial_precedes_transport(authorized):
     transport = _FakeTransport([_response])
     budget = _budget(authorized=authorized)
     _error(_run, budget=budget, transport=transport)
     assert transport.requests == []
+
+
+def test_budget_authorization_rejects_non_boolean_authorized_during_construction():
+    with pytest.raises(provider.ClaudeEscalatedReviewProviderError):
+        _budget(authorized=None)
 
 
 def test_semantic_result_is_closed_and_telemetry_free():
