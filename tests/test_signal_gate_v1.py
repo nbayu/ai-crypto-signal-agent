@@ -174,10 +174,10 @@ def test_public_api_and_policy_version_are_frozen():
 def test_policy_is_closed_immutable_and_normalized():
     policy = _policy(
         supported_routes=("L2", "L0", "L1", "L1"),
-        blocking_reason_codes=("BLOCK_RECOMMENDED", "BLOCK_RECOMMENDED"),
+        blocking_reason_codes=("CRITICAL_MATERIAL_RISK", "CRITICAL_MATERIAL_RISK"),
     )
     assert policy.supported_routes == ("L0", "L1", "L2")
-    assert policy.blocking_reason_codes == ("BLOCK_RECOMMENDED",)
+    assert policy.blocking_reason_codes == ("CRITICAL_MATERIAL_RISK",)
     with pytest.raises((AttributeError, TypeError)):
         policy.supported_routes = ("L0",)
     with pytest.raises(signal_gate.SignalGateError):
