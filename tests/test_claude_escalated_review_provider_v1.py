@@ -418,10 +418,26 @@ def test_payload_snapshot_and_router_decision_binding_mismatch_fail_before_trans
     assert transport.requests == []
 
 
-@pytest.mark.parametrize("estimate", [8001, None, True, 1.5, -1])
+@pytest.mark.parametrize("estimate", [None, True, 1.5, -1])
 def test_token_limit_authority_is_closed_before_transport(estimate):
     transport = _FakeTransport([_response])
     _error(_run, transport=transport, claude_input_estimate=estimate)
+    assert transport.requests == []
+
+
+def test_token_limit_authority_blocks_over_hard_limit_without_transport():
+    transport = _FakeTransport([_response])
+    run = _run(transport=transport, claude_input_estimate=8001)
+    assert type(run) is provider.ClaudeEscalatedReviewRunV1
+    assert run.final_run_status == "TOKEN_LIMIT_BLOCKED"
+    assert run.total_attempts == 0
+    assert run.total_retries == 0
+    assert run.execution_records == ()
+    assert run.semantic_result is None
+    assert run.event_snapshot_id == _payload().event_snapshot_id
+    assert run.payload_sha256 == _payload().payload_sha256
+    assert run.router_decision_id == _decision().decision_id
+    assert run.route == "L1"
     assert transport.requests == []
 
 
@@ -510,7 +526,17 @@ def test_non_retryable_provider_failures_do_not_retry(failure):
 def test_budget_denial_precedes_transport(authorized):
     transport = _FakeTransport([_response])
     budget = _budget(authorized=authorized)
-    _error(_run, budget=budget, transport=transport)
+    run = _run(budget=budget, transport=transport)
+    assert type(run) is provider.ClaudeEscalatedReviewRunV1
+    assert run.final_run_status == "BUDGET_BLOCKED"
+    assert run.total_attempts == 0
+    assert run.total_retries == 0
+    assert run.execution_records == ()
+    assert run.semantic_result is None
+    assert run.event_snapshot_id == _payload().event_snapshot_id
+    assert run.payload_sha256 == _payload().payload_sha256
+    assert run.router_decision_id == _decision().decision_id
+    assert run.route == "L1"
     assert transport.requests == []
 
 
