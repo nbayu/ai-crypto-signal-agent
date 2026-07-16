@@ -471,6 +471,75 @@ def test_ambiguity_group_order_is_deterministic():
     ]
 
 
+@pytest.mark.parametrize("selected_id", ["candidate-a", "candidate-b"])
+def test_two_candidate_ambiguity_resolution_selects_exact_member(selected_id):
+    first = _candidate(
+        candidate_id="candidate-a",
+        canonical_entity_id="asset:alpha",
+        canonical_name="Alpha",
+        canonical_symbol="ALPHA",
+        evidence_refs=[_evidence(evidence_ref_id="evidence-alpha")],
+        ambiguity_group_id="ambiguity-001",
+        candidate_status="AMBIGUOUS",
+        rejection_reason_codes=["AMBIGUOUS_IDENTITY"],
+    )
+    second = _candidate(
+        candidate_id="candidate-b",
+        canonical_entity_id="asset:beta",
+        canonical_name="Beta",
+        canonical_symbol="BETA",
+        source_text="Beta protocol",
+        evidence_refs=[_evidence(evidence_ref_id="evidence-beta")],
+        ambiguity_group_id="ambiguity-001",
+        candidate_status="AMBIGUOUS",
+        rejection_reason_codes=["AMBIGUOUS_IDENTITY"],
+    )
+    candidates = (first, second)
+    before = tuple(candidate.to_mapping() for candidate in candidates)
+    decision = _policy_decision()
+
+    result = _map(
+        source_policy_decision=decision,
+        candidates=candidates,
+        resolver_selections={"ambiguity-001": selected_id},
+    )
+    reversed_result = _map(
+        source_policy_decision=decision,
+        candidates=tuple(reversed(candidates)),
+        resolver_selections={"ambiguity-001": selected_id},
+    )
+
+    assert result == reversed_result
+    assert result.mapping_status == "RESOLVED"
+    assert result.event_snapshot_id == EVENT_SNAPSHOT_ID
+    assert result.source_policy_decision == decision
+    assert len(result.accepted_candidates) == 1
+    assert len(result.rejected_candidates) == 1
+    assert not result.ambiguous_candidates
+    assert not result.unresolved_candidates
+
+    accepted = result.accepted_candidates[0]
+    rejected = result.rejected_candidates[0]
+    selected = next(candidate for candidate in candidates if candidate.candidate_id == selected_id)
+    unselected = next(
+        candidate for candidate in candidates if candidate.candidate_id != selected_id
+    )
+    assert accepted.candidate_id == selected_id
+    assert accepted.candidate_status == "ACCEPTED"
+    assert accepted.ambiguity_group_id is None
+    assert accepted.canonical_entity_id == selected.canonical_entity_id
+    assert accepted.canonical_name == selected.canonical_name
+    assert accepted.canonical_symbol == selected.canonical_symbol
+    assert rejected.candidate_id == unselected.candidate_id
+    assert rejected.candidate_status == "REJECTED"
+    assert rejected.rejection_reason_codes == ("AMBIGUOUS_IDENTITY",)
+    assert rejected.canonical_entity_id == unselected.canonical_entity_id
+    assert rejected.canonical_name == unselected.canonical_name
+    assert rejected.canonical_symbol == unselected.canonical_symbol
+    assert len(result.accepted_candidates) + len(result.rejected_candidates) == 2
+    assert tuple(candidate.to_mapping() for candidate in candidates) == before
+
+
 def test_mapping_result_is_closed_immutable_and_partitioned():
     result = _map()
     expected = {
