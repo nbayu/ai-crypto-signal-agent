@@ -589,10 +589,10 @@ def adjudicate_review_results(deepseek_result: Any, router_decision: Any, claude
     if deepseek["evidence"] == claude["evidence"] == "INSUFFICIENT":
         return _new_result(
             policy=policy, decision=router_decision, deepseek=deepseek, claude=claude,
-            outcome="INSUFFICIENT_EVIDENCE", agreement="DISAGREEMENT",
+            outcome="INSUFFICIENT_EVIDENCE", agreement="AGREEMENT",
             ambiguity=ambiguity, contradiction=contradiction, evidence=evidence,
             entity=entity, source=source, risk=risk,
-            reasons={"EVIDENCE_DISAGREEMENT"}, refs=refs,
+            reasons={"PROVIDERS_AGREE"}, refs=refs,
         )
     reasons: set[str] = set()
     qualified = False

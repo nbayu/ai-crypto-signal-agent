@@ -326,14 +326,21 @@ def test_aligned_escalated_results_produce_consensus(route):
     assert result.claude_semantic_result_id == CLAUDE_RESULT_ID
 
 
-def test_l1_qualified_evidence_difference_is_explicit():
+@pytest.mark.parametrize(
+    ("deepseek_evidence", "claude_evidence"),
+    [
+        ("SUFFICIENT", "INSUFFICIENT"),
+        ("INSUFFICIENT", "SUFFICIENT"),
+    ],
+)
+def test_l1_qualified_evidence_difference_is_explicit(deepseek_evidence, claude_evidence):
     result = _adjudicate(
-        deepseek=_deepseek(evidence_sufficiency="INSUFFICIENT"),
-        claude=_claude(evidence_assessment="SUFFICIENT"),
+        deepseek=_deepseek(evidence_sufficiency=deepseek_evidence),
+        claude=_claude(evidence_assessment=claude_evidence),
     )
     assert result.adjudication_outcome == "CONSENSUS_WITH_QUALIFICATION"
     assert result.agreement_state == "QUALIFIED_AGREEMENT"
-    assert "MINOR_EVIDENCE_DIFFERENCE" in result.reason_codes
+    assert result.reason_codes == ("MINOR_EVIDENCE_DIFFERENCE",)
 
 
 def test_l1_qualified_entity_and_source_differences_are_order_invariant():
@@ -375,7 +382,10 @@ def test_insufficient_evidence_has_precedence_over_otherwise_aligned_facts():
         claude=_claude(evidence_assessment="INSUFFICIENT"),
     )
     assert result.adjudication_outcome == "INSUFFICIENT_EVIDENCE"
+    assert result.agreement_state == "AGREEMENT"
     assert result.final_evidence_state == "INSUFFICIENT"
+    assert "PROVIDERS_AGREE" in result.reason_codes
+    assert "EVIDENCE_DISAGREEMENT" not in result.reason_codes
 
 
 def test_material_risk_and_contradiction_combination_preserves_critical_state():
