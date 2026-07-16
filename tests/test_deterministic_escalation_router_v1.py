@@ -211,17 +211,17 @@ def test_l0_clean_path_has_no_claude_policy():
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "expected_code"),
+    ("overrides", "expected_code"),
     [
-        ("ambiguity_level", "MODERATE", "MODERATE_AMBIGUITY"),
-        ("entity_confidence_state", "MODERATE", "MODERATE_ENTITY_CONCERN"),
-        ("source_policy_concern_state", "MODERATE", "MODERATE_SOURCE_CONCERN"),
-        ("evidence_sufficiency", "INSUFFICIENT", "LIMITED_EVIDENCE_CONCERN"),
-        ("contradiction_present", True, "NONCRITICAL_CONTRADICTION"),
+        ({"ambiguity_level": "MODERATE"}, "MODERATE_AMBIGUITY"),
+        ({"entity_confidence_state": "MODERATE"}, "MODERATE_ENTITY_CONCERN"),
+        ({"source_policy_concern_state": "MODERATE"}, "MODERATE_SOURCE_CONCERN"),
+        ({"evidence_sufficiency": "INSUFFICIENT"}, "LIMITED_EVIDENCE_CONCERN"),
+        ({"contradiction_present": True}, "NONCRITICAL_CONTRADICTION"),
     ],
 )
-def test_each_moderate_condition_routes_l1(field, value, expected_code):
-    decision = _route(_result(**{field: value}))
+def test_each_moderate_condition_routes_l1(overrides, expected_code):
+    decision = _route(_result(**overrides))
     assert decision.route == "L1"
     assert decision.route_name == "MODERATE_AMBIGUITY"
     assert decision.claude_review_required is True
@@ -230,27 +230,36 @@ def test_each_moderate_condition_routes_l1(field, value, expected_code):
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "expected_code"),
+    ("overrides", "expected_code"),
     [
-        ("ambiguity_level", "CRITICAL", "CRITICAL_AMBIGUITY"),
-        ("entity_confidence_state", "CRITICAL", "CRITICAL_ENTITY_CONCERN"),
-        ("source_policy_concern_state", "CRITICAL", "CRITICAL_SOURCE_CONCERN"),
-        ("evidence_sufficiency", "INSUFFICIENT", "CRITICAL_EVIDENCE_DEFICIT"),
-        ("contradiction_present", True, "MATERIAL_CONTRADICTION"),
-        ("material_risk_flags", ("MATERIAL_RISK",), "CRITICAL_RISK"),
+        ({"ambiguity_level": "CRITICAL"}, "CRITICAL_AMBIGUITY"),
+        ({"entity_confidence_state": "CRITICAL"}, "CRITICAL_ENTITY_CONCERN"),
+        ({"source_policy_concern_state": "CRITICAL"}, "CRITICAL_SOURCE_CONCERN"),
+        (
+            {
+                "evidence_sufficiency": "INSUFFICIENT",
+                "material_risk_flags": ("MATERIAL_RISK",),
+            },
+            "CRITICAL_EVIDENCE_DEFICIT",
+        ),
+        (
+            {"contradiction_present": True, "ambiguity_level": "CRITICAL"},
+            "MATERIAL_CONTRADICTION",
+        ),
+        ({"material_risk_flags": ("MATERIAL_RISK",)}, "CRITICAL_RISK"),
     ],
 )
-def test_each_critical_condition_routes_l2(field, value, expected_code):
+def test_each_critical_condition_routes_l2(overrides, expected_code):
     policy = _policy(
         critical_risk_flags=("MATERIAL_RISK",),
         critical_ambiguity_values=("CRITICAL",),
     )
-    decision = _route(_result(**{field: value}), policy)
+    decision = _route(_result(**overrides), policy)
     assert decision.route == "L2"
     assert decision.route_name == "CRITICAL_AMBIGUITY"
     assert decision.claude_review_required is True
     assert decision.claude_model_policy_id == L2_POLICY_ID
-    assert expected_code in decision.reason_codes or field == "material_risk_flags"
+    assert expected_code in decision.reason_codes or expected_code == "CRITICAL_RISK"
 
 
 def test_precedence_fail_closed_beats_forced_l2_and_critical():
