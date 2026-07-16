@@ -63,9 +63,9 @@ def _policy(**overrides):
         ),
         "caution_reason_codes": (
             "INSUFFICIENT_EVIDENCE",
-            "MINOR_EVIDENCE_DIFFERENCE",
-            "MODERATE_ENTITY_DIFFERENCE",
-            "MODERATE_SOURCE_DIFFERENCE",
+            "EVIDENCE_LIMITED",
+            "MODERATE_ENTITY_CONCERN",
+            "MODERATE_SOURCE_CONCERN",
             "QUALIFIED_ADJUDICATION",
         ),
         "fail_closed_reason_codes": (
