@@ -576,16 +576,19 @@ def _validate_resolutions(
 def _apply_selection(
     candidate: EntityCandidateV1, selections: Mapping[str, str]
 ) -> EntityCandidateV1:
-    if (
-        candidate.candidate_status != "AMBIGUOUS"
-        or candidate.ambiguity_group_id not in selections
-        or selections[candidate.ambiguity_group_id] != candidate.candidate_id
-    ):
+    if candidate.candidate_status != "AMBIGUOUS":
+        return candidate
+    selected_id = selections.get(candidate.ambiguity_group_id or "")
+    if selected_id is None:
         return candidate
     values = candidate.to_mapping()
-    values["candidate_status"] = "ACCEPTED"
+    values["candidate_status"] = (
+        "ACCEPTED" if selected_id == candidate.candidate_id else "REJECTED"
+    )
     values["ambiguity_group_id"] = None
-    values["rejection_reason_codes"] = ()
+    values["rejection_reason_codes"] = (
+        () if selected_id == candidate.candidate_id else ("AMBIGUOUS_IDENTITY",)
+    )
     return EntityCandidateV1(**values)
 
 
