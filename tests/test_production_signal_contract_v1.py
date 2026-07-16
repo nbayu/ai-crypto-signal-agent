@@ -52,12 +52,6 @@ def no_trade_envelope(**overrides):
     return payload
 
 
-def test_module_does_not_exist_before_green_implementation():
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(MODULE_NAME)
-
-
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_contract_exports_required_surface():
     module = _module()
     required = {
@@ -70,7 +64,6 @@ def test_contract_exports_required_surface():
     assert required.issubset(set(vars(module)))
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_canonical_json_is_sorted_compact_utf8_and_deterministic():
     module = _module()
     payload = {"z": "é", "a": [3, 2, 1]}
@@ -80,7 +73,6 @@ def test_canonical_json_is_sorted_compact_utf8_and_deterministic():
     assert module.canonical_json_bytes(payload) == expected
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
 def test_canonical_json_rejects_non_finite_numbers(value):
     module = _module()
@@ -88,7 +80,6 @@ def test_canonical_json_rejects_non_finite_numbers(value):
         module.canonical_json_bytes({"value": value})
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_validates_and_detaches_exact_published_signal_input():
     module = _module()
     payload = source_envelope()
@@ -101,7 +92,6 @@ def test_validates_and_detaches_exact_published_signal_input():
     assert payload == original
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 @pytest.mark.parametrize("mutator", [
     lambda value: value.pop("mode"), lambda value: value.update(extra="forbidden"),
     lambda value: value.update(schema_version=True), lambda value: value.update(schema_version=2),
@@ -119,14 +109,12 @@ def test_rejects_invalid_input_envelope(mutator):
         module.validate_production_signal_input(payload)
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 @pytest.mark.parametrize("mode", ["SWING", "INTRADAY", "SCALP"])
 def test_accepts_exact_modes(mode):
     module = _module()
     assert module.validate_production_signal_input(source_envelope(mode=mode))["mode"] == mode
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_published_signal_requires_exactly_one_setup():
     module = _module()
     for setups in ([], source_envelope()["eligible_setups"] * 2):
@@ -134,7 +122,6 @@ def test_published_signal_requires_exactly_one_setup():
             module.validate_production_signal_input(source_envelope(eligible_setups=setups))
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_no_trade_requires_empty_setups():
     module = _module()
     assert module.validate_production_signal_input(no_trade_envelope())["eligible_setups"] == []
@@ -143,7 +130,6 @@ def test_no_trade_requires_empty_setups():
             eligible_setups=source_envelope()["eligible_setups"]))
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 @pytest.mark.parametrize("mutator", [
     lambda setup: setup.update(symbol=""), lambda setup: setup.update(side="BUY"),
     lambda setup: setup.update(entry_zone={"min": 102.0, "max": 101.0}),
@@ -162,7 +148,6 @@ def test_rejects_invalid_signal_geometry(mutator):
         module.validate_production_signal_input(payload)
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_builds_closed_signal_geometry():
     module = _module()
     geometry = module.build_signal_geometry(source_envelope()["eligible_setups"][0])
@@ -174,7 +159,6 @@ def test_builds_closed_signal_geometry():
     }
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_signal_id_is_deterministic_and_decision_derived():
     module = _module(); envelope = source_envelope()
     geometry_hash = sha256(module.build_signal_geometry(envelope["eligible_setups"][0]))
@@ -187,7 +171,6 @@ def test_signal_id_is_deterministic_and_decision_derived():
                                   signal_geometry_hash=geometry_hash, source_payload_hash="a" * 64) != first
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_publication_payload_contains_only_authoritative_fields():
     module = _module(); envelope = source_envelope()
     geometry = module.build_signal_geometry(envelope["eligible_setups"][0])
@@ -200,7 +183,6 @@ def test_publication_payload_contains_only_authoritative_fields():
     assert payload["signal_id"] == signal_id and payload["mode"] == "SCALP"
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_delivery_id_is_deterministic_and_destination_scoped():
     module = _module(); publication_payload = {"signal_id": "PSG-" + "1" * 64}
     payload_hash = sha256(publication_payload)
@@ -213,7 +195,6 @@ def test_delivery_id_is_deterministic_and_destination_scoped():
                                    destination_id="chat:999", publication_payload_hash=payload_hash) != first
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_builds_phase_07_compatible_source_publication_reference():
     module = _module()
     reference = module.build_source_publication_ref(signal_id="PSG-" + "1" * 64,
@@ -226,7 +207,6 @@ def test_builds_phase_07_compatible_source_publication_reference():
     assert validate_source_publication_ref(reference) == reference
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_builds_intent_with_exact_no_capital_boundary():
     module = _module(); envelope = source_envelope()
     geometry = module.build_signal_geometry(envelope["eligible_setups"][0]); gh = sha256(geometry)
@@ -249,7 +229,6 @@ def test_builds_intent_with_exact_no_capital_boundary():
     assert intent["failure"] is None
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_completed_success_preserves_identity_and_adds_receipt():
     module = _module(); envelope = source_envelope(); geometry = module.build_signal_geometry(envelope["eligible_setups"][0])
     gh = sha256(geometry); signal_id = module.build_signal_id(source_envelope=envelope, signal_geometry_hash=gh, source_payload_hash="a" * 64)
@@ -261,7 +240,6 @@ def test_completed_success_preserves_identity_and_adds_receipt():
     assert completed["failure"] is None and len(completed["content_hash"]) == 64
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_completed_failure_is_closed_and_sanitized():
     module = _module(); envelope = source_envelope(); geometry = module.build_signal_geometry(envelope["eligible_setups"][0]); gh = sha256(geometry)
     signal_id = module.build_signal_id(source_envelope=envelope, signal_geometry_hash=gh, source_payload_hash="a" * 64)
@@ -273,7 +251,6 @@ def test_completed_failure_is_closed_and_sanitized():
     assert completed["failure"] == {"primary_code": "DELIVERY_ADAPTER_FAILED", "component": "delivery_adapter", "message": "delivery adapter failed"}
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 def test_no_trade_evaluation_has_no_signal_or_delivery_identity():
     module = _module()
     result = module.build_no_trade_evaluation(source_envelope=no_trade_envelope(), recorded_at="2026-07-16T12:01:00Z")
@@ -282,7 +259,6 @@ def test_no_trade_evaluation_has_no_signal_or_delivery_identity():
     assert result["delivery_state"] is None and len(result["content_hash"]) == 64
 
 
-@pytest.mark.skip(reason="activated after GREEN module exists")
 @pytest.mark.parametrize("forbidden_key", ["api_secret", "private_key", "bot_token", "exchange_credentials", "order_payload", "position_size", "wallet", "balance"])
 def test_rejects_forbidden_sensitive_or_capital_fields(forbidden_key):
     module = _module(); payload = source_envelope(); payload[forbidden_key] = "secret"
