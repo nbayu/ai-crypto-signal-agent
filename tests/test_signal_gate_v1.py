@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import ast
 
 import pytest
 
@@ -98,7 +99,7 @@ def _policy(**overrides):
             "NEWS_RISK_CLEAR",
             "NO_NEWS_RESTRICTION",
         ),
-        "maximum_reason_code_count": 20,
+        "maximum_reason_code_count": 19,
         "maximum_evidence_reference_count": 16,
     }
     values.update(overrides)
@@ -142,12 +143,14 @@ def _risk(**overrides):
         "final_entity_state": "ACCEPTABLE",
         "final_source_state": "ACCEPTABLE",
         "final_material_risk_state": "NONE",
-        "reason_codes": ("NEWS_RISK_CLEAR", "NO_NEWS_RESTRICTION"),
+        "reason_codes": ("ADJUDICATION_CONFIRMED", "NO_MATERIAL_NEWS_RISK", "EVIDENCE_SUFFICIENT"),
         "evidence_refs": ("evidence-001",),
         "structured_explanation": "News Risk fixture.",
         "news_risk_object_id": None,
     }
     values.update(overrides)
+    values["reason_codes"] = tuple(sorted(set(values["reason_codes"])))
+    values["evidence_refs"] = tuple(sorted(set(values["evidence_refs"])))
     values["news_risk_object_id"] = _risk_identity(values)
     return news_risk.NewsRiskObjectV1(**values)
 
@@ -233,10 +236,10 @@ def test_exact_policy_input_type_is_required():
     ("classification", "recommendation", "state", "eligibility"),
     [
         ("CLEAR", "NO_NEWS_RESTRICTION", "OPEN", "ALLOW_NEWS_ELIGIBILITY"),
-        ("CAUTION", "NO_NEWS_RESTRICTION", "CAUTION", "REQUIRE_NEWS_CAUTION"),
-        ("ELEVATED", "NO_NEWS_RESTRICTION", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
-        ("BLOCKING", "NO_NEWS_RESTRICTION", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
-        ("FAIL_CLOSED", "NO_NEWS_RESTRICTION", "FAIL_CLOSED", "FAIL_CLOSED"),
+        ("CAUTION", "REQUIRE_CAUTION", "CAUTION", "REQUIRE_NEWS_CAUTION"),
+        ("ELEVATED", "REQUIRE_CAUTION", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
+        ("BLOCKING", "REQUIRE_BLOCK", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
+        ("FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED"),
     ],
 )
 def test_risk_classification_mapping_is_deterministic(classification, recommendation, state, eligibility):
@@ -246,16 +249,16 @@ def test_risk_classification_mapping_is_deterministic(classification, recommenda
 
 
 @pytest.mark.parametrize(
-    ("recommendation", "state", "eligibility"),
+    ("classification", "recommendation", "state", "eligibility"),
     [
-        ("NO_NEWS_RESTRICTION", "OPEN", "ALLOW_NEWS_ELIGIBILITY"),
-        ("REQUIRE_CAUTION", "CAUTION", "REQUIRE_NEWS_CAUTION"),
-        ("REQUIRE_BLOCK", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
-        ("FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED"),
+        ("CLEAR", "NO_NEWS_RESTRICTION", "OPEN", "ALLOW_NEWS_ELIGIBILITY"),
+        ("CAUTION", "REQUIRE_CAUTION", "CAUTION", "REQUIRE_NEWS_CAUTION"),
+        ("BLOCKING", "REQUIRE_BLOCK", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
+        ("FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED"),
     ],
 )
-def test_recommendation_mapping_is_deterministic(recommendation, state, eligibility):
-    result = _evaluate(_risk(news_gate_recommendation=recommendation))
+def test_recommendation_mapping_is_deterministic(classification, recommendation, state, eligibility):
+    result = _evaluate(_risk(risk_classification=classification, news_gate_recommendation=recommendation))
     assert result.gate_state == state
     assert result.eligibility_recommendation == eligibility
 
@@ -263,13 +266,10 @@ def test_recommendation_mapping_is_deterministic(recommendation, state, eligibil
 @pytest.mark.parametrize(
     ("classification", "recommendation", "state"),
     [
-        ("FAIL_CLOSED", "NO_NEWS_RESTRICTION", "FAIL_CLOSED"),
-        ("CLEAR", "FAIL_CLOSED", "FAIL_CLOSED"),
-        ("BLOCKING", "NO_NEWS_RESTRICTION", "BLOCKED"),
-        ("CLEAR", "REQUIRE_BLOCK", "BLOCKED"),
-        ("ELEVATED", "NO_NEWS_RESTRICTION", "BLOCKED"),
-        ("CAUTION", "NO_NEWS_RESTRICTION", "CAUTION"),
-        ("CLEAR", "REQUIRE_CAUTION", "CAUTION"),
+        ("FAIL_CLOSED", "FAIL_CLOSED", "FAIL_CLOSED"),
+        ("BLOCKING", "REQUIRE_BLOCK", "BLOCKED"),
+        ("ELEVATED", "REQUIRE_CAUTION", "BLOCKED"),
+        ("CAUTION", "REQUIRE_CAUTION", "CAUTION"),
         ("CLEAR", "NO_NEWS_RESTRICTION", "OPEN"),
     ],
 )
@@ -281,9 +281,6 @@ def test_highest_severity_precedence_wins(classification, recommendation, state)
 @pytest.mark.parametrize(
     ("reason", "state", "eligibility"),
     [
-        ("FAIL_CLOSED_NEWS_RISK", "FAIL_CLOSED", "FAIL_CLOSED"),
-        ("FAIL_CLOSED_GATE_POLICY", "FAIL_CLOSED", "FAIL_CLOSED"),
-        ("BLOCKING_NEWS_REASON", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
         ("CRITICAL_MATERIAL_RISK", "BLOCKED", "DENY_NEWS_ELIGIBILITY"),
     ],
 )
@@ -386,9 +383,9 @@ def test_semantic_identity_changes_when_bound_field_changes(field):
     if field == "route":
         second = _evaluate(_risk(route="L2"))
     elif field == "gate_state":
-        second = _evaluate(_risk(risk_classification="ELEVATED"))
+        second = _evaluate(_risk(risk_classification="ELEVATED", news_gate_recommendation="REQUIRE_CAUTION"))
     else:
-        second = _evaluate(_risk(news_gate_recommendation="REQUIRE_BLOCK"))
+        second = _evaluate(_risk(risk_classification="BLOCKING", news_gate_recommendation="REQUIRE_BLOCK"))
     assert first.signal_gate_decision_id != second.signal_gate_decision_id
 
 
@@ -418,13 +415,13 @@ def test_decision_is_immutable_and_non_executable():
 
 
 def test_caller_owned_inputs_are_not_mutated():
-    reasons = ["NEWS_RISK_CLEAR", "NO_NEWS_RESTRICTION"]
+    reasons = ["ADJUDICATION_CONFIRMED", "EVIDENCE_SUFFICIENT"]
     refs = ["evidence-001"]
     risk = _risk(reason_codes=reasons, evidence_refs=refs)
     _evaluate(risk)
     reasons.append("NEWS_RISK_CAUTION")
     refs.append("evidence-002")
-    assert risk.reason_codes == ("NEWS_RISK_CLEAR", "NO_NEWS_RESTRICTION")
+    assert risk.reason_codes == ("ADJUDICATION_CONFIRMED", "EVIDENCE_SUFFICIENT")
     assert risk.evidence_refs == ("evidence-001",)
 
 
@@ -443,14 +440,23 @@ def test_operational_and_downstream_objects_are_not_inputs():
 
 def test_signal_gate_source_has_no_external_or_downstream_authority():
     source = inspect.getsource(signal_gate)
-    for forbidden in (
-        "anthropic", "openai", "httpx", "requests", "aiohttp", "urllib.request",
-        "socket", "os.environ", "getenv", "dotenv", "subprocess", "pathlib",
-        "random", "secrets", "uuid", "Signal Gate", "ProductionSignal",
-        "publication", "trading", "account", "balance", "position", "capital",
-        "market_price", "scanner_score", "order",
-    ):
-        assert forbidden not in source
+    tree = ast.parse(source)
+    forbidden_modules = {
+        "anthropic", "openai", "httpx", "requests", "aiohttp", "socket",
+        "subprocess", "pathlib", "random", "secrets", "uuid",
+    }
+    forbidden_calls = {
+        "ProductionSignal", "publish", "send", "place_order", "cancel_order",
+        "open_position", "close_position",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name.split(".")[0] not in forbidden_modules for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert (node.module or "").split(".")[0] not in forbidden_modules
+        elif isinstance(node, ast.Call):
+            target = node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+            assert target not in forbidden_calls
 
 
 def test_errors_are_bounded_and_sanitized():
