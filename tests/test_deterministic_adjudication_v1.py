@@ -177,11 +177,22 @@ def _claude(route="L1", **overrides):
     return _set_fields(ClaudeEscalatedReviewResultV1, values)
 
 
-def _adjudicate(deepseek=None, decision=None, claude=None, policy=None):
+_AUTO_CLAUDE = object()
+
+
+def _adjudicate(deepseek=None, decision=None, claude=_AUTO_CLAUDE, policy=None):
+    selected_decision = _decision("L1") if decision is None else decision
+    selected_claude = (
+        None
+        if selected_decision.route == "L0"
+        else _claude(selected_decision.route)
+        if claude is _AUTO_CLAUDE
+        else claude
+    )
     return adjudication.adjudicate_review_results(
         _deepseek() if deepseek is None else deepseek,
-        _decision("L1") if decision is None else decision,
-        claude,
+        selected_decision,
+        selected_claude,
         _policy() if policy is None else policy,
     )
 
