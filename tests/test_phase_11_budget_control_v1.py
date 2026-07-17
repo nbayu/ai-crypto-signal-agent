@@ -401,7 +401,9 @@ class TestBudgetLedgerV1:
             ledger.sequence = 1
 
     def test_reserve_call_returns_new_state_and_authorizes_only_after_reservation(self):
-        ledger = _ledger()
+        ledger = BudgetLedgerV1(
+            policy=_policy(status="ACTIVE", owner_approval_reference="owner-approval-test-001")
+        )
         reservation = _reservation()
         denied = ledger.evaluate_call_authorization(
             provider="DEEPSEEK", model="DEEPSEEK_PRIMARY", run_id="run-001", call_id="call-001",
