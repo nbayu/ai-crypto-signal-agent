@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -48,6 +49,7 @@ from engine.phase_11_finalization_evidence_bridge_v1 import (
     ShadowAdjudicationRouteLineageV1,
     ShadowTerminalAdjudicationStateV1,
     ShadowTerminalExecutionRecordV1,
+    ShadowTerminalRecordStatusV1,
     ShadowTypedProviderReviewEvidenceV1,
 )
 from engine.phase_11_shadow_execution_record_v1 import ShadowExecutionRecordV1
@@ -686,6 +688,9 @@ class TestComparisonPlanAndObservation:
         assert observation.treatment_decision is treatment.signal_gate_decision.eligibility_recommendation
         assert observation.original_treatment_route == route
         assert observation.canonical_treatment_route == canonical
+        assert observation.locked_baseline_commit == LOCKED_PHASE09_COMMIT
+        assert observation.locked_baseline_commit == control.locked_baseline_commit
+        assert observation.terminal_status is None
 
     @pytest.mark.parametrize("status", ["DENIED", "FAILED_CLOSED", "PARTIAL_EVIDENCE", "RECONCILIATION_REQUIRED"])
     def test_terminal_treatment_has_no_fabricated_gate_or_decision(self, status):
@@ -697,6 +702,11 @@ class TestComparisonPlanAndObservation:
         assert observation.treatment_decision is None
         assert observation.treatment_availability is TreatmentAvailabilityV1.TERMINAL_UNAVAILABLE
         assert observation.decision_delta is ControlTreatmentDecisionDeltaV1.TREATMENT_UNAVAILABLE
+        assert observation.locked_baseline_commit == LOCKED_PHASE09_COMMIT
+        assert observation.locked_baseline_commit == control.locked_baseline_commit
+        assert observation.terminal_status is ShadowTerminalRecordStatusV1[status]
+        assert observation.terminal_status is treatment.terminal_record.status
+        assert observation.terminal_status.value == treatment.terminal_record.run_result.status
 
     def test_plan_rejects_candidate_event_timestamp_and_effect_mismatch(self):
         treatment = _finalized("L1")
@@ -707,6 +717,58 @@ class TestComparisonPlanAndObservation:
         ):
             with pytest.raises((TypeError, ValueError, ShadowComparativeEvaluationValidationError)):
                 _plan(treatment=treatment, control_snapshot=control, **changed)
+
+    @pytest.mark.parametrize("baseline", ["b" * 40, "not-a-commit"])
+    def test_observation_rejects_foreign_or_malformed_baseline(self, baseline):
+        treatment = _finalized("L0")
+        control = _snapshot(control_projection=treatment.clean_bundle.shadow_input.phase_09_control_projection)
+        observation = ShadowComparativeEvaluatorV1().compare(
+            _plan(treatment=treatment, control_snapshot=control, event_id=control.event_id)
+        )
+        with pytest.raises(ShadowComparativeEvaluationValidationError):
+            replace(observation, locked_baseline_commit=baseline)
+
+    @pytest.mark.parametrize(
+        "fixture,changed",
+        [
+            (("clean", "L0"), {"terminal_status": ShadowTerminalRecordStatusV1.DENIED}),
+            (("terminal", "DENIED"), {"terminal_status": None}),
+            (("terminal", "DENIED"), {"terminal_status": "DENIED"}),
+            (
+                ("terminal", "DENIED"),
+                {"terminal_status": ShadowTerminalRecordStatusV1.FAILED_CLOSED},
+            ),
+        ],
+    )
+    def test_observation_rejects_terminal_status_contradictions(self, fixture, changed):
+        kind, value = fixture
+        treatment = _finalized(value) if kind == "clean" else _finalized(terminal=value)
+        shadow_input = (
+            treatment.clean_bundle.shadow_input
+            if kind == "clean"
+            else treatment.terminal_record.shadow_input
+        )
+        control = _snapshot(control_projection=shadow_input.phase_09_control_projection)
+        observation = ShadowComparativeEvaluatorV1().compare(
+            _plan(treatment=treatment, control_snapshot=control, event_id=control.event_id)
+        )
+        with pytest.raises(ShadowComparativeEvaluationValidationError):
+            replace(observation, **changed)
+
+    def test_observation_identity_recomputes_with_exact_new_fields(self):
+        treatment = _finalized(terminal="PARTIAL_EVIDENCE")
+        control = _snapshot(
+            control_projection=treatment.terminal_record.shadow_input.phase_09_control_projection
+        )
+        observation = ShadowComparativeEvaluatorV1().compare(
+            _plan(treatment=treatment, control_snapshot=control, event_id=control.event_id)
+        )
+        assert replace(observation, observation_id=None).identity == observation.identity
+        with pytest.raises(ShadowComparativeEvaluationValidationError):
+            replace(
+                observation,
+                terminal_status=ShadowTerminalRecordStatusV1.FAILED_CLOSED,
+            )
 
     def test_structured_disagreement_metrics_identity_and_static_boundaries(self):
         treatment = _finalized("L1_TO_L2")

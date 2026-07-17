@@ -26,6 +26,9 @@ from engine.phase_11_shadow_adjudication_finalizer_v1 import (
     ShadowAdjudicationFinalizationPathV1,
     ShadowAdjudicationFinalizationResultV1,
 )
+from engine.phase_11_finalization_evidence_bridge_v1 import (
+    ShadowTerminalRecordStatusV1,
+)
 from engine.phase_11_shadow_input_contracts_v1 import (
     Phase09ControlProjectionV1,
 )
@@ -486,12 +489,80 @@ class ShadowComparativeEvaluationPlanV1:
         return self.comparison_plan_id
 
 
-@dataclass(frozen=True, slots=True)
+_OBSERVATION_FIELDS = frozenset(
+    (
+        "schema_version",
+        "observation_id",
+        "comparison_plan_id",
+        "control_snapshot_id",
+        "locked_baseline_commit",
+        "treatment_finalization_id",
+        "candidate_id",
+        "event_id",
+        "original_treatment_route",
+        "canonical_treatment_route",
+        "comparability",
+        "treatment_availability",
+        "control_decision",
+        "treatment_decision",
+        "decision_delta",
+        "structured_disagreement",
+        "unresolved_ambiguity",
+        "terminal_status",
+        "terminal_failure",
+        "terminal_reconciliation",
+        "latency_availability",
+        "total_latency_ms",
+        "input_tokens_availability",
+        "total_input_tokens",
+        "output_tokens_availability",
+        "total_output_tokens",
+        "cost_availability",
+        "total_actual_cost",
+        "call_count",
+        "retry_count",
+        "tier_count",
+        "typed_review_ids",
+        "compared_at",
+        "reason_codes",
+        "production_effect",
+        "zero_production_effect_proof",
+    )
+)
+
+
+def _metric(
+    availability: Any,
+    value: Any,
+    label: str,
+    expected_type: type,
+) -> tuple[MetricAvailabilityV1, Any]:
+    if type(availability) is not MetricAvailabilityV1:
+        raise ShadowComparativeEvaluationValidationError(
+            f"invalid {label} availability"
+        )
+    if availability is MetricAvailabilityV1.UNAVAILABLE:
+        if value is not None:
+            raise ShadowComparativeEvaluationValidationError(
+                f"unavailable {label} has a value"
+            )
+        return availability, None
+    if type(value) is not expected_type or (
+        isinstance(value, Decimal) and (not value.is_finite() or value < 0)
+    ) or (type(value) is int and value < 0):
+        raise ShadowComparativeEvaluationValidationError(
+            f"invalid {label}"
+        )
+    return availability, value
+
+
+@dataclass(frozen=True, init=False, slots=True)
 class ShadowComparativeObservationV1:
     schema_version: str
     observation_id: str
     comparison_plan_id: str
     control_snapshot_id: str
+    locked_baseline_commit: str
     treatment_finalization_id: str
     candidate_id: str
     event_id: str
@@ -504,6 +575,7 @@ class ShadowComparativeObservationV1:
     decision_delta: ControlTreatmentDecisionDeltaV1
     structured_disagreement: StructuredProviderDisagreementV1
     unresolved_ambiguity: bool
+    terminal_status: ShadowTerminalRecordStatusV1 | None
     terminal_failure: str | None
     terminal_reconciliation: str | None
     latency_availability: MetricAvailabilityV1
@@ -522,6 +594,229 @@ class ShadowComparativeObservationV1:
     reason_codes: tuple[str, ...]
     production_effect: str
     zero_production_effect_proof: str
+
+    def __init__(self, **values: Any) -> None:
+        if frozenset(values) != _OBSERVATION_FIELDS:
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid comparative-observation fields"
+            )
+        if (
+            values["schema_version"]
+            != "phase11-shadow-comparative-observation-v1"
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "unsupported comparative-observation schema"
+            )
+        if (
+            type(values["locked_baseline_commit"]) is not str
+            or values["locked_baseline_commit"] != LOCKED_PHASE09_BASELINE
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid locked Phase 09 baseline"
+            )
+        plan_id = _hash_value(
+            values["comparison_plan_id"], "comparison_plan_id"
+        )
+        snapshot_id = _hash_value(
+            values["control_snapshot_id"], "control_snapshot_id"
+        )
+        finalization_id = _hash_value(
+            values["treatment_finalization_id"],
+            "treatment_finalization_id",
+        )
+        candidate_id = _identifier(values["candidate_id"], "candidate_id")
+        event_id = _identifier(values["event_id"], "event_id")
+        original_route = values["original_treatment_route"]
+        canonical_route = values["canonical_treatment_route"]
+        if original_route not in {"L0", "L1", "L2", "L1_TO_L2"} or (
+            canonical_route is not None
+            and canonical_route not in {"L0", "L1", "L2"}
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid treatment route"
+            )
+        comparability = values["comparability"]
+        availability = values["treatment_availability"]
+        delta = values["decision_delta"]
+        disagreement = values["structured_disagreement"]
+        if (
+            type(comparability) is not ComparisonComparabilityV1
+            or type(availability) is not TreatmentAvailabilityV1
+            or type(delta) is not ControlTreatmentDecisionDeltaV1
+            or type(disagreement) is not StructuredProviderDisagreementV1
+            or type(values["unresolved_ambiguity"]) is not bool
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid comparative classification"
+            )
+        control_decision = values["control_decision"]
+        treatment_decision = values["treatment_decision"]
+        if control_decision not in {"ALLOW", "HOLD", "REJECT"} or (
+            treatment_decision is not None
+            and treatment_decision
+            not in {
+                "ALLOW_NEWS_ELIGIBILITY",
+                "REQUIRE_NEWS_CAUTION",
+                "DENY_NEWS_ELIGIBILITY",
+                "FAIL_CLOSED",
+            }
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid decision evidence"
+            )
+        terminal_status = values["terminal_status"]
+        terminal_failure = values["terminal_failure"]
+        terminal_reconciliation = values["terminal_reconciliation"]
+        if availability is TreatmentAvailabilityV1.AVAILABLE:
+            if (
+                terminal_status is not None
+                or terminal_failure is not None
+                or terminal_reconciliation is not None
+                or treatment_decision is None
+                or canonical_route is None
+            ):
+                raise ShadowComparativeEvaluationValidationError(
+                    "clean observation contains terminal evidence"
+                )
+        elif (
+            type(terminal_status) is not ShadowTerminalRecordStatusV1
+            or type(terminal_failure) is not str
+            or type(terminal_reconciliation) is not str
+            or treatment_decision is not None
+            or canonical_route is not None
+            or delta
+            is not ControlTreatmentDecisionDeltaV1.TREATMENT_UNAVAILABLE
+            or disagreement is not StructuredProviderDisagreementV1.UNAVAILABLE
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid terminal observation evidence"
+            )
+        if (
+            terminal_status
+            is ShadowTerminalRecordStatusV1.RECONCILIATION_REQUIRED
+            and terminal_reconciliation != "RECONCILIATION_REQUIRED"
+        ):
+            raise ShadowComparativeEvaluationValidationError(
+                "terminal status and reconciliation mismatch"
+            )
+        latency_availability, total_latency_ms = _metric(
+            values["latency_availability"],
+            values["total_latency_ms"],
+            "latency",
+            int,
+        )
+        input_availability, total_input_tokens = _metric(
+            values["input_tokens_availability"],
+            values["total_input_tokens"],
+            "input tokens",
+            int,
+        )
+        output_availability, total_output_tokens = _metric(
+            values["output_tokens_availability"],
+            values["total_output_tokens"],
+            "output tokens",
+            int,
+        )
+        cost_availability, total_actual_cost = _metric(
+            values["cost_availability"],
+            values["total_actual_cost"],
+            "actual cost",
+            Decimal,
+        )
+        counts = (
+            values["call_count"],
+            values["retry_count"],
+            values["tier_count"],
+        )
+        if any(type(item) is not int or item < 0 for item in counts):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid comparative count"
+            )
+        review_ids = values["typed_review_ids"]
+        if type(review_ids) not in (tuple, list):
+            raise ShadowComparativeEvaluationValidationError(
+                "invalid typed review identities"
+            )
+        typed_review_ids = tuple(
+            _hash_value(item, "typed_review_id") for item in review_ids
+        )
+        if len(set(typed_review_ids)) != len(typed_review_ids):
+            raise ShadowComparativeEvaluationValidationError(
+                "duplicate typed review identities"
+            )
+        compared_at = _timestamp(values["compared_at"], "compared_at")
+        reasons = _reasons(values["reason_codes"])
+        _zero_effect(
+            values["production_effect"],
+            values["zero_production_effect_proof"],
+        )
+        material = {
+            "schema_version": values["schema_version"],
+            "comparison_plan_id": plan_id,
+            "control_snapshot_id": snapshot_id,
+            "locked_baseline_commit": LOCKED_PHASE09_BASELINE,
+            "treatment_finalization_id": finalization_id,
+            "candidate_id": candidate_id,
+            "event_id": event_id,
+            "original_treatment_route": original_route,
+            "canonical_treatment_route": canonical_route,
+            "comparability": comparability,
+            "treatment_availability": availability,
+            "control_decision": control_decision,
+            "treatment_decision": treatment_decision,
+            "decision_delta": delta,
+            "structured_disagreement": disagreement,
+            "unresolved_ambiguity": values["unresolved_ambiguity"],
+            "terminal_status": terminal_status,
+            "terminal_failure": terminal_failure,
+            "terminal_reconciliation": terminal_reconciliation,
+            "latency_availability": latency_availability,
+            "total_latency_ms": total_latency_ms,
+            "input_tokens_availability": input_availability,
+            "total_input_tokens": total_input_tokens,
+            "output_tokens_availability": output_availability,
+            "total_output_tokens": total_output_tokens,
+            "cost_availability": cost_availability,
+            "total_actual_cost": total_actual_cost,
+            "call_count": values["call_count"],
+            "retry_count": values["retry_count"],
+            "tier_count": values["tier_count"],
+            "typed_review_ids": typed_review_ids,
+            "compared_at": compared_at,
+            "reason_codes": reasons,
+            "production_effect": _ZERO_EFFECT,
+            "zero_production_effect_proof": _ZERO_PROOF,
+        }
+        observation_id = _identity(
+            values["observation_id"],
+            material,
+            "observation_id",
+        )
+        normalized = dict(values)
+        normalized.update(
+            observation_id=observation_id,
+            comparison_plan_id=plan_id,
+            control_snapshot_id=snapshot_id,
+            locked_baseline_commit=LOCKED_PHASE09_BASELINE,
+            treatment_finalization_id=finalization_id,
+            candidate_id=candidate_id,
+            event_id=event_id,
+            latency_availability=latency_availability,
+            total_latency_ms=total_latency_ms,
+            input_tokens_availability=input_availability,
+            total_input_tokens=total_input_tokens,
+            output_tokens_availability=output_availability,
+            total_output_tokens=total_output_tokens,
+            cost_availability=cost_availability,
+            total_actual_cost=total_actual_cost,
+            typed_review_ids=typed_review_ids,
+            compared_at=compared_at,
+            reason_codes=reasons,
+            production_effect=_ZERO_EFFECT,
+            zero_production_effect_proof=_ZERO_PROOF,
+        )
+        for name, item in normalized.items():
+            object.__setattr__(self, name, item)
 
     @property
     def identity(self) -> str:
@@ -719,6 +1014,7 @@ class ShadowComparativeEvaluatorV1:
             call_count = len(record.usage_record_ids)
             retry_count = max(record.attempt_count - call_count, 0)
             tier_count = len(record.model_identities)
+            terminal_status = None
             terminal_failure = None
             terminal_reconciliation = None
             reasons = ("CLEAN_TREATMENT_COMPARISON",)
@@ -756,6 +1052,7 @@ class ShadowComparativeEvaluatorV1:
                 retry_count,
                 tier_count,
             ) = _terminal_metrics(treatment)
+            terminal_status = terminal.status
             terminal_failure = terminal.run_result.failure_class
             terminal_reconciliation = terminal.run_result.reconciliation_state
             reasons = ("TERMINAL_TREATMENT_UNAVAILABLE",)
@@ -768,6 +1065,7 @@ class ShadowComparativeEvaluatorV1:
             "schema_version": "phase11-shadow-comparative-observation-v1",
             "comparison_plan_id": plan.identity,
             "control_snapshot_id": control.identity,
+            "locked_baseline_commit": control.locked_baseline_commit,
             "treatment_finalization_id": treatment.identity,
             "candidate_id": plan.candidate_id,
             "event_id": plan.event_id,
@@ -780,6 +1078,7 @@ class ShadowComparativeEvaluatorV1:
             "decision_delta": delta,
             "structured_disagreement": disagreement,
             "unresolved_ambiguity": unresolved,
+            "terminal_status": terminal_status,
             "terminal_failure": terminal_failure,
             "terminal_reconciliation": terminal_reconciliation,
             "latency_availability": latency_availability,
@@ -801,9 +1100,10 @@ class ShadowComparativeEvaluatorV1:
         }
         return ShadowComparativeObservationV1(
             schema_version=material["schema_version"],
-            observation_id=lowercase_sha256(material),
+            observation_id=None,
             comparison_plan_id=plan.identity,
             control_snapshot_id=control.identity,
+            locked_baseline_commit=control.locked_baseline_commit,
             treatment_finalization_id=treatment.identity,
             candidate_id=plan.candidate_id,
             event_id=plan.event_id,
@@ -816,6 +1116,7 @@ class ShadowComparativeEvaluatorV1:
             decision_delta=delta,
             structured_disagreement=disagreement,
             unresolved_ambiguity=unresolved,
+            terminal_status=terminal_status,
             terminal_failure=terminal_failure,
             terminal_reconciliation=terminal_reconciliation,
             latency_availability=latency_availability,
