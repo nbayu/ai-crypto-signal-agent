@@ -753,8 +753,3 @@ def test_implementation_source_has_no_runtime_authority_references():
         elif isinstance(node, ast.Call):
             name = _ast_dotted_name(node.func) or (node.func.id if isinstance(node.func, ast.Name) else None)
             assert name not in {"getenv", "load_dotenv", "dotenv_values"}
-
-
-def test_no_phase11_implementation_module_exists_in_this_red_slice():
-    path = Path(__file__).parents[1] / "engine" / "phase_11_shadow_input_contracts_v1.py"
-    assert not path.exists(), "RED slice must not create the implementation module"
