@@ -168,8 +168,16 @@ class TestFutureBridgeContracts:
         assert evidence.identity == ShadowTypedProviderReviewEvidenceV1(**_typed_values(provider="DEEPSEEK", model="DEEPSEEK_PRIMARY", result=deepseek, call_id="call-001", invocation_result_id="f" * 64)).identity
         with pytest.raises((TypeError, ValueError, ShadowFinalizationEvidenceBridgeValidationError)):
             ShadowTypedProviderReviewEvidenceV1(**_typed_values(provider="ANTHROPIC", model="CLAUDE_SONNET_L1", result=deepseek, call_id="call-001", invocation_result_id="f" * 64))
+        malformed_values = _typed_values(
+            provider="DEEPSEEK",
+            model="DEEPSEEK_PRIMARY",
+            result=deepseek,
+            call_id="call-001",
+            invocation_result_id="f" * 64,
+        )
+        malformed_values["typed_review_result"] = DeepSeekPrimaryReviewResultV1
         with pytest.raises((TypeError, ValueError, ShadowFinalizationEvidenceBridgeValidationError)):
-            ShadowTypedProviderReviewEvidenceV1(**_typed_values(provider="DEEPSEEK", model="DEEPSEEK_PRIMARY", result=DeepSeekPrimaryReviewResultV1, call_id="call-001", invocation_result_id="f" * 64))
+            ShadowTypedProviderReviewEvidenceV1(**malformed_values)
 
     def test_l1_to_l2_lineage_preserves_l1_then_l2_while_mapping_clean_path_to_l2(self):
         deepseek = _deepseek()
