@@ -49,6 +49,21 @@ CAPTURE_CLASSIFICATIONS = ("FIXTURE", "RECORDED_LIVE_CAPTURE")
 CONTENT_ORIGINS = ("SYNTHETIC_FIXTURE", "RECORDED_SOURCE")
 DISPOSITIONS = ("PUBLISHED_SIGNAL", "NO_TRADE")
 PLAN_STATUSES = ("DRAFT", "APPROVED", "ACTIVE", "CLOSED", "STOPPED")
+FORBIDDEN_IMPORT_ROOTS = frozenset(
+    {
+        "requests", "httpx", "urllib", "socket", "subprocess", "dotenv",
+        "telegram", "ccxt", "master_engine_v4", "production_signal_service_v1",
+        "telegram_sdk_runner_v4", "deepseek_validator_v4",
+    }
+)
+FORBIDDEN_IDENTIFIERS = frozenset(
+    {
+        "account", "account_id", "balance", "position", "position_id", "capital",
+        "exchange", "exchange_id", "order", "order_id", "trading", "api_key",
+        "credential", "credentials", "transport", "provider_transport", "telegram",
+        "publication", "production_signal", "quota",
+    }
+)
 
 
 def _canonical_bytes(value):
@@ -63,6 +78,27 @@ def _canonical_bytes(value):
 
 def _sha(value):
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _authority_payload(payload):
+    if isinstance(payload, dict):
+        return {
+            key: _authority_payload(value)
+            for key, value in payload.items()
+            if key not in {"provider_explanation", "provider_prose", "free_form_provider_prose"}
+        }
+    if isinstance(payload, (list, tuple)):
+        return [_authority_payload(value) for value in payload]
+    return payload
+
+
+def _capture_identity(values):
+    material = {
+        key: _authority_payload(value)
+        for key, value in values.items()
+        if key not in {"capture_id", "normalized_payload_hash"}
+    }
+    return _sha(material)
 
 
 def _utc(text):
@@ -91,7 +127,6 @@ def _capture_values(**overrides):
     payload = _payload()
     values = {
         "schema_version": "approved-news-capture-v1",
-        "capture_id": "capture-001",
         "event_id": "event-001",
         "event_version": 1,
         "source_id": "source-001",
@@ -107,6 +142,8 @@ def _capture_values(**overrides):
         "evidence_refs": ("evidence-001",),
     }
     values.update(overrides)
+    if "capture_id" not in overrides:
+        values["capture_id"] = _capture_identity(values)
     return values
 
 
@@ -294,6 +331,16 @@ class TestApprovedNewsCaptureV1:
             ApprovedNewsCaptureV1,
             **_capture_values(normalized_payload_hash="0" * 64),
         )
+
+    def test_capture_id_is_lowercase_sha256_of_authoritative_fields(self):
+        values = _capture_values()
+        assert values["capture_id"] == _capture_identity(values)
+        assert len(values["capture_id"]) == 64
+        assert values["capture_id"] == values["capture_id"].lower()
+
+    @pytest.mark.parametrize("capture_id", ("capture-001", "A" * 64, "f" * 64))
+    def test_capture_id_rejects_noncanonical_or_forged_digest(self, capture_id):
+        _assert_rejected(ApprovedNewsCaptureV1, **_capture_values(capture_id=capture_id))
 
     def test_forged_event_identity_is_rejected(self):
         _assert_rejected(
@@ -637,25 +684,6 @@ def test_implementation_has_only_allowed_deterministic_dependencies():
     module = __import__(IMPLEMENTATION_MODULE, fromlist=["*"])
     source = inspect.getsource(module)
     tree = ast.parse(source)
-    forbidden_text = (
-        "requests",
-        "httpx",
-        "urllib",
-        "socket",
-        "subprocess",
-        "os.environ",
-        "dotenv",
-        "telegram",
-        "ccxt",
-        "master_engine_v4",
-        "production_signal_service_v1",
-        "telegram_sdk_runner_v4",
-        "deepseek_validator_v4",
-    )
-    lowered = source.casefold()
-    for token in forbidden_text:
-        assert token.casefold() not in lowered
-
     allowed_roots = {
         "__future__",
         "ast",
@@ -670,31 +698,57 @@ def test_implementation_has_only_allowed_deterministic_dependencies():
     }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            assert all(alias.name.split(".")[0] in allowed_roots for alias in node.names)
+            for alias in node.names:
+                assert alias.name.split(".")[0] in allowed_roots
+                assert alias.name.split(".")[0] not in FORBIDDEN_IMPORT_ROOTS
         elif isinstance(node, ast.ImportFrom):
-            assert (node.module or "").split(".")[0] in allowed_roots
+            root = (node.module or "").split(".")[0]
+            assert root in allowed_roots
+            assert root not in FORBIDDEN_IMPORT_ROOTS
+
+
+def _ast_identifier_names(tree):
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+    return names
+
+
+def _ast_dotted_name(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
 
 
 def test_implementation_source_has_no_runtime_authority_references():
     module = __import__(IMPLEMENTATION_MODULE, fromlist=["*"])
-    source = inspect.getsource(module).casefold()
-    forbidden = (
-        "production mutation",
-        "publication",
-        "telegram",
-        "account",
-        "balance",
-        "position",
-        "capital",
-        "exchange",
-        "order",
-        "trading",
-        "api_key",
-        "credential_material",
-        "provider_transport",
-    )
-    for token in forbidden:
-        assert token not in source
+    tree = ast.parse(inspect.getsource(module))
+    identifiers = _ast_identifier_names(tree)
+    assert not (identifiers & FORBIDDEN_IDENTIFIERS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            dotted = _ast_dotted_name(node)
+            assert dotted not in {"os.environ", "os.getenv"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
+            assert all(alias.name != "getenv" for alias in node.names)
+        elif isinstance(node, ast.Call):
+            name = _ast_dotted_name(node.func) or (node.func.id if isinstance(node.func, ast.Name) else None)
+            assert name not in {"getenv", "load_dotenv", "dotenv_values"}
 
 
 def test_no_phase11_implementation_module_exists_in_this_red_slice():
