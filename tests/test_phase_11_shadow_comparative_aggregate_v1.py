@@ -344,6 +344,7 @@ def test_direct_observation_fixture_matrix_is_complete_and_immutable():
         ControlTreatmentDecisionDeltaV1.CONTROL_ONLY_DECISION,
         ControlTreatmentDecisionDeltaV1.NOT_COMPARABLE,
         ControlTreatmentDecisionDeltaV1.NO_CHANGE,
+        ControlTreatmentDecisionDeltaV1.TREATMENT_MORE_RESTRICTIVE,
     }
     assert observations[0].structured_disagreement is (
         StructuredProviderDisagreementV1.COMPLETE_DISAGREEMENT
