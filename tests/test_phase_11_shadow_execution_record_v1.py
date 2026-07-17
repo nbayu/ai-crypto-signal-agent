@@ -346,7 +346,7 @@ def _gate(route="L0", risk=None):
     )
 
 
-def _context(route="L0", usage_overrides=None):
+def _context(route="L0", usage_overrides=None, request_hashes=None):
     policy = _policy()
     before = BudgetLedgerV1(policy=policy)
     if route == "L1_TO_L2":
@@ -356,11 +356,16 @@ def _context(route="L0", usage_overrides=None):
         reserved = before.reserve_call(_reservation())
     else:
         reserved = before.reserve_route(route, "run-001", "call-001")
+    if request_hashes is not None and len(request_hashes) != len(reserved.reservations):
+        raise AssertionError("request_hashes must align with reservations")
     committed = reserved
     usages = []
     for index, item in enumerate(reserved.reservations):
         suffix = item.model.lower().replace("_", "-") + f"-{index}"
-        usage = _usage_for(item, suffix, **(usage_overrides or {}))
+        current_overrides = dict(usage_overrides or {})
+        if request_hashes is not None:
+            current_overrides["request_hash"] = request_hashes[index]
+        usage = _usage_for(item, suffix, **current_overrides)
         usages.append(usage)
         committed = committed.commit_usage(usage)
     return {
@@ -581,6 +586,218 @@ class TestShadowExecutionRecordV1:
         _rejected(ShadowExecutionRecordV1, **_record_values(
             route="L2", context=context, escalation_reason_codes=(),
         ))
+
+    def test_l1_to_l2_preserves_ordered_claude_request_hash_reuse(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        values = _record_values(route="L1_TO_L2", context=context)
+        first = ShadowExecutionRecordV1(**values)
+        equivalent = ShadowExecutionRecordV1(
+            **_record_values(route="L1_TO_L2", context=context)
+        )
+        assert first.route == "L2"
+        assert first.model_identities == (
+            "DEEPSEEK_PRIMARY",
+            "CLAUDE_SONNET_L1",
+            "CLAUDE_OPUS_L2",
+        )
+        assert first.request_hashes == (
+            deepseek_hash,
+            claude_hash,
+            claude_hash,
+        )
+        assert first.identity == equivalent.identity
+        assert len(set(first.reservation_ids)) == 3
+        assert len(set(first.usage_record_ids)) == 3
+        assert len(set(first.response_hashes)) == 3
+
+    @pytest.mark.parametrize("route", ("L0", "L1", "L2"))
+    def test_ordinary_routes_reject_duplicate_request_hashes(self, route):
+        duplicate = _text_hash("ordinary-duplicate")
+        if route == "L0":
+            context = _context(route)
+            values = _record_values(route=route, context=context)
+            values["request_hashes"] = (duplicate, duplicate)
+            values["execution_record_id"] = _record_identity(values)
+        else:
+            context = _context(
+                route,
+                request_hashes=(duplicate, duplicate),
+            )
+            values = _record_values(route=route, context=context)
+        _rejected(ShadowExecutionRecordV1, **values)
+
+    @pytest.mark.parametrize(
+        "request_hashes",
+        (
+            (
+                _text_hash("same-deepseek-sonnet"),
+                _text_hash("same-deepseek-sonnet"),
+                _text_hash("opus"),
+            ),
+            (
+                _text_hash("same-deepseek-opus"),
+                _text_hash("sonnet"),
+                _text_hash("same-deepseek-opus"),
+            ),
+            (
+                _text_hash("all-identical"),
+                _text_hash("all-identical"),
+                _text_hash("all-identical"),
+            ),
+        ),
+    )
+    def test_l1_to_l2_rejects_unauthorized_duplicate_positions(
+        self, request_hashes
+    ):
+        context = _context("L1_TO_L2", request_hashes=request_hashes)
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(route="L1_TO_L2", context=context),
+        )
+
+    def test_claude_hash_reuse_requires_canonical_route_and_review_order(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        wrong_route = _record_values(route="L1_TO_L2", context=context)
+        wrong_route["route"] = "L1"
+        wrong_route["execution_record_id"] = _record_identity(wrong_route)
+        _rejected(
+            ShadowExecutionRecordV1,
+            **wrong_route,
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(
+                route="L1_TO_L2",
+                context=context,
+                model_identities=(
+                    "DEEPSEEK_PRIMARY",
+                    "CLAUDE_OPUS_L2",
+                    "CLAUDE_SONNET_L1",
+                ),
+            ),
+        )
+
+    def test_claude_hash_reuse_does_not_weaken_child_identity_uniqueness(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        values = _record_values(route="L1_TO_L2", context=context)
+        _rejected(
+            ShadowExecutionRecordV1,
+            **{
+                **values,
+                "reservation_ids": (
+                    values["reservation_ids"][0],
+                    values["reservation_ids"][1],
+                    values["reservation_ids"][1],
+                ),
+            },
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **{
+                **values,
+                "usage_record_ids": (
+                    values["usage_record_ids"][0],
+                    values["usage_record_ids"][1],
+                    values["usage_record_ids"][1],
+                ),
+            },
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **{
+                **values,
+                "response_hashes": (
+                    values["response_hashes"][0],
+                    values["response_hashes"][1],
+                    values["response_hashes"][1],
+                ),
+            },
+        )
+
+    def test_claude_hash_reuse_rejects_missing_extra_and_misaligned_evidence(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        for request_hashes in (
+            (deepseek_hash, claude_hash),
+            (
+                deepseek_hash,
+                claude_hash,
+                claude_hash,
+                _text_hash("extra-review"),
+            ),
+            (claude_hash, deepseek_hash, claude_hash),
+        ):
+            values = _record_values(route="L1_TO_L2", context=context)
+            values["request_hashes"] = request_hashes
+            values["execution_record_id"] = _record_identity(values)
+            _rejected(ShadowExecutionRecordV1, **values)
+
+    def test_claude_hash_reuse_rejects_malformed_hash_and_same_tier_evidence(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(
+                route="L1_TO_L2",
+                context=context,
+                request_hashes=(deepseek_hash, "not-a-hash", "not-a-hash"),
+            ),
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(
+                route="L1_TO_L2",
+                context=context,
+                model_identities=(
+                    "DEEPSEEK_PRIMARY",
+                    "CLAUDE_SONNET_L1",
+                    "CLAUDE_SONNET_L1",
+                ),
+            ),
+        )
+
+    def test_ordered_duplicate_request_hashes_remain_identity_material(self):
+        deepseek_hash = _text_hash("deepseek-request")
+        claude_hash = _text_hash("shared-claude-request")
+        first_context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, claude_hash, claude_hash),
+        )
+        changed_hash = _text_hash("different-shared-claude-request")
+        changed_context = _context(
+            "L1_TO_L2",
+            request_hashes=(deepseek_hash, changed_hash, changed_hash),
+        )
+        first = ShadowExecutionRecordV1(
+            **_record_values(route="L1_TO_L2", context=first_context)
+        )
+        changed = ShadowExecutionRecordV1(
+            **_record_values(route="L1_TO_L2", context=changed_context)
+        )
+        assert first.identity != changed.identity
 
     def test_provider_usage_and_reservation_sequences_bind(self):
         value = _record()

@@ -272,9 +272,15 @@ def _identifiers(
     return result
 
 
-def _hashes(value: Any, field_name: str, *, allow_empty: bool = False) -> tuple[str, ...]:
+def _hashes(
+    value: Any,
+    field_name: str,
+    *,
+    allow_empty: bool = False,
+    unique: bool = True,
+) -> tuple[str, ...]:
     result = tuple(_hash(item, field_name) for item in _sequence(value, field_name, allow_empty=allow_empty))
-    if len(set(result)) != len(result):
+    if unique and len(set(result)) != len(result):
         raise ShadowExecutionRecordValidationError(f"{field_name} contains duplicates")
     return result
 
@@ -426,7 +432,12 @@ class ShadowExecutionRecordV1:
             "model_versions": _identifiers(values["model_versions"], "model_versions"),
             "reservation_ids": _hashes(values["reservation_ids"], "reservation_ids"),
             "usage_record_ids": _hashes(values["usage_record_ids"], "usage_record_ids", allow_empty=True),
-            "request_hashes": _hashes(values["request_hashes"], "request_hashes", allow_empty=True),
+            "request_hashes": _hashes(
+                values["request_hashes"],
+                "request_hashes",
+                allow_empty=True,
+                unique=False,
+            ),
             "response_hashes": _hashes(values["response_hashes"], "response_hashes", allow_empty=True),
             "provider_verdicts": _identifiers(values["provider_verdicts"], "provider_verdicts", allow_empty=True, unique=False),
             "input_tokens": _nonnegative_int(values["input_tokens"], "input_tokens"),
@@ -470,6 +481,7 @@ class ShadowExecutionRecordV1:
         self._validate_route(normalized, after)
         self._validate_output_chain(normalized, capture, adjudication, risk, gate)
         self._validate_operations(normalized, after)
+        self._validate_request_hashes(normalized)
         self._validate_terminal_state(normalized)
         self._validate_zero_effect(normalized)
 
@@ -640,6 +652,35 @@ class ShadowExecutionRecordV1:
         for usage in usages:
             if _parsed(usage.started_at) < _parsed(values["started_at"]) or _parsed(usage.completed_at) > _parsed(values["completed_at"]):
                 raise ShadowExecutionRecordValidationError("provider timing is outside execution timing")
+
+    @staticmethod
+    def _validate_request_hashes(values: dict[str, Any]) -> None:
+        requests = values["request_hashes"]
+        if len(set(requests)) == len(requests):
+            return
+        authorized_claude_reuse = (
+            values["route"] == "L2"
+            and values["escalation_reason_codes"] == ("L1_TO_L2",)
+            and values["provider_identities"]
+            == ("DEEPSEEK", "ANTHROPIC", "ANTHROPIC")
+            and values["model_identities"]
+            == (
+                "DEEPSEEK_PRIMARY",
+                "CLAUDE_SONNET_L1",
+                "CLAUDE_OPUS_L2",
+            )
+            and len(requests) == 3
+            and requests[0] != requests[1]
+            and requests[1] == requests[2]
+            and len(set(requests)) == 2
+            and len(set(values["reservation_ids"])) == 3
+            and len(set(values["usage_record_ids"])) == 3
+            and len(set(values["response_hashes"])) == 3
+        )
+        if not authorized_claude_reuse:
+            raise ShadowExecutionRecordValidationError(
+                "request_hashes contains unauthorized duplicates"
+            )
 
     @staticmethod
     def _validate_terminal_state(values: dict[str, Any]) -> None:
