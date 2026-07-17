@@ -150,6 +150,8 @@ def _decision(route="L1", **overrides):
 
 
 def _claude(route="L1", **overrides):
+    """Build intentionally unreachable Claude evidence for fail-closed tests."""
+
     model = L1_POLICY_ID if route == "L1" else L2_POLICY_ID
     values = {
         "policy_version": "claude-escalated-review-policy-v1",
@@ -177,6 +179,31 @@ def _claude(route="L1", **overrides):
     return _set_fields(ClaudeEscalatedReviewResultV1, values)
 
 
+def _real_claude(decision):
+    return ClaudeEscalatedReviewResultV1(
+        policy_version="claude-escalated-review-policy-v1",
+        event_snapshot_id=decision.event_snapshot_id,
+        request_payload_sha256=CLAUDE_PAYLOAD_SHA256,
+        router_decision_id=decision.decision_id,
+        logical_review_id=LOGICAL_REVIEW_ID,
+        route=decision.route,
+        model_policy_id=decision.claude_model_policy_id,
+        review_status="COMPLETED",
+        review_conclusion="ESCALATED_REVIEW_COMPLETE",
+        ambiguity_resolution="RESOLVED",
+        contradiction_resolution="NONE",
+        evidence_assessment="SUFFICIENT",
+        entity_assessment="CONFIRMED",
+        source_assessment="ACCEPTABLE",
+        material_risk_assessment="NONE",
+        agreement_state_with_deepseek="AGREES",
+        reason_codes=("CLAUDE_REVIEW_COMPLETED",),
+        structured_explanation="Claude fixture explanation.",
+        adjudication_evidence_refs=("evidence-001",),
+        semantic_result_id=None,
+    )
+
+
 _AUTO_CLAUDE = object()
 
 
@@ -185,7 +212,7 @@ def _adjudicate(deepseek=None, decision=None, claude=_AUTO_CLAUDE, policy=None):
     selected_claude = (
         None
         if claude is _AUTO_CLAUDE and selected_decision.route == "L0"
-        else _claude(selected_decision.route)
+        else _real_claude(selected_decision)
         if claude is _AUTO_CLAUDE
         else claude
     )
@@ -304,8 +331,9 @@ def test_l0_accepts_deepseek_without_claude():
 
 
 def test_l0_rejects_supplied_claude_result():
+    decision = _decision("L1")
     with pytest.raises(adjudication.DeterministicAdjudicationError):
-        _adjudicate(decision=_decision("L0"), claude=_claude("L1"))
+        _adjudicate(decision=_decision("L0"), claude=_real_claude(decision))
 
 
 @pytest.mark.parametrize("route", ["L1", "L2"])
@@ -316,14 +344,64 @@ def test_escalated_routes_require_claude(route):
 
 @pytest.mark.parametrize("route", ["L1", "L2"])
 def test_aligned_escalated_results_produce_consensus(route):
+    decision = _decision(route)
+    claude = _real_claude(decision)
+    semantic_result_id = claude.semantic_result_id
     result = _adjudicate(
-        decision=_decision(route),
-        claude=_claude(route),
+        decision=decision,
+        claude=claude,
     )
+    assert claude.entity_assessment == "CONFIRMED"
+    assert claude.semantic_result_id == semantic_result_id
     assert result.route == route
     assert result.adjudication_outcome == "CONSENSUS_CONFIRMED"
     assert result.agreement_state == "AGREEMENT"
-    assert result.claude_semantic_result_id == CLAUDE_RESULT_ID
+    assert result.final_entity_state == "ACCEPTABLE"
+    assert result.claude_semantic_result_id == semantic_result_id
+
+
+def test_equivalent_real_claude_results_converge_without_mutation():
+    decision = _decision("L1")
+    first_claude = _real_claude(decision)
+    second_claude = _real_claude(decision)
+    first = _adjudicate(decision=decision, claude=first_claude)
+    second = _adjudicate(decision=decision, claude=second_claude)
+    assert first_claude.entity_assessment == "CONFIRMED"
+    assert second_claude.entity_assessment == "CONFIRMED"
+    assert first_claude.semantic_result_id == second_claude.semantic_result_id
+    assert first.adjudication_result_id == second.adjudication_result_id
+
+
+def test_confirmed_normalization_is_exact_type_and_exact_value_only():
+    decision = _decision("L1")
+
+    class DuckTypedClaude:
+        entity_assessment = "CONFIRMED"
+
+    with pytest.raises(adjudication.DeterministicAdjudicationError):
+        adjudication.adjudicate_review_results(
+            _deepseek(),
+            decision,
+            ClaudeEscalatedReviewResultV1,
+            _policy(),
+        )
+    with pytest.raises(adjudication.DeterministicAdjudicationError):
+        adjudication.adjudicate_review_results(
+            _deepseek(),
+            decision,
+            DuckTypedClaude(),
+            _policy(),
+        )
+    with pytest.raises(adjudication.DeterministicAdjudicationError):
+        _adjudicate(
+            decision=decision,
+            claude=_claude(entity_assessment="confirmed"),
+        )
+    with pytest.raises(adjudication.DeterministicAdjudicationError):
+        _adjudicate(
+            decision=decision,
+            claude=_claude(entity_assessment="UNKNOWN"),
+        )
 
 
 @pytest.mark.parametrize(
@@ -460,10 +538,11 @@ def test_non_completed_claude_status_fails_closed(status):
 
 
 def test_payload_hashes_are_distinct_provider_identities():
+    claude = _real_claude(_decision())
     result = _adjudicate()
     assert DEEPSEEK_PAYLOAD_SHA256 != CLAUDE_PAYLOAD_SHA256
     assert result.deepseek_semantic_result_id == DEEPSEEK_RESULT_ID
-    assert result.claude_semantic_result_id == CLAUDE_RESULT_ID
+    assert result.claude_semantic_result_id == claude.semantic_result_id
 
 
 def test_reason_and_evidence_ordering_is_canonical():

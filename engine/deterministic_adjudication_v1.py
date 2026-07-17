@@ -383,6 +383,12 @@ def _deepseek_source(value: Any) -> str:
     return mapping[value]
 
 
+def _claude_entity(value: Any) -> str:
+    if value == "CONFIRMED":
+        return "ACCEPTABLE"
+    return _require_choice(value, "entity_assessment", _ASSESSMENTS)
+
+
 def _input_reason_codes(value: Any, policy: DeterministicAdjudicationPolicyV1) -> tuple[str, ...]:
     allowed = frozenset(("REVIEW_COMPLETED", "CLAUDE_REVIEW_COMPLETED")) | frozenset(policy.fail_closed_reason_codes)
     return _normalize_texts(value, "reason_codes", allowed)
@@ -404,7 +410,7 @@ def _validate_claude(result: ClaudeEscalatedReviewResultV1, decision: Determinis
     ambiguity = _claude_ambiguity(result.ambiguity_resolution)
     contradiction = _require_choice(result.contradiction_resolution, "contradiction_resolution", _CONTRADICTIONS)
     evidence = _require_choice(result.evidence_assessment, "evidence_assessment", _EVIDENCE)
-    entity = _require_choice(result.entity_assessment, "entity_assessment", _ASSESSMENTS)
+    entity = _claude_entity(result.entity_assessment)
     source = _require_choice(result.source_assessment, "source_assessment", _ASSESSMENTS)
     risk = _require_choice(result.material_risk_assessment, "material_risk_assessment", _RISKS)
     reasons = _input_reason_codes(result.reason_codes, policy)
