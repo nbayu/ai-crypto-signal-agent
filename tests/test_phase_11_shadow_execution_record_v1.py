@@ -25,6 +25,7 @@ from engine.phase_11_budget_control_v1 import (
 )
 from engine.news_risk_object_v1 import NewsRiskObjectV1
 from engine.signal_gate_v1 import SignalGateDecisionV1
+from engine.deterministic_adjudication_v1 import DeterministicAdjudicationResultV1
 
 
 IMPLEMENTATION_MODULE = "engine.phase_11_shadow_execution_record_v1"
@@ -272,12 +273,37 @@ def _usage_for(reservation, suffix="deepseek", **overrides):
     return ProviderUsageRecordV1(**values)
 
 
-def _risk(route="L0"):
+def _adjudication(route="L0"):
+    values = {
+        "policy_version": "deterministic-adjudication-policy-v1",
+        "event_snapshot_id": EVENT_ID,
+        "route": route,
+        "router_decision_id": "3" * 64,
+        "deepseek_semantic_result_id": "4" * 64,
+        "claude_semantic_result_id": None if route == "L0" else "5" * 64,
+        "adjudication_outcome": "ACCEPT_DEEPSEEK" if route == "L0" else "CONSENSUS_CONFIRMED",
+        "agreement_state": "SINGLE_REVIEW" if route == "L0" else "AGREEMENT",
+        "final_ambiguity_state": "NONE",
+        "final_contradiction_state": "NONE",
+        "final_evidence_state": "SUFFICIENT",
+        "final_entity_state": "ACCEPTABLE",
+        "final_source_state": "ACCEPTABLE",
+        "final_material_risk_state": "NONE",
+        "reason_codes": ("PROVIDERS_AGREE",) if route != "L0" else ("RISK_ASSESSMENTS_ALIGNED",),
+        "evidence_refs": ("evidence-001",),
+        "structured_explanation": "Inert deterministic adjudication fixture.",
+        "adjudication_result_id": None,
+    }
+    return DeterministicAdjudicationResultV1(**values)
+
+
+def _risk(route="L0", adjudication=None):
+    adjudication = _adjudication(route) if adjudication is None else adjudication
     values = {
         "policy_version": "news-risk-policy-v1",
         "event_snapshot_id": EVENT_ID,
         "adjudication_policy_version": "deterministic-adjudication-policy-v1",
-        "adjudication_result_id": "2" * 64,
+        "adjudication_result_id": adjudication.adjudication_result_id,
         "route": route,
         "risk_classification": "CLEAR",
         "news_gate_recommendation": "NO_NEWS_RESTRICTION",
@@ -347,23 +373,32 @@ def _context(route="L0"):
 
 
 def _record_identity(values):
-    material = {key: value for key, value in values.items() if key != "execution_record_id"}
+    child_fields = {
+        "shadow_input", "budget_ledger_before", "budget_ledger_after",
+        "news_risk_object", "signal_gate_decision", "adjudication_result",
+    }
+    material = {
+        key: value for key, value in values.items()
+        if key not in child_fields and key != "execution_record_id"
+    }
     return _sha(material)
 
 
 def _record_values(route="L0", context=None, **overrides):
     context = _context(route) if context is None else context
-    shadow = _shadow()
+    shadow = overrides.get("shadow_input", _shadow())
     capture = shadow.approved_news_capture
     projection = shadow.phase_09_control_projection
     child_route = "L2" if route == "L1_TO_L2" else route
-    risk = _risk(child_route)
-    gate = _gate(child_route, risk)
+    adjudication = overrides.get("adjudication_result", _adjudication(child_route))
+    risk = overrides.get("news_risk_object", _risk(child_route, adjudication))
+    gate = overrides.get("signal_gate_decision", _gate(child_route, risk))
     usages = context["usages"]
     reservations = context["reserved"].reservations
     route_label = "L2" if route == "L1_TO_L2" else route
     values = {
         "schema_version": "phase11-shadow-execution-record-v1",
+        "shadow_input": shadow,
         "shadow_input_id": shadow.shadow_input_id,
         "shadow_input_identity": shadow.identity,
         "approved_news_capture_id": capture.identity,
@@ -374,6 +409,8 @@ def _record_values(route="L0", context=None, **overrides):
         "event_id": capture.event_id,
         "event_version": capture.event_version,
         "budget_policy_id": context["policy"].policy_id,
+        "budget_ledger_before": context["before"],
+        "budget_ledger_after": context["after"],
         "budget_ledger_before_id": context["before"].identity,
         "budget_ledger_after_id": context["after"].identity,
         "prompt_version": "phase11-prompt-v1",
@@ -407,9 +444,12 @@ def _record_values(route="L0", context=None, **overrides):
         "execution_status": "COMPLETED",
         "started_at": "2026-07-17T01:00:00Z",
         "completed_at": "2026-07-17T01:02:00Z",
-        "adjudication_result_id": "2" * 64,
+        "adjudication_result": adjudication,
+        "adjudication_result_id": adjudication.adjudication_result_id,
         "adjudicated_news_risk_status": risk.risk_classification,
+        "news_risk_object": risk,
         "news_risk_object_id": risk.news_risk_object_id,
+        "signal_gate_decision": gate,
         "signal_gate_decision_id": gate.signal_gate_decision_id,
         "failure_class": "NONE",
         "reason_codes": ("EXECUTION_COMPLETED",),
@@ -464,8 +504,37 @@ class TestShadowExecutionRecordV1:
         _rejected(ShadowExecutionRecordV1, **_record_values(shadow_input_identity={"bad": True}))
         _rejected(ShadowExecutionRecordV1, **_record_values(news_risk_object_id="f" * 64))
 
+    def test_valid_alternate_child_objects_are_rejected_when_bindings_conflict(self):
+        alternate_shadow = _shadow(
+            shadow_input_id="shadow-input-002",
+            phase_09_control_projection=_projection(candidate_id="candidate-002"),
+        )
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(
+                shadow_input=alternate_shadow,
+                shadow_input_identity=_shadow().identity,
+            ),
+        )
+        alternate_context = _context("L1")
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(context=alternate_context),
+        )
+        alternate_adjudication = _adjudication("L1")
+        alternate_risk = _risk("L1", alternate_adjudication)
+        alternate_gate = _gate("L1", alternate_risk)
+        _rejected(
+            ShadowExecutionRecordV1,
+            **_record_values(
+                news_risk_object=alternate_risk,
+                signal_gate_decision=alternate_gate,
+                adjudication_result=alternate_adjudication,
+            ),
+        )
+
     @pytest.mark.parametrize("field", ("shadow_input_id", "sample_plan_id", "budget_policy_id", "event_id"))
-    def test_child_binding_mismatches_are_rejected(self, field):
+    def test_redundant_child_binding_fields_are_rejected(self, field):
         replacement = "other-value" if field != "event_id" else OTHER_EVENT_ID
         _rejected(ShadowExecutionRecordV1, **_record_values(**{field: replacement}))
 
