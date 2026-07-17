@@ -300,7 +300,12 @@ def test_evaluation_set_is_canonical_and_rejects_duplicate_foreign_or_outside_ev
     assert first.identity == second.identity
     with pytest.raises(ShadowAlternativeArmAggregationValidationError):
         _set((evaluations[0], evaluations[0]))
-    duplicate_key = _evaluation(99, candidate_id="candidate-1", event_id="event-1")
+    duplicate_key = _evaluation(
+        99,
+        candidate_id="candidate-1",
+        event_id="event-1",
+        arm_identity=AlternativeArmIdentityV1.DEEPSEEK_ONLY,
+    )
     with pytest.raises(ShadowAlternativeArmAggregationValidationError):
         _set((evaluations[0], duplicate_key))
     with pytest.raises(ShadowAlternativeArmAggregationValidationError):
@@ -324,7 +329,12 @@ def test_aggregate_counts_distributions_rates_and_decimal_telemetry_are_exact():
     )
     assert type(report) is ShadowAggregateAlternativeArmReportV1
     assert report.total_evaluation_count == 10
-    assert report.arm_identity_counts == {arm: 2 for arm in AlternativeArmIdentityV1}
+    assert report.arm_identity_counts == {
+        AlternativeArmIdentityV1.DEEPSEEK_ONLY: 3,
+        AlternativeArmIdentityV1.CLAUDE_SONNET_ONLY: 3,
+        AlternativeArmIdentityV1.CLAUDE_OPUS_ONLY: 2,
+        AlternativeArmIdentityV1.ROUTED_PRIMARY_PLUS_ESCALATION: 2,
+    }
     assert sum(report.execution_status_counts.values()) == 10
     assert sum(report.decision_availability_counts.values()) == 10
     assert sum(report.decision_quality_counts.values()) == 10
