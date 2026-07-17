@@ -90,6 +90,12 @@ def _sha(value):
     ).encode("utf-8")).hexdigest()
 
 
+def _text_hash(value: str) -> str:
+    if type(value) is not str:
+        raise TypeError("raw text hash requires str")
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _reject(factory, **values):
     with pytest.raises((TypeError, ValueError, ProviderTransportAdapterValidationError)):
         factory(**values)
@@ -120,14 +126,14 @@ def _payloads():
     candidate = EntityCandidateV1(
         candidate_id="candidate-alpha", entity_type="DIGITAL_ASSET", canonical_entity_id="asset:alpha",
         canonical_name="Alpha", canonical_symbol="ALPHA", source_text="Alpha protocol",
-        source_text_sha256=_sha("Alpha protocol"), evidence_refs=[{"evidence_ref_id": "evidence-001", "event_snapshot_id": event.event_snapshot_id, "reference_type": "EVENT_FIELD", "field_name": "normalized_title"}],
+        source_text_sha256=_text_hash("Alpha protocol"), evidence_refs=[{"evidence_ref_id": "evidence-001", "event_snapshot_id": event.event_snapshot_id, "reference_type": "EVENT_FIELD", "field_name": "normalized_title"}],
         confidence_basis="EXPLICIT_CALLER_ASSERTION", supplied_confidence=None, ambiguity_group_id=None,
         candidate_status="ACCEPTED", rejection_reason_codes=[], mapping_policy_version=ENTITY_MAPPING_POLICY_VERSION,
     )
     mapped = map_entity_candidates(event_snapshot_id=event.event_snapshot_id, source_policy_decision=policy, candidates=[candidate])
     projected = project_ai_review_payloads(
         normalized_event=event, source_policy_decision=policy, entity_mapping_result=mapped,
-        bounded_evidence=({"evidence_ref_id": "evidence-001", "event_snapshot_id": event.event_snapshot_id, "source_field": "normalized_body", "excerpt": excerpt, "excerpt_sha256": _sha(excerpt)},),
+        bounded_evidence=({"evidence_ref_id": "evidence-001", "event_snapshot_id": event.event_snapshot_id, "source_field": "normalized_body", "excerpt": excerpt, "excerpt_sha256": _text_hash(excerpt)},),
         review_task="Assess bounded canonical facts.", token_policy=PayloadTokenPolicyV1(
             claude_input_hard_limit_tokens=8000, claude_target_input_min_tokens=2000,
             claude_target_input_max_tokens=5000, claude_output_hard_limit_tokens=1000,
