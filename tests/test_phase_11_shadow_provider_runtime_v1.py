@@ -196,13 +196,13 @@ def _uncertain_usage(reservation, request_hash):
     )
 
 
-def _context(provider="DEEPSEEK", model="DEEPSEEK_PRIMARY", route="L0", retry=False):
+def _context(provider="DEEPSEEK", model="DEEPSEEK_PRIMARY", route="L0", retry=False, call_id="call-001"):
     event, deepseek, claude = _payloads()
     policy = _policy()
-    first = _reservation(policy, provider, model, "call-001-attempt-1" if retry else "call-001")
+    first = _reservation(policy, provider, model, f"{call_id}-attempt-1" if retry else call_id)
     attempts = (first,)
     if retry:
-        second = _reservation(policy, provider, model, "call-001-attempt-2")
+        second = _reservation(policy, provider, model, f"{call_id}-attempt-2")
         attempts += (second,)
     ledger = _ledger(policy, attempts)
     request = deepseek if provider == "DEEPSEEK" else claude
@@ -302,7 +302,7 @@ class TestInvocationContract:
         claude = _context("ANTHROPIC", "CLAUDE_SONNET_L1", "L0")
         _reject(ShadowProviderInvocationV1, **_invocation_values(claude))
         sonnet = _context("ANTHROPIC", "CLAUDE_SONNET_L1", "L1")
-        opus = _context("ANTHROPIC", "CLAUDE_OPUS_L2", "L1_TO_L2")
+        opus = _context("ANTHROPIC", "CLAUDE_OPUS_L2", "L1_TO_L2", call_id="call-002")
         first, second = sonnet["reservation"], opus["reservation"]
         assert first.reservation_id != second.reservation_id
         assert first.model == "CLAUDE_SONNET_L1" and second.model == "CLAUDE_OPUS_L2"
