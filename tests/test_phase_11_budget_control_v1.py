@@ -701,8 +701,3 @@ def test_disposition_is_not_a_forbidden_authority_identifier():
     module = __import__(IMPLEMENTATION_MODULE, fromlist=["*"])
     tree = ast.parse(inspect.getsource(module))
     assert "disposition" in _ast_identifiers(tree)
-
-
-def test_no_budget_implementation_module_is_absent_from_red_slice():
-    path = Path(__file__).parents[1] / "engine" / "phase_11_budget_control_v1.py"
-    assert not path.exists(), "RED slice must not create the implementation module"
