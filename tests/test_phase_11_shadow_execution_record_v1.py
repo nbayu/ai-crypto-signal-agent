@@ -769,8 +769,3 @@ def test_disposition_is_not_a_forbidden_identifier():
     module = __import__(IMPLEMENTATION_MODULE, fromlist=["*"])
     tree = ast.parse(inspect.getsource(module))
     assert "disposition" in _ast_identifiers(tree)
-
-
-def test_no_execution_implementation_module_is_absent_from_red_slice():
-    import pathlib
-    assert not (pathlib.Path(__file__).parents[1] / "engine" / "phase_11_shadow_execution_record_v1.py").exists()
