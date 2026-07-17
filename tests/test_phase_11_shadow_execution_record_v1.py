@@ -346,7 +346,7 @@ def _gate(route="L0", risk=None):
     )
 
 
-def _context(route="L0"):
+def _context(route="L0", usage_overrides=None):
     policy = _policy()
     before = BudgetLedgerV1(policy=policy)
     if route == "L1_TO_L2":
@@ -360,7 +360,7 @@ def _context(route="L0"):
     usages = []
     for index, item in enumerate(reserved.reservations):
         suffix = item.model.lower().replace("_", "-") + f"-{index}"
-        usage = _usage_for(item, suffix)
+        usage = _usage_for(item, suffix, **(usage_overrides or {}))
         usages.append(usage)
         committed = committed.commit_usage(usage)
     return {
@@ -595,9 +595,18 @@ class TestShadowExecutionRecordV1:
     def test_money_is_decimal_exact_and_nonnegative(self, field):
         _rejected(ShadowExecutionRecordV1, **_record_values(**{field: 850.0}))
         _rejected(ShadowExecutionRecordV1, **_record_values(**{field: Decimal("-0.01")}))
-        zero = _record(**_record_values(**{field: Decimal("-0")}))
-        plain = _record(**_record_values(**{field: Decimal("0")}))
+        zero_context = _context(usage_overrides={field: Decimal("-0")})
+        plain_context = _context(usage_overrides={field: Decimal("0")})
+        zero = _record(**_record_values(context=zero_context))
+        plain = _record(**_record_values(context=plain_context))
         assert zero.identity == plain.identity
+
+    def test_zero_parent_aggregate_cannot_bypass_nonzero_child_usage(self):
+        values = _record_values()
+        values["estimated_cost"] = Decimal("0")
+        values["actual_cost"] = Decimal("0")
+        values["execution_record_id"] = _record_identity(values)
+        _rejected(ShadowExecutionRecordV1, **values)
 
     def test_timing_latency_attempts_and_operational_states_are_consistent(self):
         value = _record()
