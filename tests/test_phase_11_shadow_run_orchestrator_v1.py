@@ -286,7 +286,17 @@ class TestSequentialRuntimeOrchestration:
 class TestBindingIdentityAndStaticBoundaries:
     def test_missing_adapter_expired_reservation_and_identity_are_fail_closed(self):
         context = _context("L1")
-        _reject(ShadowProviderRunOrchestratorV1, adapters={("DEEPSEEK", "DEEPSEEK_PRIMARY"): context.adapters[("DEEPSEEK", "DEEPSEEK_PRIMARY")]})
+        orchestrator = ShadowProviderRunOrchestratorV1(
+            adapters={("DEEPSEEK", "DEEPSEEK_PRIMARY"): context.adapters[("DEEPSEEK", "DEEPSEEK_PRIMARY")]}
+        )
+        result = orchestrator.execute(_run_plan(context, "L1"))
+        assert result.status == "DENIED" and result.failure_class == "MISSING_ADAPTER"
+        assert result.completed_call_plan_ids == ()
+        assert result.ledger_after.identity == context.ledger.identity
+        assert result.ledger_after.sequence == context.ledger.sequence
+        assert result.ledger_after.usage_records == context.ledger.usage_records
+        assert context.order == []
+        assert result.production_effect == "NONE" and result.zero_production_effect_proof == "PROVEN_NONE"
         expired = _context("L0", expires_at="2026-07-17T00:05:29Z")
         result = ShadowProviderRunOrchestratorV1(adapters=expired.adapters).execute(_run_plan(expired, "L0"))
         assert result.status == "DENIED" and result.failure_class == "RESERVATION_MISSING" and expired.order == []
