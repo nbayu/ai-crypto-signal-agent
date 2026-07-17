@@ -333,6 +333,12 @@ def test_direct_observation_fixture_matrix_is_complete_and_immutable():
             treatment_decision="REQUIRE_NEWS_CAUTION",
             decision_delta=ControlTreatmentDecisionDeltaV1.NOT_COMPARABLE,
         ),
+        _observation(
+            12,
+            control_decision="ALLOW",
+            treatment_decision="ALLOW_NEWS_ELIGIBILITY",
+            decision_delta=ControlTreatmentDecisionDeltaV1.NO_CHANGE,
+        ),
     )
     assert {item.decision_delta for item in observations} == {
         ControlTreatmentDecisionDeltaV1.CONTROL_ONLY_DECISION,
@@ -432,8 +438,10 @@ def test_aggregate_report_counts_distributions_rates_and_coverage():
     assert report.latency_summary.availability is AggregateMetricAvailabilityV1.PARTIAL
     assert report.latency_summary.available_observation_count == 7
     assert report.latency_summary.unavailable_observation_count == 1
-    assert report.cost_summary.total == Decimal("0.31")
-    assert report.cost_summary.mean == Decimal("0.0442857143")
+    assert report.cost_summary.available_observation_count == 6
+    assert report.cost_summary.unavailable_observation_count == 2
+    assert report.cost_summary.total == Decimal("0.28")
+    assert report.cost_summary.mean == Decimal("0.0466666667")
     assert all(
         item.status is ShadowAggregateCoverageStatusV1.MET
         for item in report.coverage_results
