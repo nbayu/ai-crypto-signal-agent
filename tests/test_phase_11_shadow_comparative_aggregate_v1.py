@@ -46,7 +46,7 @@ from engine.phase_11_shadow_comparative_aggregate_v1 import (
 
 UTC_NOW = datetime(2026, 7, 17, 0, 10, tzinfo=UTC)
 WINDOW_START = datetime(2026, 7, 17, 0, 6, tzinfo=UTC)
-WINDOW_END = datetime(2026, 7, 17, 0, 9, tzinfo=UTC)
+WINDOW_END = UTC_NOW
 
 
 def _canonical(value):
