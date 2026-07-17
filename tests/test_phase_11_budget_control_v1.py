@@ -556,10 +556,42 @@ class TestRoutingAndBudgetInteraction:
 
 class TestBudgetMoneyAndFailureValues:
     def test_decimal_arithmetic_is_exact_and_canonical(self):
-        first = _policy(total_cost_cap=Decimal("0.10"), per_run_cost_cap=Decimal("0.10"))
-        second = _policy(total_cost_cap=Decimal("0.100"), per_run_cost_cap=Decimal("0.100"))
+        provider_caps = {"DEEPSEEK": Decimal("0.10"), "ANTHROPIC": Decimal("0.10")}
+        model_caps = {
+            "DEEPSEEK_PRIMARY": Decimal("0.10"),
+            "CLAUDE_SONNET_L1": Decimal("0.10"),
+            "CLAUDE_OPUS_L2": Decimal("0.10"),
+        }
+        first = _policy(
+            total_cost_cap=Decimal("0.10"),
+            provider_cost_caps=provider_caps,
+            model_cost_caps=model_caps,
+            per_run_cost_cap=Decimal("0.10"),
+        )
+        second = _policy(
+            total_cost_cap=Decimal("0.100"),
+            provider_cost_caps={key: Decimal("0.100") for key in provider_caps},
+            model_cost_caps={key: Decimal("0.100") for key in model_caps},
+            per_run_cost_cap=Decimal("0.100"),
+        )
         assert first.identity == second.identity
-        for value in (Decimal("-0"), Decimal("NaN"), Decimal("Infinity"), 0.1):
+        zero_provider_caps = {"DEEPSEEK": Decimal("0"), "ANTHROPIC": Decimal("-0.0")}
+        zero_model_caps = {key: Decimal("-0.00") for key in model_caps}
+        negative_zero = _policy(
+            total_cost_cap=Decimal("-0"),
+            provider_cost_caps=zero_provider_caps,
+            model_cost_caps=zero_model_caps,
+            per_run_cost_cap=Decimal("-0.00"),
+        )
+        canonical_zero = _policy(
+            total_cost_cap=Decimal("0"),
+            provider_cost_caps={key: Decimal("0") for key in provider_caps},
+            model_cost_caps={key: Decimal("0") for key in model_caps},
+            per_run_cost_cap=Decimal("0"),
+        )
+        assert negative_zero.total_cost_cap == Decimal("0")
+        assert negative_zero.identity == canonical_zero.identity
+        for value in (Decimal("NaN"), Decimal("Infinity"), Decimal("-0.01"), 0.1):
             _assert_rejected(Phase11BudgetPolicyV1, **_policy_values(total_cost_cap=value))
 
     def test_failure_class_vocabulary_is_closed(self):
