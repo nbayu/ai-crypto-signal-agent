@@ -434,7 +434,21 @@ class TestBudgetLedgerV1:
 
     @pytest.mark.parametrize("field", ("total_cost_cap", "per_run_cost_cap"))
     def test_hard_cost_caps_deny_before_reservation(self, field):
-        policy = _policy(**{field: Decimal("500")})
+        overrides = {field: Decimal("500")}
+        if field == "total_cost_cap":
+            overrides.update(
+                provider_cost_caps={
+                    "DEEPSEEK": Decimal("500"),
+                    "ANTHROPIC": Decimal("500"),
+                },
+                model_cost_caps={
+                    "DEEPSEEK_PRIMARY": Decimal("500"),
+                    "CLAUDE_SONNET_L1": Decimal("500"),
+                    "CLAUDE_OPUS_L2": Decimal("500"),
+                },
+                per_run_cost_cap=Decimal("500"),
+            )
+        policy = _policy(**overrides)
         ledger = BudgetLedgerV1(policy=policy)
         with pytest.raises((TypeError, ValueError)):
             ledger.reserve_call(_reservation(reserved_cost=Decimal("501")))
