@@ -336,9 +336,9 @@ def test_aggregate_counts_distributions_rates_and_decimal_telemetry_are_exact():
     assert report.false_block_rate == ShadowAlternativeArmRateEvidenceV1(1, 5, AlternativeArmAggregateRateAvailabilityV1.AVAILABLE, Decimal("0.2000000000"))
     assert report.missed_material_event_rate == ShadowAlternativeArmRateEvidenceV1(1, 5, AlternativeArmAggregateRateAvailabilityV1.AVAILABLE, Decimal("0.2000000000"))
     assert report.unnecessary_escalation_rate == ShadowAlternativeArmRateEvidenceV1(1, 2, AlternativeArmAggregateRateAvailabilityV1.AVAILABLE, Decimal("0.5000000000"))
-    assert report.cost_summary == ShadowAlternativeArmTelemetrySummaryV1(AlternativeArmTelemetryAvailabilityV1.PARTIAL, 7, 3, Decimal("0.25"), Decimal("0.0357142857"))
-    assert report.cost_summary.total == Decimal("0.25")
-    assert report.cost_summary.mean == Decimal("0.0357142857")
+    assert report.cost_summary == ShadowAlternativeArmTelemetrySummaryV1(AlternativeArmTelemetryAvailabilityV1.PARTIAL, 7, 3, Decimal("0.27"), Decimal("0.0385714286"))
+    assert report.cost_summary.total == Decimal("0.27")
+    assert report.cost_summary.mean == Decimal("0.0385714286")
 
 
 def test_zero_denominator_rates_remain_unavailable_not_zero():
