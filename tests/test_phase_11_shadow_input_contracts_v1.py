@@ -351,7 +351,11 @@ class TestApprovedNewsCaptureV1:
     def test_equivalent_semantics_converge_and_material_changes_diverge(self):
         first = _capture()
         equivalent = _capture(
-            normalized_payload={"facts": {"entities": ["entity-alpha"], "material": False}, "headline": "A bounded event fixture"}
+            normalized_payload={
+                "facts": {"entities": ["entity-alpha"], "material": False},
+                "headline": "A bounded event fixture",
+                "event_class": "CLEAN_ROUTINE",
+            }
         )
         changed = _capture(normalized_payload={**_payload(), "severity": "MATERIAL"}, normalized_payload_hash=_sha({**_payload(), "severity": "MATERIAL"}))
         assert _identity(first) == _identity(equivalent)
