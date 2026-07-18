@@ -64,6 +64,7 @@ class TransportOutcomeV1(StrEnum):
     SUCCESS = "SUCCESS"
     TIMEOUT = "TIMEOUT"
     TRANSPORT_FAILURE = "TRANSPORT_FAILURE"
+    AUTHENTICATION_FAILURE = "AUTHENTICATION_FAILURE"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
     SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
@@ -99,6 +100,7 @@ class RuntimeFailureV1(StrEnum):
     CIRCUIT_OPEN = "CIRCUIT_OPEN"
     TIMEOUT = "TIMEOUT"
     TRANSPORT_FAILURE = "TRANSPORT_FAILURE"
+    AUTHENTICATION_FAILURE = "AUTHENTICATION_FAILURE"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
     MALFORMED_RESPONSE = "MALFORMED_RESPONSE"
     SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
@@ -637,6 +639,12 @@ class ShadowProviderRuntimeV1:
                 response = {"outcome": "TRANSPORT_FAILURE"}
             except Exception:
                 response = {"outcome": "TRANSPORT_FAILURE"}
+            if (
+                isinstance(response, Mapping)
+                and set(response) == {"outcome"}
+                and response["outcome"] == "AUTHENTICATION_REJECTED"
+            ):
+                response = {"outcome": "AUTHENTICATION_FAILURE"}
             if not isinstance(response, Mapping):
                 return _result(invocation, status="FAILED", count=number,
                     outcome="MALFORMED_RESPONSE", failure="MALFORMED_RESPONSE",
