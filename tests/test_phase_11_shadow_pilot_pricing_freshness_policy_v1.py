@@ -245,6 +245,7 @@ def test_reason_codes_are_exact_canonical_and_reject_missing_duplicate_or_author
     for reasons in (
         POLICY_REASONS[:-1],
         POLICY_REASONS + (POLICY_REASONS[0],),
+        ("MATERIAL_VARIANT",),
         POLICY_REASONS + ("UNKNOWN_REASON",),
         POLICY_REASONS + ("PRICING_REVALIDATION_COMPLETED",),
         POLICY_REASONS + ("LAUNCH_AUTHORIZED",),
@@ -255,9 +256,16 @@ def test_reason_codes_are_exact_canonical_and_reject_missing_duplicate_or_author
 def test_canonical_identity_converges_diverges_and_future_module_has_no_time_or_side_effect_surface():
     first = _evidence(reason_codes=tuple(reversed(POLICY_REASONS)))
     second = _evidence(reason_codes=POLICY_REASONS)
-    variant = _evidence(reason_codes=("MATERIAL_VARIANT",))
+    payload = {
+        name: getattr(first, name)
+        for name in first.__dataclass_fields__
+        if name != "evidence_id"
+    }
+    material_variant = dict(payload)
+    material_variant["maximum_reusable_pricing_evidence_age_seconds"] = 1
     assert first.identity == second.identity
-    assert first.identity != variant.identity
+    assert sha256_hex(canonical_json_bytes(payload)) == first.identity
+    assert sha256_hex(canonical_json_bytes(material_variant)) != first.identity
     assert canonical_json_bytes({"b": "é", "a": 1}) == b'{"a":1,"b":"\\xc3\\xa9"}'
     assert sha256_hex(b"zero-reuse-pricing-policy") == "9e194b63981d1f703dec7945339bab452d607d12362b80d6a0d5c4fdd19fcabe"
     evidence = get_phase_11_shadow_pilot_pricing_freshness_policy_evidence_v1()
