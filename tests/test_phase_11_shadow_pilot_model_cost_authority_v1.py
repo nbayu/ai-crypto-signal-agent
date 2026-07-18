@@ -151,7 +151,8 @@ def test_every_provider_bound_has_exact_token_one_attempt_and_no_retry_rules():
 
 
 def test_provider_bound_rejects_role_model_provider_token_attempt_and_retry_variance():
-    _reject_bound(role="UNKNOWN")
+    with pytest.raises(ShadowPhase11PilotAuthorityValidationError):
+        _bound("UNKNOWN")
     _reject_bound(provider="ANTHROPIC")
     _reject_bound(model_identifier="claude-opus-4-8")
     _reject_bound(model_identifier="")
