@@ -357,14 +357,15 @@ def test_exact_model_price_token_and_no_retry_bounds_are_frozen_with_decimal_cei
 
 
 def test_sonnet_promotion_cannot_reduce_the_conservative_cost_bound():
-    _reject_model(
-        role=ShadowPhase11PilotProviderRoleV1.L1,
-        conservative_input_price_usd_per_million=Decimal("2"),
-        conservative_output_price_usd_per_million=Decimal("10"),
-        maximum_input_cost_micro_usd=Decimal("32000"),
-        maximum_output_cost_micro_usd=Decimal("20000"),
-        maximum_call_cost_micro_usd=Decimal("52000"),
-    )
+    with pytest.raises(ShadowPhase11PricingCostBoundValidationError):
+        _model_bound(
+            ShadowPhase11PilotProviderRoleV1.L1,
+            conservative_input_price_usd_per_million=Decimal("2"),
+            conservative_output_price_usd_per_million=Decimal("10"),
+            maximum_input_cost_micro_usd=Decimal("32000"),
+            maximum_output_cost_micro_usd=Decimal("20000"),
+            maximum_call_cost_micro_usd=Decimal("52000"),
+        )
     with pytest.raises(ShadowPhase11PricingCostBoundValidationError):
         _model_bound(
             ShadowPhase11PilotProviderRoleV1.L1,
