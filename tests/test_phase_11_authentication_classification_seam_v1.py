@@ -52,6 +52,7 @@ ADAPTER_PATH = Path("engine/phase_11_provider_transport_adapters_v1.py")
 RUNTIME_PATH = Path("engine/phase_11_shadow_provider_runtime_v1.py")
 AUTHENTICATION_REJECTED = "AUTHENTICATION_REJECTED"
 AUTHENTICATION_FAILURE = "AUTHENTICATION_FAILURE"
+UNRECOGNIZED_NORMALIZED_OUTCOME = "UNRECOGNIZED_NORMALIZED_OUTCOME"
 
 
 def _text_hash(value: str) -> str:
@@ -288,20 +289,24 @@ def _runtime_invocation(maximum_attempts: int) -> ShadowProviderInvocationV1:
 class _SanitizedAuthenticationTransport:
     """A counter-only fake: no HTTP client, credential, or account state."""
 
-    def __init__(self) -> None:
+    def __init__(self, outcome: str = AUTHENTICATION_REJECTED) -> None:
         self.calls: list[tuple[object, int]] = []
+        self.outcome = outcome
 
     def __call__(self, request: object, timeout_ms: int) -> object:
         self.calls.append((request, timeout_ms))
-        return {"outcome": AUTHENTICATION_REJECTED}
+        return {"outcome": self.outcome}
 
 
 def _enum_values(enum_type: type[object]) -> set[str]:
     return {member.value for member in enum_type}  # type: ignore[union-attr]
 
 
-def _invoke_authentication_fixture(maximum_attempts: int):
-    transport = _SanitizedAuthenticationTransport()
+def _invoke_authentication_fixture(
+    maximum_attempts: int,
+    outcome: str = AUTHENTICATION_REJECTED,
+):
+    transport = _SanitizedAuthenticationTransport(outcome)
     result = ShadowProviderRuntimeV1(transport=transport).invoke(
         _runtime_invocation(maximum_attempts)
     )
@@ -344,7 +349,10 @@ def test_runtime_outcome_enum_requires_dedicated_authentication_failure_member()
 
 
 def test_current_unknown_authentication_category_proves_the_generic_malformed_response_gap():
-    transport, result = _invoke_authentication_fixture(1)
+    transport, result = _invoke_authentication_fixture(
+        1,
+        UNRECOGNIZED_NORMALIZED_OUTCOME,
+    )
     assert len(transport.calls) == result.attempt_count == 1
     assert result.transport_outcome == TransportOutcomeV1.MALFORMED_RESPONSE.value
     assert result.failure_class == TransportOutcomeV1.MALFORMED_RESPONSE.value
@@ -374,7 +382,7 @@ def test_authentication_failure_is_not_added_to_the_existing_retryable_boundary(
 
 def test_sanitized_fixture_has_no_secret_or_operational_authority_surface():
     transport = _SanitizedAuthenticationTransport()
-    assert set(vars(transport)) == {"calls"}
+    assert set(vars(transport)) == {"calls", "outcome"}
     assert transport.calls == []
     assert not {
         "api_key", "token", "password", "authorization_header", "credential",
