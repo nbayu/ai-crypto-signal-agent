@@ -125,14 +125,19 @@ def _dimension_decision(
     decision: ShadowPhase11OwnerEvidenceDecisionV1 = ShadowPhase11OwnerEvidenceDecisionV1.ACCEPTED,
     readiness: ShadowPhase11EvidenceReadinessV1 = ShadowPhase11EvidenceReadinessV1.AVAILABLE,
 ) -> ShadowPhase11OwnerDimensionDecisionV1:
+    dimension_label = (
+        dimension.value
+        if isinstance(dimension, ShadowPhase11EvidenceDimensionV1)
+        else str(dimension)
+    )
     return ShadowPhase11OwnerDimensionDecisionV1(
         schema_version="phase11-shadow-owner-dimension-decision-v1",
         owner_dimension_decision_id=None,
         dimension=dimension,
         owner_decision=decision,
         source_readiness=readiness,
-        owner_rationale="SYNTHETIC CONTRACT DECISION FOR " + dimension.value,
-        evidence_references=(_id("dimension-reference-" + dimension.value),),
+        owner_rationale="SYNTHETIC CONTRACT DECISION FOR " + dimension_label,
+        evidence_references=(_id("dimension-reference-" + dimension_label),),
         reason_codes=("SYNTHETIC_OWNER_DIMENSION_DECISION",),
     )
 
