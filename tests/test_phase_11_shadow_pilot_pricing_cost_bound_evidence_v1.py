@@ -230,7 +230,12 @@ def _route(route: ShadowPhase11PilotRouteV1, **overrides: object) -> ShadowPhase
         ShadowPhase11PilotRouteV1.DIRECT_L2: ((bounds[ShadowPhase11PilotProviderRoleV1.PRIMARY].identity, bounds[ShadowPhase11PilotProviderRoleV1.L2].identity), 2, Decimal("138700"), Decimal("138700")),
         ShadowPhase11PilotRouteV1.L1_TO_L2: ((bounds[ShadowPhase11PilotProviderRoleV1.PRIMARY].identity, bounds[ShadowPhase11PilotProviderRoleV1.L1].identity, bounds[ShadowPhase11PilotProviderRoleV1.L2].identity), 3, Decimal("190700"), Decimal("216700")),
     }
-    sequence, calls, current, conservative = assignments[route]
+    template_route = (
+        route
+        if route in assignments
+        else ShadowPhase11PilotRouteV1.L0
+    )
+    sequence, calls, current, conservative = assignments[template_route]
     values = {
         "schema_version": "phase11-route-cost-bound-v1",
         "route_bound_id": None,
