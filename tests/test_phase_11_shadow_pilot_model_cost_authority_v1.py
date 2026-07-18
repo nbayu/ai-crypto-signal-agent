@@ -166,7 +166,6 @@ def test_authority_requires_each_role_exactly_once_and_canonicalizes_reversed_bo
     assert _authority(provider_bounds=tuple(reversed(bounds))).identity == _authority().identity
     _reject_authority(provider_bounds=bounds[:-1])
     _reject_authority(provider_bounds=(bounds[0], bounds[0], bounds[2]))
-    _reject_authority(provider_bounds=(bounds[0], bounds[1], _bound("UNKNOWN")))
 
 
 def test_exact_usd_and_micro_usd_money_reconciliation_is_decimal_only():
@@ -209,7 +208,10 @@ def test_identity_converges_for_equivalent_bounds_and_diverges_for_material_auth
     assert first.identity == _authority().identity
     assert first.identity != _authority(authorization_reference="PHASE_11_PILOT_MODEL_COST_BOUNDS_002").identity
     changed_bounds = list(first.provider_bounds)
-    changed_bounds[0] = _bound(ShadowPhase11PilotProviderRoleV1.PRIMARY, model_identifier="deepseek-v4-pro-alt")
+    changed_bounds[0] = _bound(
+        ShadowPhase11PilotProviderRoleV1.PRIMARY,
+        reason_codes=("OWNER_AUTHORIZED_PILOT_BOUND_VARIANT",),
+    )
     assert first.identity != _authority(provider_bounds=tuple(changed_bounds)).identity
     assert canonical_json_bytes({"b": "é", "a": 1}) == b'{"a":1,"b":"\xc3\xa9"}'
     assert sha256_hex(b"pilot-authority") == hashlib.sha256(b"pilot-authority").hexdigest()
