@@ -317,9 +317,9 @@ def test_owner_review_dimensions_are_independent_evidence_readiness_only():
 
 
 def test_mechanical_readiness_remains_evidence_only_for_not_ready_and_insufficient_cases():
-    critical = list(_assurance().domain_evidence); critical[0] = _control_domain(ShadowPhase11ControlDomainV1.AUTHORITY, critical=1)
+    critical = list(_assurance().domain_evidence); critical[1] = _control_domain(ShadowPhase11ControlDomainV1.AUTHORITY, critical=1)
     assert _report(control_assurance_evidence=_assurance(tuple(critical))).mechanical_readiness is ShadowPhase11MechanicalReadinessV1.NOT_READY
-    unavailable = list(_assurance().domain_evidence); unavailable[0] = _control_domain(ShadowPhase11ControlDomainV1.AUTHORITY, readiness=ShadowPhase11EvidenceReadinessV1.UNAVAILABLE)
+    unavailable = list(_assurance().domain_evidence); unavailable[1] = _control_domain(ShadowPhase11ControlDomainV1.AUTHORITY, readiness=ShadowPhase11EvidenceReadinessV1.UNAVAILABLE)
     assert _report(control_assurance_evidence=_assurance(tuple(unavailable))).mechanical_readiness is ShadowPhase11MechanicalReadinessV1.INSUFFICIENT_EVIDENCE
 
 
