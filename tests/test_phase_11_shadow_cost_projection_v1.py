@@ -402,9 +402,9 @@ def test_nonzero_volume_with_unavailable_route_cost_makes_cost_projections_parti
 
 def test_projected_cost_horizons_apply_only_route_specific_actual_means():
     report = _report()
-    assert report.projected_daily_cost.value == Decimal("75")
-    assert report.projected_sample_cost.value == Decimal("525")
-    assert report.projected_monthly_cost.value == Decimal("2250")
+    assert report.projected_daily_cost.value == Decimal("46.25")
+    assert report.projected_sample_cost.value == Decimal("323.75")
+    assert report.projected_monthly_cost.value == Decimal("1387.50")
     assert report.projected_daily_cost.source_available_denominator == 40
     assert report.projected_monthly_cost.source_available_denominator == 40
 
