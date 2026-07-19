@@ -206,7 +206,8 @@ def test_fail_closed_preconditions_do_not_invoke_fake_factory_or_probe() -> None
 
 
 def test_fake_structural_preflight_remains_zero_network_and_zero_execution() -> None:
-    probe, factory = _FakeProbe(), _FakeFactory(probe)
+    probe = _FakeProbe()
+    factory = _FakeFactory(probe)
     result = evaluate_provider_connectivity_preflight_v1(_endpoint(), _policy(), _preflight(), factory)
     assert result.accepted is True
     assert result.connectivity_metadata_ready is True
@@ -217,7 +218,8 @@ def test_fake_structural_preflight_remains_zero_network_and_zero_execution() -> 
 
 
 def test_audit_evidence_is_identity_bound_redacted_and_non_operational() -> None:
-    probe, factory = _FakeProbe(), _FakeFactory(probe)
+    probe = _FakeProbe()
+    factory = _FakeFactory(probe)
     endpoint, policy, preflight = _endpoint(), _policy(), _preflight()
     result = evaluate_provider_connectivity_preflight_v1(endpoint, policy, preflight, factory)
     evidence = build_provider_connectivity_audit_evidence_v1(endpoint, policy, preflight, result)
