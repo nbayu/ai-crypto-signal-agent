@@ -131,7 +131,7 @@ def test_public_contract_is_closed_immutable_and_secret_free() -> None:
 
 
 @pytest.mark.parametrize(
-    ("request", "verifier", "code"),
+    ("verification_request", "verifier", "code"),
     (
         (_request(succeeded=False), _Verifier(True), "SECRET_RESOLUTION_NOT_SUCCESSFUL"),
         (_request(present=False), _Verifier(True), "SECRET_NOT_PRESENT"),
@@ -141,9 +141,9 @@ def test_public_contract_is_closed_immutable_and_secret_free() -> None:
     ),
 )
 def test_preconditions_fail_before_verifier_invocation(
-    request: CredentialVerificationRequestV1, verifier: object, code: str
+    verification_request: CredentialVerificationRequestV1, verifier: object, code: str
 ) -> None:
-    result = verify_credential_reference_v1(request, verifier)
+    result = verify_credential_reference_v1(verification_request, verifier)
     if verifier is not None:
         assert verifier.invocations == 0
     assert result.verification_attempted is False
