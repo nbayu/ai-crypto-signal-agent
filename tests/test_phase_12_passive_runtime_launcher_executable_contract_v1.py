@@ -102,10 +102,12 @@ def _configuration(**overrides: object) -> PassiveRuntimeLauncherConfigurationV1
 
 
 def _signal(**overrides: object) -> PassiveRuntimeLauncherSyntheticSignalV1:
-    return PassiveRuntimeLauncherSyntheticSignalV1(
-        signal_id="synthetic-signal-v1", signal_classification="SYNTHETIC_SIGTERM",
-        **overrides,
-    )
+    values = {
+        "signal_id": "synthetic-signal-v1",
+        "signal_classification": "SYNTHETIC_SIGTERM",
+    }
+    values.update(overrides)
+    return PassiveRuntimeLauncherSyntheticSignalV1(**values)
 
 
 def _shutdown(**overrides: object) -> PassiveRuntimeLauncherShutdownRequestV1:
