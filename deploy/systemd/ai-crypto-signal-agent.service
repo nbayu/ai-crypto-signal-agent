@@ -1,0 +1,37 @@
+[Unit]
+Description=AI Crypto Signal Agent passive production service
+After=network.target
+
+[Service]
+Type=simple
+User=ai-crypto-signal-agent
+Group=ai-crypto-signal-agent
+WorkingDirectory=/opt/ai-crypto-signal-agent
+ExecStart=/opt/ai-crypto-signal-agent/.venv/bin/python -m engine.phase_12_passive_runtime_launcher_executable_contract_v1
+Restart=no
+StandardOutput=journal
+StandardError=journal
+UMask=0027
+StateDirectory=ai-crypto-signal-agent
+StateDirectoryMode=0750
+CacheDirectory=ai-crypto-signal-agent
+CacheDirectoryMode=0750
+RuntimeDirectory=ai-crypto-signal-agent
+RuntimeDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
