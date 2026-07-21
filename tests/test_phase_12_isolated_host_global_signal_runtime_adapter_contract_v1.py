@@ -229,7 +229,7 @@ def test_main_thread_registration_captures_redacted_previous_handlers_in_order()
 
 
 @pytest.mark.parametrize(
-    ("request", "adapter", "failure_code"),
+    ("registration_request_case", "adapter", "failure_code"),
     (
         (_request(thread_classification="WORKER_THREAD"), _adapter(), "MAIN_THREAD_CLASSIFICATION_REQUIRED"),
         (_request(thread_classification=""), _adapter(), "CALLER_SUPPLIED_THREAD_CLASSIFICATION_REQUIRED"),
@@ -245,12 +245,12 @@ def test_main_thread_registration_captures_redacted_previous_handlers_in_order()
     ),
 )
 def test_registration_rejections_are_fail_closed(
-    request: IsolatedHostGlobalSignalRegistrationRequestV1,
+    registration_request_case: IsolatedHostGlobalSignalRegistrationRequestV1,
     adapter: IsolatedHostGlobalSignalModuleAdapterV1,
     failure_code: str,
 ) -> None:
     result = register_isolated_host_global_signal_handlers_v1(
-        policy=_policy(), adapter=adapter, request=request, state=_registration_state(),
+        policy=_policy(), adapter=adapter, request=registration_request_case, state=_registration_state(),
     )
     assert result.registered is False
     assert failure_code in result.failure_codes
