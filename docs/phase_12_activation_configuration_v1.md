@@ -1,6 +1,6 @@
 # Phase 12 — Non-Secret Activation Configuration V1
 
-Status: **Activation configuration V1 and coordinator integration committed and remotely locked; authorization-verifier and executable-default changes are local, focused green, not committed or deployed**
+Status: **Activation configuration V1 and coordinator integration committed and remotely locked; authorization-verifier, executable-default, and authorization-record parser changes are local, focused green, not committed or deployed**
 Production state: **Canonical configuration is `CLOSED`; all configurable gates are closed**
 Service state: **Loaded, disabled, failed/failed (`MainPID=0`, `NRestarts=0)**
 Canonical schema: `phase12-activation-v1`
@@ -417,6 +417,63 @@ non-string or empty result is rejected before lexical validation. Lexical valida
 Telegram authentication. Credential values never appear in output, logs, documentation examples,
 or exceptions.
 
+### Authorization-record document parser
+
+The local parser mechanism is implemented in engine/phase_12_activation_mode_authorization_record_parser_v1. It accepts caller-supplied document text only; it does not locate, load, authenticate, or trust a document source.
+
+Public API:
+
+    Phase12ActivationAuthorizationRecordDocumentErrorV1
+
+    parse_phase_12_activation_authorization_record_v1(
+        *,
+        document: str,
+    ) -> Phase12ActivationAuthorizationRecordV1
+
+The document argument is keyword-only. The parser accepts neither file paths nor byte input, returns the existing immutable authorization-record type, and makes no authorization decision.
+
+#### Strict parser document schema
+
+The parser accepts exactly this ordered eight-line schema:
+
+    schema_version=phase12-activation-authorization-record-v1
+    mode=<MODE>
+    owner_authorization_id=<VALUE>
+    checkpoint_id=<VALUE>
+    approved_locked_commit=<LOWERCASE_SHA1>
+    approval_timestamp_utc=<UTC_Z_TIMESTAMP>
+    expires_at_utc=<UTC_Z_TIMESTAMP>
+    accepted_locked_commit=<LOWERCASE_SHA1>
+
+The document has exactly eight lines, LF-only line endings, and exactly one terminal LF. Keys use the exact order and casing above. Every line has exactly one delimiter and a nonblank value. Comments, a BOM, CR or CRLF, leading or trailing whitespace, unknown, missing, duplicate, or reordered keys are rejected. This section contains placeholders only; it does not provide authorization evidence.
+
+The schema version is exactly phase12-activation-authorization-record-v1. The only syntactically accepted modes are:
+
+- CREDENTIAL_VALIDATION
+- TELEGRAM_CONNECTIVITY_VALIDATION
+- TELEGRAM_START_VALIDATION
+- CONTROLLED_WORKLOAD
+
+CLOSED, PRODUCTION, malformed modes, and unknown modes are rejected by parser syntax. Identifiers are lowercase alphanumeric and hyphen, length 1 through 64, with no whitespace or control characters.
+
+Both commit fields are lowercase hexadecimal with exactly 40 characters, no prefix, abbreviation, uppercase, or whitespace. Their values may differ syntactically. Equality between approved and accepted commits is verifier policy responsibility, not parser responsibility.
+
+Timestamps require strict UTC Z notation at second precision. Successful parsing returns timezone-aware UTC datetimes; local-time and offset variants are rejected. Calendar-invalid, padded, trailing, missing-Z, equal, and reversed timestamp values are rejected. The approval timestamp must be strictly earlier than the expiration timestamp.
+
+#### Output, errors, and purity
+
+A successful parse returns Phase12ActivationAuthorizationRecordV1 with its seven authorization-evidence fields only. The existing output remains immutable and slotted, has no __dict__, and has a fixed sanitized representation.
+
+A malformed document raises Phase12ActivationAuthorizationRecordDocumentErrorV1 with the fixed text INVALID_AUTHORIZATION_RECORD_DOCUMENT. The error reveals no input content, identifier, checkpoint, commit, timestamp, mode, key, line number, or mismatch reason.
+
+The parser is deterministic: repeated parsing of identical valid text produces equal immutable records. It has no filesystem or file-path access; environment or argv access; Git or subprocess; systemd; credential access; Telegram SDK; network; provider integration; logging; retry; cache; dynamic clock; or mutable registry.
+
+#### Mechanism is not an approval source
+
+The parser mechanism is implemented, but no production record locator, approval-document loader, ownership or permission authentication, trusted approval source, approval record deployment, or authorization-policy composition exists. The parser is not wired into the executable. Parsed records are not composed into the production verifier, whose production policy remains empty and fail-closed.
+
+Parsing a syntactically valid record is not sufficient authorization and grants no operational authorization. The executable has no production approval record, loader, source, or parser wiring; every production-default non-CLOSED request remains fail-closed.
+
 ## Result taxonomy
 
 | Condition | Fixed result | Exit |
@@ -500,7 +557,7 @@ operationally deployed or validated, and no real credential, Telegram, network, 
 publication, ledger, trading, or production validation was executed for the coordinator change. The
 service remains disabled and production gates remain closed.
 
-Current local authorization-verifier and executable-default regression evidence:
+Prior remotely locked authorization-verifier and executable-default regression evidence:
 
 - Activation configuration reader: 74 passed.
 - Authorization verifier: 49 passed.
@@ -514,6 +571,31 @@ Current local authorization-verifier and executable-default regression evidence:
 - Xfails: 0.
 - Retries: 0.
 
+Authorization-record parser combined focused regression:
+
+- Activation configuration reader: 74 passed.
+- Authorization-record parser: 60 passed.
+- Activation-mode authorization verifier: 49 passed.
+- Activation-mode validation coordinator: 55 passed.
+- Credential-aware executable: 19 passed.
+- Total: 257 passed in 7.74s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+Authorization-record parser full repository regression:
+
+- 4,258 passed in 53.37s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+The parser implementation, tests, and documentation remain local, uncommitted, unpushed, and undeployed. This regression evidence applies to the exact current parser implementation, parser test, and documentation state. The parser remains unwired into production; no approval record, loader, source, or policy composition exists; and the production policy remains empty and fail-closed. No real configuration, credential, Telegram, network, runtime, or production action occurred.
+
 The coordinator commit remains remotely locked at
 `cac05b1b63ee60e65bfe9f383f19d686cc422632`; the canonical `CLOSED` configuration remains deployed
 and parser-validated, and the service remains disabled. The verifier and executable-default changes
@@ -525,8 +607,12 @@ or production validation occurred.
 Capability status for this local slice:
 
 - Non-CLOSED authorization mechanism: **IMPLEMENTED_AND_TESTED**.
-- Production authorization policy: **IMPLEMENTED_BUT_EMPTY_FAIL_CLOSED**.
+- Authorization-record document parser: **IMPLEMENTED_AND_REGRESSION_VALIDATED_LOCAL**.
+- Production approval-record loader: **MISSING**.
 - Production approval-record source: **MISSING / NOT AUTHORIZED**.
+- Authorization-policy composition: **MISSING**.
+- Production verifier policy: **IMPLEMENTED_BUT_EMPTY_FAIL_CLOSED**.
+- Deployment: **LOCAL_UNCOMMITTED_UNPUSHED_UNDEPLOYED**.
 - Operational authorization: **NOT GRANTED**.
 
 ## Rollout and rollback policy
