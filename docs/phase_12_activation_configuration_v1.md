@@ -1,6 +1,6 @@
 # Phase 12 — Non-Secret Activation Configuration V1
 
-Status: **Activation configuration V1 committed and remotely locked at `415c77c4b9a021bbc211797d7b41e74c55c18538`; coordinator integration local, focused green, not committed or deployed**
+Status: **Activation configuration V1 and coordinator integration committed and remotely locked; authorization-verifier and executable-default changes are local, focused green, not committed or deployed**
 Production state: **Canonical configuration is `CLOSED`; all configurable gates are closed**
 Service state: **Loaded, disabled, failed/failed (`MainPID=0`, `NRestarts=0)**
 Canonical schema: `phase12-activation-v1`
@@ -208,6 +208,33 @@ activation environment variable to obtain the accepted commit. Current effect-be
 defaults are fail-closed; no concrete Telegram identity-probe or start-validation adapter is
 implemented or deployed.
 
+### Activation-mode authorization verifier
+
+The local verifier module is `engine.phase_12_activation_mode_authorization_verifier_v1`. Its
+public types are `Phase12ActivationAuthorizationRecordV1` and
+`Phase12ActivationModeAuthorizationVerifierV1`.
+
+The verifier is a pure, deterministic, immutable callable policy object. It receives `now_utc`
+from its caller and returns only a boolean authorization decision. It performs no filesystem,
+environment, Git, subprocess, systemd, credential, SDK, or network access. The coordinator remains
+responsible for effect ordering, fixed authorization-failure result mapping, unexpected ordinary
+failure mapping, BaseException behavior, and preventing effect-bearing dependency reachability
+before authorization.
+
+An authorization record has keyword-only construction and exactly these evidence fields:
+
+- `mode`
+- `owner_authorization_id`
+- `checkpoint_id`
+- `approved_locked_commit`
+- `approval_timestamp_utc`
+- `expires_at_utc`
+- `accepted_locked_commit`
+
+Records are immutable and slotted, have no dynamic attributes, and contain no credentials, tokens,
+provider keys, endpoints, or runtime dependencies. Their representation is fixed and sanitized: it
+reveals no field values. Record contents must not be rendered, logged, or emitted.
+
 ## Mode behavior and effect boundaries
 
 ### `CLOSED`
@@ -339,6 +366,50 @@ Exit status: `1`. Authorization evidence and the accepted commit context are not
 are not taken from argv or activation environment variables, and remain separate from configuration
 correlation metadata. Current production defaults fail closed.
 
+### Exact authorization policy
+
+The verifier returns `True` only when exactly one record matches all required evidence: an accepted
+non-`CLOSED` mode, owner authorization ID, checkpoint ID, configuration-approved locked commit,
+approval timestamp, expiration timestamp, separately supplied accepted locked commit, and the
+current UTC validity window. The validity rule is exactly:
+
+`approval_timestamp_utc <= now_utc < expires_at_utc`
+
+It denies zero matches, duplicate exact matches, `CLOSED`, `PRODUCTION`, malformed or unknown
+modes, empty or mismatched evidence, partial or prefix commit matches, naive timestamps, a time
+before approval, a time at or after expiration, and malformed policy members. Configuration
+evidence alone never authorizes a mode.
+
+Authorization requires agreement among the configuration-approved locked commit, the separately
+trusted accepted locked-commit context, the record-approved locked commit, and the record-accepted
+locked commit. No live Git lookup occurs; accepted commit evidence is not read from environment or
+argv, and it is not printed or logged. Configuration correlation metadata is not approval.
+
+The executable injects the verifier through its existing keyword-only dependency seam and uses one
+immutable verifier with an empty record tuple as its production default. No production authorization
+record or record source exists. Therefore every production-default non-`CLOSED` request remains
+rejected with:
+
+```json
+{"executable_result":"ACTIVATION_MODE_AUTHORIZATION_FAILURE"}
+```
+
+Exit status: `1`. Replacing the former raw always-false helper with this empty verifier does not open
+a gate. The executable forwards configuration evidence and accepted-commit context to the
+coordinator; it does not perform policy matching itself. CLOSED-before-locator behavior, deferred
+credential reading, and unchanged coordinator-tuple pass-through remain preserved. No environment,
+argv, filesystem, Git, systemd, credential, SDK, or network approval source is added.
+
+Expected ordinary mismatches return `False` and the verifier emits no result tuple. Unexpected
+ordinary exceptions propagate to the coordinator/executable boundary, which maps them to:
+
+```json
+{"executable_result":"UNEXPECTED_FAILURE"}
+```
+
+Exit status: `70`. BaseException propagates unchanged under the frozen boundary policy. There is no
+retry, cache, fallback approval, first-match selection for duplicates, or dynamic mismatch reason.
+
 For a non-`CLOSED` mode requiring credential capability, the executable validates only the secure
 `CREDENTIALS_DIRECTORY` locator and constructs a deferred reader. It does not read credential
 content before coordinator authorization. The coordinator resolves the reader at most once; a
@@ -408,7 +479,7 @@ Previously committed activation-configuration evidence for the remotely locked b
 - Prior full repository regression: 4104 passed in 53.43s.
 - Failures, errors, skips, xfails, and retries: 0.
 
-Current local, uncommitted coordinator and executable-integration regression evidence:
+Previously accepted coordinator and executable-integration regression evidence:
 
 - Activation configuration reader: 74 passed.
 - Coordinator: 55 passed.
@@ -421,13 +492,42 @@ Current local, uncommitted coordinator and executable-integration regression evi
 - Xfails: 0.
 - Retries: 0.
 
-The coordinator and executable integration are focused and full-regression green, but are not yet
-committed, pushed, or deployed. The canonical `CLOSED` configuration is deployed and
-parser-validated, and the one separately authorized installed-service `CLOSED` validation produced
-`{"launcher_result":"BLOCKED"}`. No non-`CLOSED` configuration was operationally deployed or
-validated, and no real credential, Telegram, network, runtime, workload, publication, ledger,
-trading, or production validation was executed for the coordinator change. The service remains
-disabled and production gates remain closed.
+The coordinator and executable integration are focused and full-regression green and remotely
+locked, but are not deployed to the installed service. The canonical `CLOSED` configuration is
+deployed and parser-validated, and the one separately authorized installed-service `CLOSED`
+validation produced `{"launcher_result":"BLOCKED"}`. No non-`CLOSED` configuration was
+operationally deployed or validated, and no real credential, Telegram, network, runtime, workload,
+publication, ledger, trading, or production validation was executed for the coordinator change. The
+service remains disabled and production gates remain closed.
+
+Current local authorization-verifier and executable-default regression evidence:
+
+- Activation configuration reader: 74 passed.
+- Authorization verifier: 49 passed.
+- Mode-validation coordinator: 55 passed.
+- Executable: 19 passed.
+- Combined focused: 197 passed in 3.72s.
+- Full repository regression: 4198 passed in 44.28s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+The coordinator commit remains remotely locked at
+`cac05b1b63ee60e65bfe9f383f19d686cc422632`; the canonical `CLOSED` configuration remains deployed
+and parser-validated, and the service remains disabled. The verifier and executable-default changes
+are focused and full-regression green, but remain local, uncommitted, unpushed, and undeployed. The
+production authorization policy remains empty, no approval record exists, and no non-`CLOSED` mode
+is authorized. No service execution occurred, and no real credential, Telegram, network, runtime,
+or production validation occurred.
+
+Capability status for this local slice:
+
+- Non-CLOSED authorization mechanism: **IMPLEMENTED_AND_TESTED**.
+- Production authorization policy: **IMPLEMENTED_BUT_EMPTY_FAIL_CLOSED**.
+- Production approval-record source: **MISSING / NOT AUTHORIZED**.
+- Operational authorization: **NOT GRANTED**.
 
 ## Rollout and rollback policy
 
@@ -444,3 +544,9 @@ against real credentials; Telegram identity probing; Telegram application initia
 message sending; update processing; worker or provider execution; publication; ledger mutation;
 trading; service start or enablement; `reset-failed`; or persistent production operation. Every
 such operational action requires a later separate authorization.
+
+The authorization-verifier slice also does not authorize approval-record deployment, non-`CLOSED`
+configuration deployment, real credential reading, Telegram connectivity or start validation,
+service execution, polling, update handling, worker/provider execution, publication, ledger
+mutation, trading, controlled workload execution, or production activation. Every operational
+approval remains a later separately authorized step.

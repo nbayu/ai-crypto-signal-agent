@@ -470,3 +470,13 @@ def test_configuration_failure_remains_executable_owned_before_coordinator_dispa
     )
     assert result == (1, "{\"executable_result\":\"ACTIVATION_CONFIGURATION_FAILURE\"}")
     assert coordinator.calls == []
+
+
+def test_production_authorization_default_is_one_empty_immutable_verifier_policy() -> None:
+    signature = inspect.signature(run_phase_12_telegram_credential_aware_executable)
+    default = signature.parameters["authorization_verifier"].default
+    source = inspect.getsource(module)
+    assert "phase_12_activation_mode_authorization_verifier_v1" in source
+    assert default.__class__.__name__ == "Phase12ActivationModeAuthorizationVerifierV1"
+    assert default.records == ()
+    assert default is not module._authorization_rejected

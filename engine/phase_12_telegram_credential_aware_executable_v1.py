@@ -15,6 +15,9 @@ from engine.phase_12_activation_configuration_v1 import (
 from engine.phase_12_activation_mode_validation_coordinator_v1 import (
     run_phase_12_activation_mode_validation_coordinator,
 )
+from engine.phase_12_activation_mode_authorization_verifier_v1 import (
+    Phase12ActivationModeAuthorizationVerifierV1,
+)
 from engine.phase_12_telegram_production_launcher_v1 import (
     TelegramCredentialSourceMetadataV1,
     TelegramLauncherDependenciesV1,
@@ -125,6 +128,9 @@ def _authorization_rejected(**_: object) -> bool:
     return False
 
 
+_EMPTY_AUTHORIZATION_VERIFIER = Phase12ActivationModeAuthorizationVerifierV1(records=())
+
+
 def _credential_lexically_valid(*, credential: object) -> bool:
     return isinstance(credential, str) and bool(credential)
 
@@ -186,7 +192,7 @@ def run_phase_12_telegram_credential_aware_executable(
     launcher=run_phase_12_telegram_production_launcher,
     coordinator=run_phase_12_activation_mode_validation_coordinator,
     accepted_locked_commit=_ACCEPTED_LOCKED_COMMIT,
-    authorization_verifier=_authorization_rejected,
+    authorization_verifier=_EMPTY_AUTHORIZATION_VERIFIER,
     credential_validator=_credential_lexically_valid,
     identity_probe_client_factory=_no_identity_client,
     authenticated_identity_probe=_no_identity_probe,
