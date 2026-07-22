@@ -12,6 +12,9 @@ from engine.phase_12_activation_configuration_v1 import (
     Phase12ActivationConfigurationErrorV1,
     load_phase_12_activation_configuration,
 )
+from engine.phase_12_activation_mode_validation_coordinator_v1 import (
+    run_phase_12_activation_mode_validation_coordinator,
+)
 from engine.phase_12_telegram_production_launcher_v1 import (
     TelegramCredentialSourceMetadataV1,
     TelegramLauncherDependenciesV1,
@@ -32,6 +35,13 @@ _MISUSE_JSON = '{"executable_result":"MISUSE"}'
 _LOCATOR_FAILURE_JSON = '{"executable_result":"CREDENTIAL_LOCATOR_FAILURE"}'
 _UNEXPECTED_JSON = '{"executable_result":"UNEXPECTED_FAILURE"}'
 _ACTIVATION_CONFIGURATION_PATH = "/etc/ai-crypto-signal-agent/phase12-activation-v1.conf"
+_ACCEPTED_LOCKED_COMMIT = "415c77c4b9a021bbc211797d7b41e74c55c18538"
+_NON_CLOSED_MODES = frozenset((
+    "CREDENTIAL_VALIDATION",
+    "TELEGRAM_CONNECTIVITY_VALIDATION",
+    "TELEGRAM_START_VALIDATION",
+    "CONTROLLED_WORKLOAD",
+))
 
 
 def _now_utc() -> datetime:
@@ -111,6 +121,30 @@ def _reservation() -> str:
     return ""
 
 
+def _authorization_rejected(**_: object) -> bool:
+    return False
+
+
+def _credential_lexically_valid(*, credential: object) -> bool:
+    return isinstance(credential, str) and bool(credential)
+
+
+def _no_identity_client(**_: object) -> None:
+    return None
+
+
+def _no_identity_probe(**_: object) -> bool:
+    return False
+
+
+def _no_application_initializer(**_: object) -> None:
+    return None
+
+
+def _no_launcher() -> tuple[int, str]:
+    return (70, _UNEXPECTED_JSON)
+
+
 def run_phase_12_telegram_production_launcher(
     *, dependencies: TelegramLauncherDependenciesV1, credential_directory: str, gates: TelegramProductionGateStateV1
 ) -> tuple[int, str]:
@@ -150,43 +184,85 @@ def run_phase_12_telegram_credential_aware_executable(
     now_utc_provider=_now_utc,
     credential_reader=read_systemd_telegram_credential,
     launcher=run_phase_12_telegram_production_launcher,
+    coordinator=run_phase_12_activation_mode_validation_coordinator,
+    accepted_locked_commit=_ACCEPTED_LOCKED_COMMIT,
+    authorization_verifier=_authorization_rejected,
+    credential_validator=_credential_lexically_valid,
+    identity_probe_client_factory=_no_identity_client,
+    authenticated_identity_probe=_no_identity_probe,
+    application_initializer=_no_application_initializer,
+    application_shutdown=_no_action,
 ) -> tuple[int, str]:
-    """Prepare one credential-aware launcher boundary without process activation."""
+    """Dispatch one validated activation mode through the bounded coordinator."""
     try:
         now_utc = now_utc_provider()
-        configuration = configuration_reader(configuration_path=_ACTIVATION_CONFIGURATION_PATH, now_utc=now_utc)
+        configuration = configuration_reader(
+            configuration_path=_ACTIVATION_CONFIGURATION_PATH, now_utc=now_utc
+        )
     except Phase12ActivationConfigurationErrorV1:
         return (1, '{"executable_result":"ACTIVATION_CONFIGURATION_FAILURE"}')
     except Exception:
         return (70, _UNEXPECTED_JSON)
-    try:
-        directory = environment_reader(_DIRECTORY_KEY)
-    except Exception:
-        return (1, _LOCATOR_FAILURE_JSON)
-    if not _locator_is_valid(directory):
-        return (1, _LOCATOR_FAILURE_JSON)
 
-    bridge = _credential_bridge(directory=directory, reader=credential_reader)
-    dependencies = TelegramLauncherDependenciesV1(
-        credential_reader=bridge,
-        sender=_no_action,
-        worker=_no_action,
-        quota_now_provider=_zero,
-        reservation_id_provider=_reservation,
-    )
+    mode = getattr(configuration, "activation_mode", None)
+    credential_locator = _no_identity_client
+    deferred_credential_reader = _no_identity_client
+    production_launcher = _no_launcher
+
+    if mode in _NON_CLOSED_MODES:
+        try:
+            directory = environment_reader(_DIRECTORY_KEY)
+        except Exception:
+            return (1, _LOCATOR_FAILURE_JSON)
+        if not _locator_is_valid(directory):
+            return (1, _LOCATOR_FAILURE_JSON)
+        bridge = _credential_bridge(directory=directory, reader=credential_reader)
+        dependencies = TelegramLauncherDependenciesV1(
+            credential_reader=bridge,
+            sender=_no_action,
+            worker=_no_action,
+            quota_now_provider=_zero,
+            reservation_id_provider=_reservation,
+        )
+
+        def credential_locator() -> str:
+            return directory
+
+        def deferred_credential_reader(*, locator: object) -> str:
+            if locator != directory:
+                raise _safe_reader_failure()
+            return bridge(directory, _CREDENTIAL_NAME)
+
+        def production_launcher() -> tuple[int, str]:
+            return launcher(
+                dependencies=dependencies,
+                credential_directory=directory,
+                gates=TelegramProductionGateStateV1(
+                    activation_gate_open=configuration.activation_gate_open,
+                    credential_gate_open=configuration.credential_gate_open,
+                    network_gate_open=configuration.network_gate_open,
+                    workload_gate_open=configuration.workload_gate_open,
+                    telegram_start_authorized=configuration.telegram_start_authorized,
+                ),
+            )
+
     try:
-        result = launcher(dependencies=dependencies, credential_directory=directory, gates=TelegramProductionGateStateV1(activation_gate_open=configuration.activation_gate_open, credential_gate_open=configuration.credential_gate_open, network_gate_open=configuration.network_gate_open, workload_gate_open=configuration.workload_gate_open, telegram_start_authorized=configuration.telegram_start_authorized))
+        return coordinator(
+            configuration=configuration,
+            accepted_locked_commit=accepted_locked_commit,
+            now_utc=now_utc,
+            authorization_verifier=authorization_verifier,
+            credential_locator=credential_locator,
+            credential_reader=deferred_credential_reader,
+            credential_validator=credential_validator,
+            identity_probe_client_factory=identity_probe_client_factory,
+            authenticated_identity_probe=authenticated_identity_probe,
+            application_initializer=application_initializer,
+            application_shutdown=application_shutdown,
+            production_launcher=production_launcher,
+        )
     except Exception:
         return (70, _UNEXPECTED_JSON)
-    if (
-        not isinstance(result, tuple)
-        or len(result) != 2
-        or type(result[0]) is not int
-        or type(result[1]) is not str
-        or "\n" in result[1]
-    ):
-        return (70, _UNEXPECTED_JSON)
-    return result
 
 
 def _environment_metadata(name: str) -> object:

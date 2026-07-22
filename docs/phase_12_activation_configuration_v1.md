@@ -1,14 +1,15 @@
 # Phase 12 — Non-Secret Activation Configuration V1
 
-Status: **Implemented locally, focused green, not committed, not deployed**
-Production state: **Gates closed**
-Service state: **Disabled**
+Status: **Activation configuration V1 committed and remotely locked at `415c77c4b9a021bbc211797d7b41e74c55c18538`; coordinator integration local, focused green, not committed or deployed**
+Production state: **Canonical configuration is `CLOSED`; all configurable gates are closed**
+Service state: **Loaded, disabled, failed/failed (`MainPID=0`, `NRestarts=0)**
 Canonical schema: `phase12-activation-v1`
 
 ## Purpose
 
 This seam replaces executable hard-coded gate selection with a typed, non-secret configuration
-file. The existing production launcher remains the authority for gate validation. Configuration
+file. The coordinator owns mode-specific validation dispatch; the existing production launcher
+remains the authority for `CONTROLLED_WORKLOAD` preparation and gate validation. Configuration
 defects fail closed before credential lookup. The file carries no credentials and does not itself
 authorize service start or enablement, networking, workload, publication, ledger mutation, or
 trading.
@@ -24,7 +25,10 @@ The fixed path is:
 The parent directory must be owned by `root:ai-crypto-signal-agent` with mode `0750`. The file
 must be a regular, non-symlink file owned by `root:ai-crypto-signal-agent`, mode `0640`, with link
 count exactly one. Maximum payload size is 4096 bytes, encoded as strict UTF-8 with exactly one
-terminal LF. The real canonical file has not been created or deployed.
+terminal LF. The canonical `CLOSED` file is deployed, metadata-compliant, and parser-validated; no
+non-`CLOSED` configuration has been deployed. One separately authorized installed-service `CLOSED`
+validation completed with `{"launcher_result":"BLOCKED"}`. The service remains disabled; no
+credential or network validation has been operationally executed.
 
 ## Exact file schema
 
@@ -165,57 +169,202 @@ Unexpected ordinary failure:
 Exit status: `70`.
 
 This is parser-only. It performs no credential access, launcher call, SDK/network/runtime action,
-or dynamic error/configuration disclosure. It has not been authorized against the canonical real
-file.
+or dynamic error/configuration disclosure. It was used in the separately authorized deployment and
+validation of the canonical `CLOSED` file; this documentation step does not run it.
 
-## Executable integration
+## Coordinator architecture and executable dispatch
 
-The credential-aware executable uses the fixed canonical path; it is not supplied by argv,
-environment, `EnvironmentFile`, or `CREDENTIALS_DIRECTORY`.
+The local, uncommitted coordinator module is
+`engine.phase_12_activation_mode_validation_coordinator_v1`. It receives an already validated
+activation configuration, verifies separate authorization for every non-`CLOSED` mode before any
+effect-bearing dependency, owns exact mode dispatch, prevents implicit fallthrough, and applies a
+fixed sanitized result taxonomy. It has no retry or cache; ordinary `Exception` failures are
+sanitized and `BaseException` propagates according to the frozen implementation policy.
 
-Execution order is:
+The coordinator is outside the unchanged production launcher. The credential-aware executable
+forwards dependencies and returns coordinator tuples unchanged; it does not independently execute
+mode-specific validation or directly dispatch the five configuration gates into the launcher. For
+`CONTROLLED_WORKLOAD`, the coordinator delegates preparation/composition to the existing production
+launcher exactly once. `launcher_implementation_authorized` remains repository-controlled.
+
+The executable uses the fixed canonical path; it is not supplied by argv, environment,
+`EnvironmentFile`, or `CREDENTIALS_DIRECTORY`. Its high-level order is:
 
 1. CLI argument validation.
 2. UTC current-time acquisition.
 3. Activation configuration load.
-4. `CREDENTIALS_DIRECTORY` lookup.
-5. Credential-locator validation.
-6. Deferred credential-bridge construction.
-7. Launcher dependency construction.
-8. Launcher invocation.
-9. Launcher tuple pass-through.
+4. For `CLOSED`, direct coordinator dispatch before credential-locator lookup.
+5. For non-`CLOSED` modes, secure credential-locator prerequisite construction.
+6. Deferred credential-reader construction.
+7. Exactly one coordinator invocation.
+8. Unchanged coordinator tuple return.
 
-## Executable results
+The executable supplies the coordinator with the validated configuration, separately trusted
+accepted locked-commit context, authorization verifier, deferred credential reader, lexical
+validator, identity-client factory, authenticated identity probe, application initializer,
+application shutdown seam, and production-launcher dependency. It does not make an independent
+authorization decision, invoke the production launcher separately, or use Git, argv, or an
+activation environment variable to obtain the accepted commit. Current effect-bearing production
+defaults are fail-closed; no concrete Telegram identity-probe or start-validation adapter is
+implemented or deployed.
 
-Configuration defect:
+## Mode behavior and effect boundaries
+
+### `CLOSED`
+
+The coordinator returns:
 
 ```json
-{"executable_result":"ACTIVATION_CONFIGURATION_FAILURE"}
+{"launcher_result":"BLOCKED"}
+```
+
+Exit status: `1`. It performs no authorization verification, locator lookup, credential read,
+lexical validation, SDK/client construction, identity probe, application initialization or
+shutdown, production-launcher call, or workload effect.
+
+### `CREDENTIAL_VALIDATION`
+
+Separate authorization is verified first. After success, the coordinator resolves the deferred
+credential at most once and performs local lexical validation only. This does not claim Telegram
+authentication, live-bot ownership, or Bot API reachability. It does not construct an SDK/client
+or perform network, application, launcher, polling, worker, publication, ledger, or trading work.
+
+Success:
+
+```json
+{"activation_mode_validation_result":"CREDENTIAL_VALID"}
+```
+
+Exit status: `0`. Controlled failure:
+
+```json
+{"activation_mode_validation_result":"CREDENTIAL_INVALID"}
 ```
 
 Exit status: `1`.
 
-Unexpected ordinary executable or configuration failure:
+### `TELEGRAM_CONNECTIVITY_VALIDATION`
+
+Separate authorization, deferred credential resolution, and lexical validation occur before one
+injected client construction and exactly one injected authenticated identity probe. The coordinator
+does not poll, send a message, process updates, initialize an application, invoke the launcher,
+or perform worker, provider, publication, ledger, trading, or persistent work.
+
+Success:
 
 ```json
-{"executable_result":"UNEXPECTED_FAILURE"}
+{"activation_mode_validation_result":"TELEGRAM_CONNECTIVITY_VALID"}
 ```
 
-Exit status: `70`.
+Exit status: `0`. Controlled failure:
 
-After valid configuration, locator defects retain the existing fixed
-`CREDENTIAL_LOCATOR_FAILURE` result. Valid launcher outcomes are returned unchanged. Dynamic
-configuration values, evidence fields, paths, and exception internals are never emitted.
+```json
+{"activation_mode_validation_result":"TELEGRAM_CONNECTIVITY_FAILURE"}
+```
 
-## Reachability and fail-closed behavior
+Exit status: `1`. The client and probe are injected seams only. No concrete production Telegram
+identity-probe adapter is implemented, deployed, or operationally authorized.
 
-A configuration defect prevents locator lookup, credential-bridge construction, launcher, SDK,
-and network reachability. With valid `CLOSED` or partial modes, the launcher may return `BLOCKED`
-before credential resolution. `CONTROLLED_WORKLOAD` permits the existing launcher to reach its
-credential/composition seams under fakes and contracts, but does not itself authorize operational
-use or persistent production operation.
+### `TELEGRAM_START_VALIDATION`
 
-No non-`CLOSED` configuration has been provisioned or operationally validated.
+Separate authorization, credential validation, and the injected identity probe precede bounded
+injected application initialization. When initialization establishes a resource, injected shutdown
+occurs exactly once as required by the coordinator contract. Polling initialization and persistence,
+update processing, message dispatch, launcher invocation, worker/provider execution, publication,
+ledger mutation, and trading are forbidden.
+
+Success:
+
+```json
+{"activation_mode_validation_result":"TELEGRAM_START_VALID"}
+```
+
+Exit status: `0`. Controlled failure:
+
+```json
+{"activation_mode_validation_result":"TELEGRAM_START_FAILURE"}
+```
+
+Exit status: `1`. These are injected seams only: no concrete production start-validation adapter is
+implemented, deployed, or operationally authorized.
+
+### `CONTROLLED_WORKLOAD`
+
+Separate authorization is verified first. The coordinator invokes the existing production launcher
+exactly once and returns its tuple unchanged; the executable does not invoke it separately. The
+current launcher remains preparation/composition only. This does not authorize polling, worker
+execution, provider execution, publication, ledger mutation, trading, or persistent production
+operation.
+
+### Effect-capability matrix
+
+`ALLOWED` below means only that the coordinator contract permits the listed injected seam. It does
+not mean a concrete production adapter exists, that an operational action has been authorized, or
+that a service should be started. `FORBIDDEN` is an explicit mode boundary.
+
+| Capability | CLOSED | CREDENTIAL_VALIDATION | TELEGRAM_CONNECTIVITY_VALIDATION | TELEGRAM_START_VALIDATION | CONTROLLED_WORKLOAD |
+|---|---|---|---|---|---|
+| Activation configuration read | ALLOWED | ALLOWED | ALLOWED | ALLOWED | ALLOWED |
+| Authorization verification | FORBIDDEN | ALLOWED | ALLOWED | ALLOWED | ALLOWED |
+| Locator lookup | FORBIDDEN | ALLOWED | ALLOWED | ALLOWED | ALLOWED |
+| Credential read | FORBIDDEN | ALLOWED | ALLOWED | ALLOWED | launcher-owned preparation only |
+| Lexical validation | FORBIDDEN | ALLOWED | ALLOWED | ALLOWED | launcher-owned preparation only |
+| SDK/client construction | FORBIDDEN | FORBIDDEN | ALLOWED (injected seam) | ALLOWED (injected seam) | launcher-owned preparation only |
+| Authenticated identity probe | FORBIDDEN | FORBIDDEN | ALLOWED (one injected probe) | ALLOWED (one injected probe) | FORBIDDEN |
+| Application initialization | FORBIDDEN | FORBIDDEN | FORBIDDEN | ALLOWED (injected seam) | FORBIDDEN |
+| Application shutdown | FORBIDDEN | FORBIDDEN | FORBIDDEN | ALLOWED when initialization requires it | FORBIDDEN |
+| Polling initialization | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Polling persistence | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Update processing | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Worker execution | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Provider execution | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Message dispatch | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Signal publication | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Ledger mutation | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Trading | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+| Persistent service operation | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN | FORBIDDEN |
+
+## Authorization and credential boundary
+
+A valid non-`CLOSED` configuration is not sufficient authorization. Before credential resolution,
+client construction, network probe, application initialization, or launcher invocation, the
+coordinator requires a separate authorization verifier and accepted locked-commit context.
+Authorization rejection returns:
+
+```json
+{"executable_result":"ACTIVATION_MODE_AUTHORIZATION_FAILURE"}
+```
+
+Exit status: `1`. Authorization evidence and the accepted commit context are not emitted or logged,
+are not taken from argv or activation environment variables, and remain separate from configuration
+correlation metadata. Current production defaults fail closed.
+
+For a non-`CLOSED` mode requiring credential capability, the executable validates only the secure
+`CREDENTIALS_DIRECTORY` locator and constructs a deferred reader. It does not read credential
+content before coordinator authorization. The coordinator resolves the reader at most once; a
+non-string or empty result is rejected before lexical validation. Lexical validation does not prove
+Telegram authentication. Credential values never appear in output, logs, documentation examples,
+or exceptions.
+
+## Result taxonomy
+
+| Condition | Fixed result | Exit |
+|---|---|---:|
+| Activation configuration failure | `{"executable_result":"ACTIVATION_CONFIGURATION_FAILURE"}` | `1` |
+| Credential locator failure | `{"executable_result":"CREDENTIAL_LOCATOR_FAILURE"}` | `1` |
+| Authorization failure | `{"executable_result":"ACTIVATION_MODE_AUTHORIZATION_FAILURE"}` | `1` |
+| CLOSED | `{"launcher_result":"BLOCKED"}` | `1` |
+| Credential success | `{"activation_mode_validation_result":"CREDENTIAL_VALID"}` | `0` |
+| Credential controlled failure | `{"activation_mode_validation_result":"CREDENTIAL_INVALID"}` | `1` |
+| Connectivity success | `{"activation_mode_validation_result":"TELEGRAM_CONNECTIVITY_VALID"}` | `0` |
+| Connectivity controlled failure | `{"activation_mode_validation_result":"TELEGRAM_CONNECTIVITY_FAILURE"}` | `1` |
+| Start success | `{"activation_mode_validation_result":"TELEGRAM_START_VALID"}` | `0` |
+| Start controlled failure | `{"activation_mode_validation_result":"TELEGRAM_START_FAILURE"}` | `1` |
+| Unexpected ordinary failure | `{"executable_result":"UNEXPECTED_FAILURE"}` | `70` |
+
+Success outcomes exit `0`; controlled failures exit `1`; unexpected ordinary failures exit `70`.
+`BaseException` propagates according to the frozen implementation policy. There is no retry and no
+dynamic exception, credential, path, authorization, configuration, or evidence detail in results.
 
 ## Systemd integration
 
@@ -227,7 +376,9 @@ unchanged, and the service remains disabled.
 
 ## Future operator workflow
 
-This workflow is documented for a separately authorized future step and has not been executed:
+The canonical `CLOSED` deployment used this atomic pattern in a separately authorized step. The
+following workflow remains frozen for a future non-`CLOSED` update and is not authorized by this
+document:
 
 1. Require the service to be inactive and disabled.
 2. Prepare a root-owned temporary file inside the target parent.
@@ -250,24 +401,46 @@ and does not automatically start, stop, reload, enable, or disable the service.
 
 ## Current validation evidence
 
+Previously committed activation-configuration evidence for the remotely locked baseline:
+
 - Activation-reader focused suite: 74 passed.
-- Combined activation-reader and executable focused suite: 103 passed in 3.62s.
-- Full repository regression: 4104 passed in 53.43s.
+- Activation-reader plus prior executable focused suite: 103 passed in 3.62s.
+- Prior full repository regression: 4104 passed in 53.43s.
+- Failures, errors, skips, xfails, and retries: 0.
+
+Current local, uncommitted coordinator and executable-integration regression evidence:
+
+- Activation configuration reader: 74 passed.
+- Coordinator: 55 passed.
+- Executable: 18 passed.
+- Combined focused: 147 passed in 4.43s.
+- Full repository regression: 4148 passed in 46.41s.
 - Failures: 0.
 - Errors: 0.
 - Skips: 0.
 - Xfails: 0.
 - Retries: 0.
-- No real configuration file was accessed.
-- No credential access occurred.
-- No service or systemd mutation occurred.
-- No Telegram, network, runtime, or production action occurred.
-- Service remained disabled.
-- Production gates remained closed.
+
+The coordinator and executable integration are focused and full-regression green, but are not yet
+committed, pushed, or deployed. The canonical `CLOSED` configuration is deployed and
+parser-validated, and the one separately authorized installed-service `CLOSED` validation produced
+`{"launcher_result":"BLOCKED"}`. No non-`CLOSED` configuration was operationally deployed or
+validated, and no real credential, Telegram, network, runtime, workload, publication, ledger,
+trading, or production validation was executed for the coordinator change. The service remains
+disabled and production gates remain closed.
+
+## Rollout and rollback policy
+
+Configuration begins and ends as `CLOSED`. At most one non-`CLOSED` mode may be deployed in one
+separately authorized step, with strict expiry and parser preflight. The service remains disabled;
+any authorized observation uses one start only, no retry, bounded journal evidence, and immediate
+atomic rollback to `CLOSED`. There is no automatic escalation between modes and no `reset-failed`
+unless separately authorized.
 
 ## Production boundary
 
-This implementation does not authorize creating or deploying a non-`CLOSED` configuration, service
-start, service enablement, `reset-failed`, Telegram connectivity, polling, message sending,
-workload execution, provider execution, signal publication, ledger mutation, trading, or persistent
-production operation. Every operational action requires a later separately authorized step.
+This change does not authorize deployment of a non-`CLOSED` configuration; credential validation
+against real credentials; Telegram identity probing; Telegram application initialization; polling;
+message sending; update processing; worker or provider execution; publication; ledger mutation;
+trading; service start or enablement; `reset-failed`; or persistent production operation. Every
+such operational action requires a later separate authorization.

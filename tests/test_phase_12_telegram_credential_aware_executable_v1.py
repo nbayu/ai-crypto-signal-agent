@@ -104,14 +104,14 @@ def _capture_bridge() -> tuple[list[TelegramLauncherDependenciesV1], Callable[..
     return captured, launcher
 
 
-def test_public_api_is_exact_and_keyword_only() -> None:
+def test_public_api_exposes_exact_keyword_only_coordinator_dispatch_seams() -> None:
     signature = inspect.signature(run_phase_12_telegram_credential_aware_executable)
     assert tuple(signature.parameters) == (
-        "environment_reader",
-        "configuration_reader",
-        "now_utc_provider",
-        "credential_reader",
-        "launcher",
+        "environment_reader", "configuration_reader", "now_utc_provider",
+        "credential_reader", "launcher", "coordinator", "accepted_locked_commit",
+        "authorization_verifier", "credential_validator",
+        "identity_probe_client_factory", "authenticated_identity_probe",
+        "application_initializer", "application_shutdown",
     )
     assert all(
         parameter.kind is inspect.Parameter.KEYWORD_ONLY
@@ -122,10 +122,12 @@ def test_public_api_is_exact_and_keyword_only() -> None:
     assert callable(signature.parameters["now_utc_provider"].default)
     assert signature.parameters["credential_reader"].default is read_systemd_telegram_credential
     assert signature.parameters["launcher"].default is module.run_phase_12_telegram_production_launcher
+    assert callable(signature.parameters["coordinator"].default)
     assert inspect.signature(main).parameters == {}
     assert "tuple" in str(signature.return_annotation)
     assert "int" in str(inspect.signature(main).return_annotation)
     source = inspect.getsource(module)
+    assert "phase_12_activation_mode_validation_coordinator_v1" in source
     assert 'if __name__ == "__main__":' in source
     assert "raise SystemExit(main())" in source
 
@@ -155,190 +157,17 @@ def test_main_accepts_zero_arguments_and_prints_one_json_line(
     assert capsys.readouterr() == ('{"launcher_result":"SANITIZED"}\n', "")
 
 
-def test_valid_locator_is_read_once_and_forwarded_to_the_fixed_credential_name() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader()
-    launcher_calls: list[TelegramLauncherDependenciesV1] = []
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
+def test_non_closed_invalid_locator_fails_before_coordinator_or_launcher() -> None:
+    coordinator = _Coordinator((0, "{\"activation_mode_validation_result\":\"CREDENTIAL_VALID\"}"))
+    environment = _EnvironmentReader(None)
+    result = _run_with_coordinator(
+        configuration=_activation_configuration("CREDENTIAL_VALIDATION"),
+        coordinator=coordinator,
         environment_reader=environment,
-        credential_reader=reader,
-        launcher=_launcher_that_uses_reader(launcher_calls),
-    )
-    assert result == (0, '{"launcher_result":"SANITIZED"}')
-    assert environment.calls == ["CREDENTIALS_DIRECTORY"]
-    assert reader.calls == [(_DIRECTORY, _NAME)]
-    assert len(launcher_calls) == 1
-
-
-def test_successful_credential_read_is_cached_only_within_the_invocation() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader()
-    launcher_calls: list[TelegramLauncherDependenciesV1] = []
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment,
-        credential_reader=reader,
-        launcher=_launcher_that_uses_reader(launcher_calls, repeat_reader=True),
-    )
-    assert result[0] == 0
-    assert reader.calls == [(_DIRECTORY, _NAME)]
-    assert len(launcher_calls) == 1
-
-
-@pytest.mark.parametrize("locator", (None, 7, "", "relative", "/run/../credentials"))
-def test_invalid_or_absent_locator_fails_closed_before_reader_or_launcher(locator: object) -> None:
-    environment = _EnvironmentReader(locator)
-    reader = _CredentialReader()
-    launcher_calls: list[object] = []
-    result = _run_with_fake_activation_configuration(
-        mode="CLOSED",
-        environment_reader=environment,
-        credential_reader=reader,
-        launcher=lambda **_: launcher_calls.append(True),
     )
     assert result == (1, _LOCATOR_FAILURE_JSON)
     assert environment.calls == ["CREDENTIALS_DIRECTORY"]
-    assert reader.calls == []
-    assert launcher_calls == []
-    if locator == "":
-        assert json.loads(result[1]) == {
-            "executable_result": "CREDENTIAL_LOCATOR_FAILURE"
-        }
-        assert tuple(json.loads(result[1])) == ("executable_result",)
-    else:
-        assert str(locator) not in result[1]
-
-
-def test_bridge_rejects_wrong_directory_and_filename_without_reader_call() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader()
-    captured, launcher = _capture_bridge()
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment, credential_reader=reader, launcher=launcher
-    )
-    assert result[0] == 0
-    bridge = captured[0].credential_reader
-    with pytest.raises(Exception):
-        bridge("/other", _NAME)
-    with pytest.raises(Exception):
-        bridge(_DIRECTORY, "other")
-    assert reader.calls == []
-
-
-def test_ordinary_credential_failure_is_cached_and_sanitized_without_retry() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader(RuntimeError(_CREDENTIAL))
-    captured, launcher = _capture_bridge()
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment, credential_reader=reader, launcher=launcher
-    )
-    assert result[0] == 0
-    bridge = captured[0].credential_reader
-    failures = []
-    for _ in range(2):
-        with pytest.raises(Exception) as raised:
-            bridge(_DIRECTORY, _NAME)
-        failures.append(raised.value)
-    assert reader.calls == [(_DIRECTORY, _NAME)]
-    assert all(_CREDENTIAL not in str(error) + repr(error) for error in failures)
-
-
-def test_base_exception_from_credential_reader_propagates_unchanged() -> None:
-    interruption = KeyboardInterrupt("fixture interruption")
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader(interruption)
-    captured, launcher = _capture_bridge()
-    assert _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment, credential_reader=reader, launcher=launcher
-    )[0] == 0
-    with pytest.raises(KeyboardInterrupt) as raised:
-        captured[0].credential_reader(_DIRECTORY, _NAME)
-    assert raised.value is interruption
-    assert reader.calls == [(_DIRECTORY, _NAME)]
-
-
-def test_credential_failure_prevents_fake_runtime_effects() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader(SystemdTelegramCredentialErrorV1("CREDENTIAL_MISSING"))
-    effects: list[str] = []
-
-    def launcher(*, dependencies: TelegramLauncherDependenciesV1, **_: object) -> tuple[int, str]:
-        with pytest.raises(SystemdTelegramCredentialErrorV1):
-            dependencies.credential_reader(_DIRECTORY, _NAME)
-        effects.append("launcher-after-reader")
-        return (1, '{"launcher_result":"CREDENTIAL_FAILURE"}')
-
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment, credential_reader=reader, launcher=launcher
-    )
-    assert result == (1, '{"launcher_result":"CREDENTIAL_FAILURE"}')
-    assert effects == ["launcher-after-reader"]
-    assert reader.calls == [(_DIRECTORY, _NAME)]
-
-
-def test_launcher_result_is_compact_deterministic_and_has_no_public_newline() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader()
-    expected = '{"launcher_result":"CONTROLLED_NON_SUCCESS","detail":"SANITIZED"}'
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment,
-        credential_reader=reader,
-        launcher=_launcher_that_uses_reader([], result=(1, expected)),
-    )
-    assert result == (1, expected)
-    assert "\n" not in result[1]
-    assert json.dumps(json.loads(result[1]), separators=(",", ":")) == result[1]
-    assert tuple(json.loads(result[1])) == ("launcher_result", "detail")
-
-
-def test_unexpected_exception_is_normalized_and_base_exception_propagates() -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader()
-    unexpected = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment,
-        credential_reader=reader,
-        launcher=lambda **_: (_ for _ in ()).throw(RuntimeError(_CREDENTIAL)),
-    )
-    assert unexpected == (70, _UNEXPECTED_JSON)
-    assert _CREDENTIAL not in unexpected[1]
-    interruption = KeyboardInterrupt("fixture interruption")
-    with pytest.raises(KeyboardInterrupt) as raised:
-        _run_with_fake_activation_configuration(
-            mode="CONTROLLED_WORKLOAD",
-            environment_reader=_EnvironmentReader(_DIRECTORY),
-            credential_reader=_CredentialReader(),
-            launcher=lambda **_: (_ for _ in ()).throw(interruption),
-        )
-    assert raised.value is interruption
-
-
-def test_no_locator_or_credential_detail_reaches_result_stdout_stderr_or_logging(
-    capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
-) -> None:
-    environment = _EnvironmentReader(_DIRECTORY)
-    reader = _CredentialReader(RuntimeError(_CREDENTIAL))
-    captured, launcher = _capture_bridge()
-    root = logging.getLogger()
-    handlers_before = tuple(root.handlers)
-    level_before = root.level
-    result = _run_with_fake_activation_configuration(
-        mode="CONTROLLED_WORKLOAD",
-        environment_reader=environment, credential_reader=reader, launcher=launcher
-    )
-    with pytest.raises(Exception):
-        captured[0].credential_reader(_DIRECTORY, _NAME)
-    rendered = result[1] + capsys.readouterr().out + capsys.readouterr().err + caplog.text
-    assert _DIRECTORY not in rendered
-    assert _CREDENTIAL not in rendered
-    assert tuple(root.handlers) == handlers_before
-    assert root.level == level_before
+    assert coordinator.calls == []
 
 
 def test_source_has_only_the_directory_metadata_boundary_and_no_runtime_surface() -> None:
@@ -432,39 +261,6 @@ def _gate_values(gates: object) -> tuple[object, object, object, object, object]
     )
 
 
-def test_activation_configuration_loads_before_locator_and_forwards_only_gate_state() -> None:
-    events: list[str] = []
-    configuration_reader = _ActivationConfigurationReader(_activation_configuration("CLOSED"), events)
-
-    class Environment:
-        def __init__(self) -> None:
-            self.calls: list[str] = []
-
-        def __call__(self, name: str) -> object:
-            self.calls.append(name)
-            events.append("locator")
-            return _DIRECTORY
-
-    environment = Environment()
-    received: dict[str, object] = {}
-
-    def launcher(**kwargs: object) -> tuple[int, str]:
-        events.append("launcher")
-        received.update(kwargs)
-        return (1, "{\"launcher_result\":\"BLOCKED\"}")
-
-    result = _run_with_activation_configuration(
-        configuration_reader=configuration_reader, environment_reader=environment, launcher=launcher,
-    )
-    assert result == (1, "{\"launcher_result\":\"BLOCKED\"}")
-    assert configuration_reader.calls == [(_ACTIVATION_CONFIGURATION_PATH, _CONFIGURATION_NOW)]
-    assert environment.calls == ["CREDENTIALS_DIRECTORY"]
-    assert events == ["configuration", "locator", "launcher"]
-    assert set(received) == {"dependencies", "credential_directory", "gates"}
-    assert _gate_values(received["gates"]) == (False, False, False, False, False)
-    assert "owner-authorization-v1" not in repr(received)
-
-
 def test_activation_configuration_failures_stop_before_locator_bridge_or_launcher() -> None:
     configuration_reader = _ActivationConfigurationReader(
         Phase12ActivationConfigurationErrorV1("CONFIGURATION_FORMAT_INVALID")
@@ -501,65 +297,6 @@ def test_unexpected_configuration_failure_is_normalized_and_baseexception_propag
     assert raised.value is interruption
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected"),
-    (
-        ("CREDENTIAL_VALIDATION", (True, True, False, False, False)),
-        ("TELEGRAM_CONNECTIVITY_VALIDATION", (True, True, True, False, False)),
-        ("TELEGRAM_START_VALIDATION", (True, True, True, False, True)),
-    ),
-)
-def test_partial_modes_forward_exact_gates_and_preserve_blocked_result(
-    mode: str, expected: tuple[bool, bool, bool, bool, bool]
-) -> None:
-    received: list[object] = []
-    credentials = _CredentialReader()
-
-    def launcher(**kwargs: object) -> tuple[int, str]:
-        received.append(kwargs["gates"])
-        return (1, "{\"launcher_result\":\"BLOCKED\"}")
-
-    result = _run_with_activation_configuration(
-        configuration_reader=_ActivationConfigurationReader(_activation_configuration(mode)),
-        environment_reader=_EnvironmentReader(_DIRECTORY), credential_reader=credentials, launcher=launcher,
-    )
-    assert result == (1, "{\"launcher_result\":\"BLOCKED\"}")
-    assert _gate_values(received[0]) == expected
-    assert credentials.calls == []
-
-
-def test_controlled_workload_wires_deferred_credential_bridge_and_passes_launcher_tuple() -> None:
-    credentials = _CredentialReader()
-    received: list[object] = []
-
-    def launcher(**kwargs: object) -> tuple[int, str]:
-        received.append(kwargs["gates"])
-        dependencies = kwargs["dependencies"]
-        assert dependencies.credential_reader(_DIRECTORY, _NAME) == _CREDENTIAL
-        return (7, "{\"launcher_result\":\"CONTROLLED_NON_SUCCESS\"}")
-
-    result = _run_with_activation_configuration(
-        configuration_reader=_ActivationConfigurationReader(_activation_configuration("CONTROLLED_WORKLOAD")),
-        environment_reader=_EnvironmentReader(_DIRECTORY), credential_reader=credentials, launcher=launcher,
-    )
-    assert result == (7, "{\"launcher_result\":\"CONTROLLED_NON_SUCCESS\"}")
-    assert _gate_values(received[0]) == (True, True, True, True, True)
-    assert credentials.calls == [(_DIRECTORY, _NAME)]
-
-
-def test_locator_failure_occurs_only_after_valid_configuration_loading() -> None:
-    configuration_reader = _ActivationConfigurationReader(_activation_configuration("CLOSED"))
-    credentials = _CredentialReader()
-    calls: list[object] = []
-    result = _run_with_activation_configuration(
-        configuration_reader=configuration_reader, environment_reader=_EnvironmentReader(None),
-        credential_reader=credentials, launcher=lambda **_: calls.append(True),
-    )
-    assert result == (1, _LOCATOR_FAILURE_JSON)
-    assert configuration_reader.calls == [(_ACTIVATION_CONFIGURATION_PATH, _CONFIGURATION_NOW)]
-    assert credentials.calls == [] and calls == []
-
-
 def test_activation_integration_source_has_fixed_path_default_reader_and_no_configuration_environment() -> None:
     source = inspect.getsource(module)
     assert _ACTIVATION_CONFIGURATION_PATH in source
@@ -575,3 +312,161 @@ def test_activation_integration_source_has_fixed_path_default_reader_and_no_conf
     ))
     assert "systemctl" not in source
     assert not any(value in source for value in ("socket", "requests", "httpx", "subprocess", "logging"))
+
+
+_ACCEPTED_LOCKED_COMMIT = "415c77c4b9a021bbc211797d7b41e74c55c18538"
+
+
+class _Coordinator:
+    def __init__(self, result: tuple[int, str] | BaseException) -> None:
+        self.result = result
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, **kwargs: object) -> tuple[int, str]:
+        self.calls.append(kwargs)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+def _run_with_coordinator(
+    *,
+    configuration: Phase12ActivationConfigurationV1,
+    coordinator: _Coordinator,
+    environment_reader: _EnvironmentReader,
+    launcher: Callable[..., tuple[int, str]] = lambda **_: (_ for _ in ()).throw(
+        AssertionError("the executable must not call the production launcher directly")
+    ),
+) -> tuple[int, str]:
+    return run_phase_12_telegram_credential_aware_executable(
+        environment_reader=environment_reader,
+        configuration_reader=_ActivationConfigurationReader(configuration),
+        now_utc_provider=lambda: _CONFIGURATION_NOW,
+        credential_reader=_CredentialReader(),
+        launcher=launcher,
+        coordinator=coordinator,
+        accepted_locked_commit=_ACCEPTED_LOCKED_COMMIT,
+        authorization_verifier=lambda **_: True,
+        credential_validator=lambda **_: True,
+        identity_probe_client_factory=lambda **_: object(),
+        authenticated_identity_probe=lambda **_: True,
+        application_initializer=lambda **_: object(),
+        application_shutdown=lambda **_: None,
+    )
+
+
+def test_executable_source_requires_coordinator_without_new_environment_or_argv_surface() -> None:
+    source = inspect.getsource(module)
+    assert "phase_12_activation_mode_validation_coordinator_v1" in source
+    assert "PHASE12_ACTIVATION_CONFIG" not in source
+    assert "os.getenv" not in source
+    assert "os.environ.items" not in source
+    assert "configuration_path=sys.argv" not in source
+
+
+def test_closed_dispatches_once_before_locator_or_launcher_and_passes_result_through() -> None:
+    events: list[str] = []
+    coordinator = _Coordinator((1, "{\"launcher_result\":\"BLOCKED\"}"))
+
+    class Environment(_EnvironmentReader):
+        def __call__(self, name: str) -> object:
+            events.append("locator")
+            return super().__call__(name)
+
+    result = _run_with_coordinator(
+        configuration=_activation_configuration("CLOSED"),
+        coordinator=coordinator,
+        environment_reader=Environment(_DIRECTORY),
+    )
+    assert result == (1, "{\"launcher_result\":\"BLOCKED\"}")
+    assert events == []
+    assert len(coordinator.calls) == 1
+    received = coordinator.calls[0]
+    assert received["configuration"] == _activation_configuration("CLOSED")
+    assert received["accepted_locked_commit"] == _ACCEPTED_LOCKED_COMMIT
+
+
+@pytest.mark.parametrize(
+    ("mode", "result"),
+    (
+        ("CREDENTIAL_VALIDATION", (0, "{\"activation_mode_validation_result\":\"CREDENTIAL_VALID\"}")),
+        ("TELEGRAM_CONNECTIVITY_VALIDATION", (0, "{\"activation_mode_validation_result\":\"TELEGRAM_CONNECTIVITY_VALID\"}")),
+        ("TELEGRAM_START_VALIDATION", (0, "{\"activation_mode_validation_result\":\"TELEGRAM_START_VALID\"}")),
+    ),
+)
+def test_partial_modes_dispatch_once_to_coordinator_and_never_directly_to_launcher(
+    mode: str, result: tuple[int, str]
+) -> None:
+    coordinator = _Coordinator(result)
+    assert _run_with_coordinator(
+        configuration=_activation_configuration(mode),
+        coordinator=coordinator,
+        environment_reader=_EnvironmentReader(_DIRECTORY),
+    ) == result
+    assert len(coordinator.calls) == 1
+    received = coordinator.calls[0]
+    assert received["configuration"].activation_mode == mode
+    assert received["accepted_locked_commit"] == _ACCEPTED_LOCKED_COMMIT
+    for required in (
+        "authorization_verifier", "credential_locator", "credential_reader",
+        "credential_validator", "identity_probe_client_factory", "authenticated_identity_probe",
+        "application_initializer", "application_shutdown", "production_launcher",
+    ):
+        assert callable(received[required])
+
+
+def test_coordinator_authorization_and_controlled_mode_results_pass_through_unchanged() -> None:
+    authorization = _Coordinator((1, "{\"executable_result\":\"ACTIVATION_MODE_AUTHORIZATION_FAILURE\"}"))
+    assert _run_with_coordinator(
+        configuration=_activation_configuration("CREDENTIAL_VALIDATION"),
+        coordinator=authorization,
+        environment_reader=_EnvironmentReader(_DIRECTORY),
+    ) == (1, "{\"executable_result\":\"ACTIVATION_MODE_AUTHORIZATION_FAILURE\"}")
+    workload = _Coordinator((7, "{\"launcher_result\":\"CONTROLLED_NON_SUCCESS\"}"))
+    assert _run_with_coordinator(
+        configuration=_activation_configuration("CONTROLLED_WORKLOAD"),
+        coordinator=workload,
+        environment_reader=_EnvironmentReader(_DIRECTORY),
+    ) == (7, "{\"launcher_result\":\"CONTROLLED_NON_SUCCESS\"}")
+    assert len(authorization.calls) == len(workload.calls) == 1
+
+
+def test_coordinator_ordinary_exception_is_sanitized_and_baseexception_propagates() -> None:
+    ordinary = _Coordinator(RuntimeError("dynamic coordinator detail"))
+    assert _run_with_coordinator(
+        configuration=_activation_configuration("CLOSED"),
+        coordinator=ordinary,
+        environment_reader=_EnvironmentReader(_DIRECTORY),
+    ) == (70, _UNEXPECTED_JSON)
+    interruption = KeyboardInterrupt("coordinator interruption")
+    with pytest.raises(KeyboardInterrupt) as raised:
+        _run_with_coordinator(
+            configuration=_activation_configuration("CLOSED"),
+            coordinator=_Coordinator(interruption),
+            environment_reader=_EnvironmentReader(_DIRECTORY),
+        )
+    assert raised.value is interruption
+
+
+def test_configuration_failure_remains_executable_owned_before_coordinator_dispatch() -> None:
+    coordinator = _Coordinator((0, "{\"activation_mode_validation_result\":\"CREDENTIAL_VALID\"}"))
+    configuration_reader = _ActivationConfigurationReader(
+        Phase12ActivationConfigurationErrorV1("CONFIGURATION_FORMAT_INVALID")
+    )
+    result = run_phase_12_telegram_credential_aware_executable(
+        environment_reader=_EnvironmentReader(_DIRECTORY),
+        configuration_reader=configuration_reader,
+        now_utc_provider=lambda: _CONFIGURATION_NOW,
+        credential_reader=_CredentialReader(),
+        launcher=lambda **_: (0, "{\"launcher_result\":\"UNUSED\"}"),
+        coordinator=coordinator,
+        accepted_locked_commit=_ACCEPTED_LOCKED_COMMIT,
+        authorization_verifier=lambda **_: True,
+        credential_validator=lambda **_: True,
+        identity_probe_client_factory=lambda **_: object(),
+        authenticated_identity_probe=lambda **_: True,
+        application_initializer=lambda **_: object(),
+        application_shutdown=lambda **_: None,
+    )
+    assert result == (1, "{\"executable_result\":\"ACTIVATION_CONFIGURATION_FAILURE\"}")
+    assert coordinator.calls == []
