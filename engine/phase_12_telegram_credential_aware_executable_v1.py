@@ -5,8 +5,13 @@ import json
 import os
 import posixpath
 import sys
+from datetime import datetime, timezone
 from collections.abc import Callable
 
+from engine.phase_12_activation_configuration_v1 import (
+    Phase12ActivationConfigurationErrorV1,
+    load_phase_12_activation_configuration,
+)
 from engine.phase_12_telegram_production_launcher_v1 import (
     TelegramCredentialSourceMetadataV1,
     TelegramLauncherDependenciesV1,
@@ -26,6 +31,11 @@ _CREDENTIAL_NAME = "telegram_bot_token"
 _MISUSE_JSON = '{"executable_result":"MISUSE"}'
 _LOCATOR_FAILURE_JSON = '{"executable_result":"CREDENTIAL_LOCATOR_FAILURE"}'
 _UNEXPECTED_JSON = '{"executable_result":"UNEXPECTED_FAILURE"}'
+_ACTIVATION_CONFIGURATION_PATH = "/etc/ai-crypto-signal-agent/phase12-activation-v1.conf"
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _compact_result(value: str) -> str:
@@ -102,7 +112,7 @@ def _reservation() -> str:
 
 
 def run_phase_12_telegram_production_launcher(
-    *, dependencies: TelegramLauncherDependenciesV1, credential_directory: str
+    *, dependencies: TelegramLauncherDependenciesV1, credential_directory: str, gates: TelegramProductionGateStateV1
 ) -> tuple[int, str]:
     """Bind existing launcher preparation behind permanently closed execution gates."""
     result = prepare_telegram_production_launcher_v1(
@@ -122,13 +132,7 @@ def run_phase_12_telegram_production_launcher(
             expected_credential_filename=_CREDENTIAL_NAME,
             expected_credential_directory_classification="SYSTEMD_CREDENTIALS",
         ),
-        gates=TelegramProductionGateStateV1(
-            activation_gate_open=False,
-            credential_gate_open=False,
-            network_gate_open=False,
-            workload_gate_open=False,
-            telegram_start_authorized=False,
-        ),
+        gates=gates,
         credential_source=TelegramCredentialSourceMetadataV1(
             credential_directory=credential_directory,
             directory_classification="SYSTEMD_CREDENTIALS",
@@ -142,10 +146,19 @@ def run_phase_12_telegram_production_launcher(
 def run_phase_12_telegram_credential_aware_executable(
     *,
     environment_reader,
+    configuration_reader=load_phase_12_activation_configuration,
+    now_utc_provider=_now_utc,
     credential_reader=read_systemd_telegram_credential,
     launcher=run_phase_12_telegram_production_launcher,
 ) -> tuple[int, str]:
     """Prepare one credential-aware launcher boundary without process activation."""
+    try:
+        now_utc = now_utc_provider()
+        configuration = configuration_reader(configuration_path=_ACTIVATION_CONFIGURATION_PATH, now_utc=now_utc)
+    except Phase12ActivationConfigurationErrorV1:
+        return (1, '{"executable_result":"ACTIVATION_CONFIGURATION_FAILURE"}')
+    except Exception:
+        return (70, _UNEXPECTED_JSON)
     try:
         directory = environment_reader(_DIRECTORY_KEY)
     except Exception:
@@ -162,7 +175,7 @@ def run_phase_12_telegram_credential_aware_executable(
         reservation_id_provider=_reservation,
     )
     try:
-        result = launcher(dependencies=dependencies, credential_directory=directory)
+        result = launcher(dependencies=dependencies, credential_directory=directory, gates=TelegramProductionGateStateV1(activation_gate_open=configuration.activation_gate_open, credential_gate_open=configuration.credential_gate_open, network_gate_open=configuration.network_gate_open, workload_gate_open=configuration.workload_gate_open, telegram_start_authorized=configuration.telegram_start_authorized))
     except Exception:
         return (70, _UNEXPECTED_JSON)
     if (
