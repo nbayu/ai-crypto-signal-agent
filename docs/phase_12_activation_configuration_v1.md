@@ -474,6 +474,71 @@ The parser mechanism is implemented, but no production record locator, approval-
 
 Parsing a syntactically valid record is not sufficient authorization and grants no operational authorization. The executable has no production approval record, loader, source, or parser wiring; every production-default non-CLOSED request remains fail-closed.
 
+### Accepted-locked-commit marker document parser
+
+The local syntax-only marker parser is implemented in
+engine.phase_12_activation_mode_accepted_locked_commit_marker_parser_v1. It
+accepts caller-supplied string text only: there is no file-path or byte-input
+API. It returns one immutable marker and performs neither an authorization nor
+an authenticity decision.
+
+Public API:
+
+    Phase12ActivationAcceptedLockedCommitMarkerV1
+    Phase12ActivationAcceptedLockedCommitMarkerDocumentErrorV1
+
+    parse_phase_12_activation_accepted_locked_commit_marker_v1(
+        *,
+        document: str,
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerV1
+
+The marker has exactly two fields, schema_version and accepted_locked_commit.
+It is immutable, frozen, slotted, keyword-only, and has no __dict__. Equality
+is based on those two fields only. Its fixed sanitized representation is
+Phase12ActivationAcceptedLockedCommitMarkerV1(); it contains no file path,
+ownership, permissions, source metadata, authenticity, policy, or
+authorization state.
+
+#### Strict marker schema
+
+The parser accepts exactly this ordered two-line document:
+
+    schema_version=phase12-activation-accepted-locked-commit-marker-v1
+    accepted_locked_commit=<LOWERCASE_SHA1>
+
+It requires exactly two logical lines, exact key order and casing, exactly one
+delimiter per line, LF-only endings, and exactly one terminal LF. Leading or
+trailing blank lines, comments, a BOM, CR or CRLF, NUL or other control
+characters, whitespace padding, blank values, and missing, duplicate, unknown,
+or reordered keys are rejected.
+
+The schema version is exactly
+phase12-activation-accepted-locked-commit-marker-v1. The commit value is
+exactly 40 lowercase hexadecimal characters (0-9 and a-f), with no uppercase,
+prefix, abbreviation, whitespace, or control character.
+
+#### Output, error, purity, and trust boundary
+
+Malformed input raises
+Phase12ActivationAcceptedLockedCommitMarkerDocumentErrorV1 with the fixed text
+INVALID_ACCEPTED_LOCKED_COMMIT_MARKER_DOCUMENT. It reveals no document content,
+commit, key, line number, mismatch reason, source, or filesystem detail.
+
+Repeated parsing of identical valid text yields equal immutable markers. The
+parser has no filesystem or marker-path access; environment or argv access; Git
+or subprocess; systemd; credential access; Telegram SDK; network; provider
+imports; logging; random or UUID; sleep; dynamic clock; retry; cache; or mutable
+registry.
+
+This slice owns marker-document syntax only. No marker document is deployed,
+and no marker locator, reader, metadata validator, regular-file, symlink,
+ownership, permission, or link-count validation exists. There is no trusted
+deployment release marker, accepted-commit production source, repository-HEAD
+or Git comparison, or deployment-authenticity decision. The executable static
+placeholder remains unchanged, the parser is not wired into production, no
+verifier policy is populated, and parsing a syntactically valid marker string
+does not grant authorization.
+
 ## Result taxonomy
 
 | Condition | Fixed result | Exit |
@@ -594,7 +659,50 @@ Authorization-record parser full repository regression:
 - Xfails: 0.
 - Retries: 0.
 
-The parser implementation, tests, and documentation remain local, uncommitted, unpushed, and undeployed. This regression evidence applies to the exact current parser implementation, parser test, and documentation state. The parser remains unwired into production; no approval record, loader, source, or policy composition exists; and the production policy remains empty and fail-closed. No real configuration, credential, Telegram, network, runtime, or production action occurred.
+The preceding authorization-record parser evidence is separately attributed to
+the remotely locked authorization-record parser slice. It is not
+accepted-locked-commit marker-parser regression evidence.
+
+Accepted-locked-commit marker parser focused regression:
+
+- 48 passed in 0.17s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+Accepted-locked-commit marker parser combined focused regression:
+
+- Activation configuration reader: 74 passed.
+- Authorization-record parser: 60 passed.
+- Accepted-locked-commit marker parser: 48 passed.
+- Authorization verifier: 49 passed.
+- Mode-validation coordinator: 55 passed.
+- Credential-aware executable: 19 passed.
+- Total: 305 passed in 10.24s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+Accepted-locked-commit marker parser full repository regression:
+
+- 4,306 passed in 51.33s.
+- Failures: 0.
+- Errors: 0.
+- Skips: 0.
+- Xfails: 0.
+- Retries: 0.
+
+The full repository count increased by exactly 48 from the prior 4,258 baseline
+because the new marker-parser suite contributes 48 tests. The marker-parser
+implementation and tests remain local, uncommitted, unpushed, and undeployed.
+No marker source, reader, metadata validator, authenticity decision, policy
+composition, or operational authorization was created. No configuration,
+credential, Git, systemd, Telegram, network, runtime, or production action
+occurred.
 
 The coordinator commit remains remotely locked at
 `cac05b1b63ee60e65bfe9f383f19d686cc422632`; the canonical `CLOSED` configuration remains deployed
@@ -607,7 +715,13 @@ or production validation occurred.
 Capability status for this local slice:
 
 - Non-CLOSED authorization mechanism: **IMPLEMENTED_AND_TESTED**.
-- Authorization-record document parser: **IMPLEMENTED_AND_REGRESSION_VALIDATED_LOCAL**.
+- Authorization-record document parser: **IMPLEMENTED_AND_REMOTELY_LOCKED**.
+- Accepted-locked-commit marker parser: **IMPLEMENTED_AND_REGRESSION_VALIDATED_LOCAL**.
+- Marker document deployment: **MISSING**.
+- Marker locator: **MISSING**.
+- Marker metadata validator: **MISSING**.
+- Marker reader/source: **MISSING**.
+- Accepted-commit authenticity: **MISSING**.
 - Production approval-record loader: **MISSING**.
 - Production approval-record source: **MISSING / NOT AUTHORIZED**.
 - Authorization-policy composition: **MISSING**.
