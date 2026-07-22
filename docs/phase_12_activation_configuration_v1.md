@@ -476,11 +476,11 @@ Parsing a syntactically valid record is not sufficient authorization and grants 
 
 ### Accepted-locked-commit marker document parser
 
-The local syntax-only marker parser is implemented in
+The remotely locked syntax-only marker parser is implemented in
 engine.phase_12_activation_mode_accepted_locked_commit_marker_parser_v1. It
 accepts caller-supplied string text only: there is no file-path or byte-input
 API. It returns one immutable marker and performs neither an authorization nor
-an authenticity decision.
+an authenticity decision. It is implemented, tested, committed, pushed, and remotely locked at `a249fca1b0b7f7dd9644fd2ad015126e18a9d59f`; this remote lock is repository evidence only, not marker deployment or production trust.
 
 Public API:
 
@@ -530,14 +530,86 @@ or subprocess; systemd; credential access; Telegram SDK; network; provider
 imports; logging; random or UUID; sleep; dynamic clock; retry; cache; or mutable
 registry.
 
-This slice owns marker-document syntax only. No marker document is deployed,
-and no marker locator, reader, metadata validator, regular-file, symlink,
-ownership, permission, or link-count validation exists. There is no trusted
-deployment release marker, accepted-commit production source, repository-HEAD
-or Git comparison, or deployment-authenticity decision. The executable static
-placeholder remains unchanged, the parser is not wired into production, no
-verifier policy is populated, and parsing a syntactically valid marker string
-does not grant authorization.
+This slice owns marker-document syntax only. No marker document or canonical marker path is deployed, and no marker locator, metadata inspector, reader, regular-file, symlink, ownership, permission, or link-count acquisition exists. There is no trusted deployment release marker, accepted-commit production source, repository-HEAD or Git comparison, or deployment-authenticity decision. The executable static placeholder remains unchanged, the parser is operationally unwired, no verifier policy is populated, and parsing a syntactically valid marker string does not grant authorization.
+
+### Accepted-locked-commit marker metadata validator
+
+The pure local validator module is
+`engine.phase_12_activation_mode_accepted_locked_commit_marker_metadata_validator_v1`.
+It validates already-supplied immutable metadata facts against already-supplied
+immutable policy only. It is local, uncommitted, unpushed, undeployed, and
+operationally unwired.
+
+Public API:
+
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataV1
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataPolicyV1
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataValidationResultV1
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataErrorV1
+
+    validate_phase_12_activation_accepted_locked_commit_marker_metadata_v1(
+        *,
+        metadata: Phase12ActivationAcceptedLockedCommitMarkerMetadataV1,
+        policy: Phase12ActivationAcceptedLockedCommitMarkerMetadataPolicyV1,
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerMetadataValidationResultV1
+
+The frozen, slotted, keyword-only metadata model has no defaults and exactly
+these ordered fields: `entry_kind`, `link_count`, `owner_uid`, `group_gid`,
+`permission_mode`, and `size_bytes`. The equally frozen, slotted,
+keyword-only policy model has no defaults and exactly: `expected_owner_uid`,
+`expected_group_gid`, `required_permission_mode`, `required_link_count`, and
+`maximum_size_bytes`. Both have fixed sanitized representations and exact
+primitive validation.
+
+The immutable result model has exactly `is_valid` and `failure_codes`.
+`failure_codes` is an immutable tuple of known, unique codes in canonical
+order. `is_valid=True` requires `()`, while `is_valid=False` requires at least
+one code. The result reveals no path, UID, GID, mode, size, source, content,
+commit, exception, or authorization evidence.
+
+#### Exact-type decision and validation semantics
+
+The accepted repair decision is **EXACT_TYPE_REJECTION_TAKES_PRECEDENCE**.
+`entry_kind` accepts only exact `str`; numeric fields accept only exact `int`,
+with `bool` rejected. Primitive subclasses and proxies are rejected before
+equality, hashing, formatting, conversion, iteration, containment, or ordering
+comparison can run. Metadata and policy subclasses may be declared for
+adversarial testing, but subclass instances are rejected by validator exact
+identity checks; there is no `isinstance` widening.
+
+The accepted entry-kind vocabulary is `regular_file`, `symbolic_link`,
+`directory`, and `other`. Counts, identifiers, and sizes are nonnegative;
+permission modes are limited to `0` through `0o7777`.
+
+All applicable mismatches are accumulated without short-circuiting in this
+fixed order:
+
+1. `NON_REGULAR_ENTRY`
+2. `SYMBOLIC_LINK_ENTRY`
+3. `LINK_COUNT_MISMATCH`
+4. `OWNER_UID_MISMATCH`
+5. `GROUP_GID_MISMATCH`
+6. `PERMISSION_MODE_MISMATCH`
+7. `MARKER_SIZE_EXCEEDS_MAXIMUM`
+
+A symbolic link yields both entry-kind codes; `directory` and `other` yield
+only `NON_REGULAR_ENTRY` from entry-kind evaluation. A size equal to the
+maximum is valid, and a zero-byte regular file may be metadata-valid. Marker
+syntax and content emptiness are outside this validator.
+
+Malformed primitives, malformed public-model construction, and wrong validator
+model types raise only
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataErrorV1` with fixed text
+`INVALID_ACCEPTED_LOCKED_COMMIT_MARKER_METADATA`. No malformed value, field,
+path, UID, GID, permission, size, source, commit, or dynamic evidence is
+disclosed. There is no retry, fallback, partial result, logging, or cache.
+
+This validator does not own canonical path selection or normalization,
+stat/lstat or metadata acquisition, filesystem inspection, file opening,
+bounded reads, decoding, marker parsing, accepted-commit source construction,
+authenticity verification, repository revision comparison, approval-record
+loading, policy composition, executable wiring, or authorization. It performs
+no real filesystem metadata validation by default.
 
 ## Result taxonomy
 
@@ -696,13 +768,35 @@ Accepted-locked-commit marker parser full repository regression:
 - Xfails: 0.
 - Retries: 0.
 
-The full repository count increased by exactly 48 from the prior 4,258 baseline
-because the new marker-parser suite contributes 48 tests. The marker-parser
-implementation and tests remain local, uncommitted, unpushed, and undeployed.
-No marker source, reader, metadata validator, authenticity decision, policy
-composition, or operational authorization was created. No configuration,
-credential, Git, systemd, Telegram, network, runtime, or production action
-occurred.
+The full repository count increased by exactly 48 from the prior 4,258 baseline because the new marker-parser suite contributes 48 tests. The marker-parser implementation and tests are committed, pushed, and remotely locked at `a249fca1b0b7f7dd9644fd2ad015126e18a9d59f`; they remain undeployed and operationally unwired. No marker document, canonical marker path, metadata inspector, source, reader, authenticity decision, policy composition, or operational authorization exists. No configuration, credential, Git, systemd, Telegram, network, runtime, or production action occurred.
+
+Accepted-locked-commit marker metadata validator regression evidence:
+
+- Isolated metadata-validator suite: 97 passed in 0.39s.
+- Compilation: implementation and test compiled successfully; source hashes remained unchanged.
+- Combined focused Phase 12 regression:
+  - Activation configuration reader: 74 passed.
+  - Authorization-record parser: 60 passed.
+  - Accepted-locked-commit marker parser: 48 passed.
+  - Marker metadata validator: 97 passed.
+  - Authorization verifier: 49 passed.
+  - Validation coordinator: 55 passed.
+  - Credential-aware executable: 19 passed.
+  - Total: 402 passed in 5.10s.
+- Full repository regression: 4,403 passed in 48.65s.
+- Failures, errors, skips, xfails, and retries: 0.
+
+Count correlation for this validator slice:
+
+- Previous remotely locked full baseline: 4,306.
+- New validator contract tests: 97.
+- Current total: 4,403.
+- Exact delta: +97.
+
+The preceding isolated marker-parser (48 passed in 0.17s), combined focused
+(305 passed in 10.24s), and full repository (4,306 passed in 51.33s) evidence
+remains separately attributed to the accepted-locked-commit marker-parser
+slice; it is not metadata-validator regression evidence.
 
 The coordinator commit remains remotely locked at
 `cac05b1b63ee60e65bfe9f383f19d686cc422632`; the canonical `CLOSED` configuration remains deployed
@@ -712,22 +806,27 @@ production authorization policy remains empty, no approval record exists, and no
 is authorized. No service execution occurred, and no real credential, Telegram, network, runtime,
 or production validation occurred.
 
-Capability status for this local slice:
+Capability status for the current Phase 12 slices:
 
 - Non-CLOSED authorization mechanism: **IMPLEMENTED_AND_TESTED**.
 - Authorization-record document parser: **IMPLEMENTED_AND_REMOTELY_LOCKED**.
-- Accepted-locked-commit marker parser: **IMPLEMENTED_AND_REGRESSION_VALIDATED_LOCAL**.
+- Accepted-locked-commit marker parser: **IMPLEMENTED_AND_REMOTELY_LOCKED**.
 - Marker document deployment: **MISSING**.
+- Marker canonical path: **MISSING**.
 - Marker locator: **MISSING**.
-- Marker metadata validator: **MISSING**.
+- Marker metadata inspector: **MISSING**.
+- Marker metadata validator: **IMPLEMENTED_AND_REGRESSION_VALIDATED_LOCAL**.
 - Marker reader/source: **MISSING**.
 - Accepted-commit authenticity: **MISSING**.
 - Production approval-record loader: **MISSING**.
 - Production approval-record source: **MISSING / NOT AUTHORIZED**.
 - Authorization-policy composition: **MISSING**.
 - Production verifier policy: **IMPLEMENTED_BUT_EMPTY_FAIL_CLOSED**.
-- Deployment: **LOCAL_UNCOMMITTED_UNPUSHED_UNDEPLOYED**.
-- Operational authorization: **NOT GRANTED**.
+- Validator deployment: **LOCAL_UNCOMMITTED_UNPUSHED_UNDEPLOYED**.
+- Marker parser deployment: **REMOTELY_LOCKED_BUT_UNWIRED_AND_UNDEPLOYED**.
+- Operational authorization: **NOT_GRANTED**.
+
+Fail-closed current state: no marker document, canonical marker path, metadata acquisition, real filesystem metadata validation, marker content read, source object, authenticity decision, approval record, policy composition, or executable wiring exists. The accepted-commit placeholder remains unchanged, the production policy remains empty, no mode is operationally authorized, canonical configuration remains `CLOSED`, the service remains disabled, and all production gates remain closed. The remotely locked parser and local validator are both unwired and do not establish production trust.
 
 ## Rollout and rollback policy
 
