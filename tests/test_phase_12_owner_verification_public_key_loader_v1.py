@@ -1,7 +1,7 @@
 """RED contract for the unwired Phase 12 owner verification public-key loader."""
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 import hashlib
 import inspect
 import os
@@ -13,6 +13,34 @@ from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key
 import pytest
 
 import engine.phase_12_owner_verification_public_key_loader_v1 as loader_module
+
+
+
+@dataclass(frozen=True, slots=True)
+class _FixtureLeafMetadata:
+    st_dev: int
+    st_ino: int
+    st_mode: int
+    st_uid: int
+    st_gid: int
+    st_nlink: int
+    st_size: int
+    st_mtime_ns: int
+    st_ctime_ns: int
+
+
+def _leaf_snapshot(metadata, *, mtime_ns: int) -> _FixtureLeafMetadata:
+    return _FixtureLeafMetadata(
+        st_dev=metadata.st_dev,
+        st_ino=metadata.st_ino,
+        st_mode=metadata.st_mode,
+        st_uid=metadata.st_uid,
+        st_gid=metadata.st_gid,
+        st_nlink=metadata.st_nlink,
+        st_size=metadata.st_size,
+        st_mtime_ns=mtime_ns,
+        st_ctime_ns=2_000_000_000,
+    )
 
 
 _PREFIX = "ed25519-sha256:"
@@ -268,12 +296,14 @@ def test_mutation_during_read_is_rejected(tmp_path, monkeypatch):
 
     def changed_leaf_metadata(descriptor):
         nonlocal leaf_snapshots
-        fields = list(original_fstat(descriptor))
-        if descriptor == leaf_descriptor:
-            leaf_snapshots += 1
-            if mutation_started and leaf_snapshots == 2:
-                fields[8] += 1
-        return os.stat_result(fields)
+        metadata = original_fstat(descriptor)
+        if descriptor != leaf_descriptor:
+            return metadata
+        leaf_snapshots += 1
+        return _leaf_snapshot(
+            metadata,
+            mtime_ns=1_000_000_000 + int(mutation_started and leaf_snapshots == 2),
+        )
 
     monkeypatch.setattr(os, "read", mutate)
     monkeypatch.setattr(os, "fstat", changed_leaf_metadata)
@@ -302,12 +332,14 @@ def test_descriptor_metadata_change_is_rejected(tmp_path, monkeypatch):
 
     def changed_leaf_metadata(descriptor):
         nonlocal leaf_snapshots
-        fields = list(original_fstat(descriptor))
-        if descriptor == leaf_descriptor:
-            leaf_snapshots += 1
-            if leaf_snapshots == 2:
-                fields[8] += 1
-        return os.stat_result(fields)
+        metadata = original_fstat(descriptor)
+        if descriptor != leaf_descriptor:
+            return metadata
+        leaf_snapshots += 1
+        return _leaf_snapshot(
+            metadata,
+            mtime_ns=1_000_000_000 + int(leaf_snapshots == 2),
+        )
 
     monkeypatch.setattr(os, "fstat", changed_leaf_metadata)
     _failure(_load(path, fingerprint, key_id), "TRUST_MATERIAL_CHANGED_DURING_READ")
