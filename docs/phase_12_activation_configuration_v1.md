@@ -747,6 +747,138 @@ content reading or parsing, authenticity, repository-lock equality, approval
 authority, policy population, inspector-to-validator composition, executable
 integration, service activation, or production readiness.
 
+### Canonical accepted-locked-commit marker path
+
+The local, unwired, undeployed canonical marker-path component is implemented in
+`engine.phase_12_activation_mode_accepted_locked_commit_marker_path_v1`. It
+owns one project-defined marker location and returns it only as an immutable
+value. It has no public error type, setter, override, registry, reader,
+inspector, validator, source, policy, wiring, or authorization API.
+
+Public surface:
+
+    Phase12ActivationAcceptedLockedCommitMarkerPathV1
+
+    get_phase_12_activation_accepted_locked_commit_marker_path_v1(
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerPathV1
+
+#### Model, construction, and canonical literal
+
+The exact model is:
+
+    @dataclass(frozen=True, slots=True, kw_only=True, repr=False)
+    class Phase12ActivationAcceptedLockedCommitMarkerPathV1:
+        path: str
+
+It has exactly one field, `path`, no default, no `__dict__`, frozen/slotted
+keyword-only construction, equality by value, and immutable hash-compatible
+value semantics. Its fixed sanitized representation is
+`Phase12ActivationAcceptedLockedCommitMarkerPathV1()`.
+
+`type(path)` must be the exact built-in `str`. A non-exact string type raises
+empty `TypeError()` before hostile-subclass interaction. An exact string other
+than the frozen literal raises empty `ValueError()`. Only the exact literal is
+accepted, so no invalid public instance can be constructed. Errors and reprs
+contain no supplied path or dynamic evidence.
+
+The sole private source-code literal is:
+
+    /var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker
+
+It is an intentionally visible, non-secret project-owned value exposed through
+`.path`. It is outside the Git working tree and separate from configuration and
+credential files. Defining it does not establish that the marker or its parent
+directory exists; neither has been created or inspected.
+
+The literal is an exact built-in `str`, nonempty, absolute, NUL-free, has one
+leading slash, and has no leading double slash, repeated separator, trailing
+slash, `.` component, or `..` component. There is no normalization, trimming,
+expansion, resolution, rewriting, environment lookup, or fallback. These
+strict lexical rules apply only to this project-owned literal; they do not
+alter the remotely locked metadata inspector, which accepts caller-supplied
+absolute non-normalized paths verbatim.
+
+#### Getter, effects, and separation
+
+The zero-argument getter constructs a new immutable object each call. Repeated
+values are equal, repeated identities are distinct, and the exact literal is
+always returned deterministically. There is no I/O, cache mutation, clock,
+randomness, logging, or external lookup.
+
+This component is responsible only for owning the canonical literal and
+returning it as a sanitized immutable value. It does not create directories or
+marker files; test existence; inspect metadata; call `stat`, `lstat`, or `readlink`; follow
+symlinks; enumerate parent directories; open or read content; parse a marker; invoke the metadata inspector,
+validator, or parser; build a reader/source; establish authenticity; compare
+repository state; load approval; compose policy; wire executables; authorize
+activation; or mutate or activate services.
+
+There is no import-time or call-time filesystem access, environment or argv
+lookup, configuration or credential read, subprocess, systemd, network,
+Telegram, provider, time, random, UUID, mutable-registry, or override state.
+The component does not import or invoke the metadata inspector; that inspector
+remains caller-path-only. A future separately authorized composition boundary
+may obtain `.path` and pass it explicitly to the inspector. A future reader or
+source may consume the path only through explicit caller input or such a
+separately authorized boundary. Path selection and content reading remain
+separate concerns.
+
+#### Contract-test repair provenance
+
+The initial isolated GREEN invocation produced 23 passed and 2 failed in
+0.38s; implementation-related failures were zero. Both failures were contract
+test defects: an impossible `"" not in ""` assertion after requiring an empty
+sanitized `ValueError` message, and classification of standard Python
+`__cached__` import metadata as a project-owned mutable cache.
+
+The authorized test-only repair removed only the impossible empty-string
+assertion while retaining the exact empty `ValueError()` contract and
+nondisclosure checks for nonempty invalid values. It explicitly permits
+standard dunder import metadata while preserving prohibitions on project-owned
+cache, registry, override, setter, and reset behavior. The implementation hash
+remained unchanged.
+
+#### Validation evidence and current posture
+
+Accepted evidence for this bounded slice is:
+
+- Expected RED: 25 failed in 0.66s, solely because the frozen module/API was
+  absent; internal errors and unexpected failures were zero.
+- Initial GREEN: 23 passed and 2 contract-test defects failed in 0.38s; no
+  implementation-related failure occurred.
+- Repaired isolated GREEN: 25 passed in 0.21s; failures, errors, skips,
+  xfails, retries, and internal errors were zero.
+- Compilation: implementation and test passed; source hashes were unchanged.
+- Combined focused regression: 485 passed in 7.94s, with exact correlation
+  `74 + 60 + 48 + 97 + 58 + 25 + 49 + 55 + 19 = 485`; failures, errors,
+  skips, xfails, retries, and internal errors were zero.
+- The first full repository execution produced 4,486 passed in 48.56s with
+  pytest status 0, but tee status was unavailable because `PIPESTATUS` was not
+  captured atomically. That evidence was indeterminate, not a test failure.
+- A durable recapture produced 4,486 passed in 49.32s with PIPESTATUS count 2,
+  pytest status 0, tee status 0, and exact correlation
+  `4,461 + 25 = 4,486`; failures, errors, skips, xfails, retries, and internal
+  errors were zero.
+
+The implementation SHA-256 is
+`4e7abf88e62ec57e9d4e98408778d2cf8f61b673b4dfa2d8d93caca20224332a`.
+The repaired test SHA-256 is
+`3a5ebeba0998258397118503009d24894181516fdcc1477b8c0c28223d82b6ec`.
+
+Canonical activation configuration remains `CLOSED`. The production verifier
+policy remains immutable, empty, and fail-closed, and the accepted-commit
+placeholder remains unchanged. The path component is unwired and undeployed;
+no real marker or parent-directory inspection occurred. No reader, source,
+composition, authenticity, repository comparison, approval, policy, wiring, or
+operational authorization exists. The service remains disabled and all
+production gates remain closed.
+
+This slice does not establish marker or parent-directory existence, deployment,
+ownership or permissions, metadata validity, content validity, accepted-commit
+authenticity, repository equality, approval authority, a nonempty production
+policy, executable wiring, operational authorization, service activation, or
+production readiness.
+
 ## Result taxonomy
 
 | Condition | Fixed result | Exit |
