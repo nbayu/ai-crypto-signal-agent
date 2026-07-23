@@ -530,7 +530,7 @@ or subprocess; systemd; credential access; Telegram SDK; network; provider
 imports; logging; random or UUID; sleep; dynamic clock; retry; cache; or mutable
 registry.
 
-This slice owns marker-document syntax only. No marker document or canonical marker path is deployed, and no marker locator, metadata inspector, reader, regular-file, symlink, ownership, permission, or link-count acquisition exists. There is no trusted deployment release marker, accepted-commit production source, repository-HEAD or Git comparison, or deployment-authenticity decision. The executable static placeholder remains unchanged, the parser is operationally unwired, no verifier policy is populated, and parsing a syntactically valid marker string does not grant authorization.
+This slice owns marker-document syntax only. No marker document or canonical marker path is deployed, and no marker locator or reader exists. The separately bounded metadata inspector has no marker-reader, parser, source, trust, or authorization role. There is no trusted deployment release marker, accepted-commit production source, repository-HEAD or Git comparison, or deployment-authenticity decision. The executable static placeholder remains unchanged, the parser is operationally unwired, no verifier policy is populated, and parsing a syntactically valid marker string does not grant authorization.
 
 ### Accepted-locked-commit marker metadata validator
 
@@ -610,6 +610,142 @@ bounded reads, decoding, marker parsing, accepted-commit source construction,
 authenticity verification, repository revision comparison, approval-record
 loading, policy composition, executable wiring, or authorization. It performs
 no real filesystem metadata validation by default.
+
+### Accepted-locked-commit marker metadata inspector
+
+The local, unwired, undeployed metadata inspector is implemented in
+`engine.phase_12_activation_mode_accepted_locked_commit_marker_metadata_inspector_v1`.
+It acquires immutable metadata facts for one caller-supplied path only. It does
+not select a canonical path, open or read marker content, parse a marker,
+validate a metadata policy, construct an accepted-commit source, establish
+authenticity, compare repository state, or authorize activation.
+
+Public surface:
+
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionFactsV1
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionErrorV1
+
+    inspect_phase_12_activation_accepted_locked_commit_marker_metadata_v1(
+        *,
+        path: str,
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionFactsV1
+
+#### Path and filesystem boundary
+
+Only an exact built-in `str` path is accepted. It must be nonempty, absolute,
+and NUL-free. Subclasses, bytes, `pathlib.Path`, `os.PathLike`, proxies,
+relative values, empty values, and NUL-containing values are rejected before
+arbitrary interaction. Absolute non-normalized strings are forwarded verbatim:
+repeated separators, `.` components, `..` components, a leading `//`, and a
+trailing slash are not trimmed, normalized, expanded, resolved, canonicalized,
+or rewritten. This component selects no canonical marker path.
+
+The only filesystem operation is exactly:
+
+    os.lstat(path)
+
+Malformed paths cause zero calls; every other invocation causes exactly one.
+The final symlink is inspected rather than followed. There is no `os.stat`,
+preflight, fallback, retry, second metadata lookup, directory enumeration,
+open, content read, decoding, or partial result.
+
+#### Inspector-owned facts and mapping
+
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionFactsV1` is
+frozen, slotted, keyword-only, immutable, and has a fixed sanitized
+representation. Its exact ordered fields are:
+
+1. `entry_kind`
+2. `link_count`
+3. `owner_uid`
+4. `group_gid`
+5. `permission_mode`
+6. `size_bytes`
+
+The facts model is inspector-owned. It is field-compatible with the validator
+facts only; it is not the validator-owned model.
+
+The inspector reads only `st_mode`, `st_nlink`, `st_uid`, `st_gid`, and
+`st_size`. Each must be an exact, nonnegative built-in `int`. It rejects bool,
+int subclasses, floats, strings, proxies, coercible objects, negative values,
+and missing attributes. There is no coercion, defaulting, synthesis, or partial
+facts.
+
+Entry kind is calculated exactly as:
+
+    file_type = st_mode & 0o170000
+
+- `0o100000` maps to `regular_file`.
+- `0o120000` maps to `symbolic_link`.
+- `0o040000` maps to `directory`.
+- Every other value maps to `other`.
+
+Permission mode is calculated exactly as:
+
+    permission_mode = st_mode & 0o7777
+
+File-type bits are excluded; conventional permission and special bits are
+retained.
+
+#### Errors, exceptions, and separation
+
+The fixed public error representation is:
+
+    Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionErrorV1()
+
+Its only error texts are:
+
+- `INVALID_ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_PATH`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_PATH_ABSENT`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_PERMISSION_DENIED`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_SYMBOLIC_LINK_LOOP`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_PATH_COMPONENT_NOT_DIRECTORY`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_FILESYSTEM_INSPECTION_FAILED`
+- `ACCEPTED_LOCKED_COMMIT_MARKER_METADATA_MALFORMED_RESULT`
+
+Errors reveal no path, errno, OS text, metadata value, field name, exception
+detail, or host identity. Expected `OSError` conditions map to these sanitized
+fixed errors, and native missing metadata attributes map to malformed result.
+Unexpected ordinary exceptions propagate unchanged; `KeyboardInterrupt`,
+`SystemExit`, and other `BaseException` values also propagate unchanged. There
+is no broad `BaseException` catch, retry, fallback, logging, caching, or
+partial fact.
+
+The inspector does not import the metadata validator, construct or return the
+validator facts model, invoke validation, evaluate policy, or produce an
+authorization result. A future separately authorized composition boundary may
+convert inspector facts into validator facts and invoke validation; no such
+composition exists now.
+
+#### Validation evidence and current posture
+
+Accepted evidence for this bounded slice is:
+
+- Expected RED: 58 failures caused solely by absent module/API.
+- Isolated GREEN: 58 passed in 0.29s.
+- Compilation: implementation and contract test passed.
+- Combined focused regression: 460 passed in 8.81s.
+- Full repository regression: 4,461 passed in 50.72s.
+- Exact count correlation: 4,403 + 58 = 4,461.
+- Failures, errors, skips, xfails, and retries: 0.
+
+The first full-regression terminal result was indeterminate because terminal
+evidence was lost; it was not a test failure. A separately authorized durable
+recapture produced the accepted 4,461-pass evidence above.
+
+Canonical activation configuration remains `CLOSED`. The production verifier
+policy remains immutable, empty, and fail-closed, and the accepted-commit
+placeholder remains unchanged. No canonical marker path exists, no real marker
+was inspected, no marker content reader or accepted-commit source exists,
+authenticity is not established, repository equality is not verified, and no
+approval source, policy composition, executable wiring, or operational
+authorization exists. The service remains disabled and all production gates
+remain closed.
+
+This slice does not introduce canonical path selection, marker deployment,
+content reading or parsing, authenticity, repository-lock equality, approval
+authority, policy population, inspector-to-validator composition, executable
+integration, service activation, or production readiness.
 
 ## Result taxonomy
 
