@@ -380,4 +380,3 @@ def test_purity_03() -> None:
 
 def test_purity_04() -> None:
     assert "phase_12_activation_owner_approval_signature_verifier_v1" not in _source()
-
