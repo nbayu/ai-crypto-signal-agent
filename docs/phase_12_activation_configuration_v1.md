@@ -1983,3 +1983,97 @@ The RED contract has exactly 163 unique top-level static tests, with no parametr
 Future cumulative scope is exactly this document, `tests/test_phase_12_repository_identity_locked_commit_comparator_v1.py`, and `engine/phase_12_repository_identity_locked_commit_comparator_v1.py`. Future subjects are exactly `docs: freeze phase 12 repository identity and locked-commit comparator design`, `test: define phase 12 repository identity and locked-commit comparator`, and `feat: add phase 12 repository identity and locked-commit comparator`. Fixture-repair commits are forbidden absent a proven committed contradiction.
 
 This frozen design authorizes no implementation, test creation, caller-fact source, path access, policy population, wiring, activation, or production action. All production gates remain closed.
+
+
+## Phase 12 repository remote expectation source v1 — frozen detailed design
+
+### Capability, module, and public surface
+
+Capability: **repository remote expectation source**. It owns only loading expected origin fetch and push URL policy facts, validating their filesystem, schema, and URL grammar, and constructing one immutable result. It does not inspect Git; compare repository state; verify approval/signatures; inspect marker, key, revocation, replay, comparator, or policy state; wire components; activate services; or claim repository, URL, hosting, or production authority.
+
+Module: `engine.phase_12_repository_remote_expectation_source_v1`. Implementation file: `engine/phase_12_repository_remote_expectation_source_v1.py`. Future test file: `tests/test_phase_12_repository_remote_expectation_source_v1.py`.
+
+```python
+__all__ = (
+    "load_phase_12_repository_remote_expectation_source_v1",
+)
+
+def load_phase_12_repository_remote_expectation_source_v1(
+    *,
+    source_path: str,
+) -> _Phase12RepositoryRemoteExpectationSourceResultV1:
+```
+
+There is no other public parse, validate, inspect, read, open, resolve, normalize, fetch-URL, or push-URL helper. `type(source_path) is str`; malformed type or grammar raises empty `TypeError()`. The path is nonempty normalized absolute, has exactly one leading slash, is not `/`, and has no NUL, empty interior component, `.` component, `..` component, or trailing slash. Caller input is not normalized automatically.
+
+### Descriptor, metadata, and one-read boundary
+
+Open `/` directly. Open every parent descriptor-relatively with `os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW`, retaining all descriptors until completion. Open the leaf exactly once with `os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW`; do not reopen by path. Parent or leaf symlink failures are `SOURCE_SYMLINK_REJECTED`; ordinary missing, inaccessible, non-directory-parent, open, `fstat`, or read availability failures are `SOURCE_UNAVAILABLE`.
+
+Initial leaf validation order is regular file, UID exactly `0`, `stat.S_IMODE(st_mode)` exactly `0o644`, `st_nlink` exactly `1`, and `st_size` from `1` through `4096` inclusive. These fail respectively as `SOURCE_TYPE_INVALID`, `SOURCE_OWNER_MISMATCH`, `SOURCE_MODE_MISMATCH`, `SOURCE_LINK_COUNT_INVALID`, and `SOURCE_SIZE_INVALID`. Parent UID/mode and parent link counts are not constrained.
+
+Snapshot initially and finally exactly `st_dev`, `st_ino`, `st_mode`, `st_uid`, `st_gid`, `st_nlink`, and `st_size`; a final mismatch is `SOURCE_CHANGED_DURING_READ`. Do not add mtime, ctime, block-count, or other metadata, and do not claim protection from privileged swap-and-restore attacks.
+
+Perform exactly one `os.read(source_fd, 4097)`: no loop, retry, second content read, mmap, or path reopen. A 4097-byte result is `SOURCE_SIZE_INVALID`; a zero/short/partial result inconsistent with initial `st_size`, including interrupted read without retry, is `SOURCE_CHANGED_DURING_READ`; an expected read `OSError` is `SOURCE_UNAVAILABLE`; only `1..4096` bytes matching initial `st_size` continue. Partial kernel reads fail closed.
+
+### Canonical file format and URL grammar
+
+Decode strictly as UTF-8 with no replacement; BOM or invalid UTF-8 is `SOURCE_ENCODING_INVALID`. Require exactly one terminal `0x0A`; missing LF, CRLF, extra LF, bytes after terminal LF, leading whitespace, and trailing whitespace before LF are `SOURCE_SCHEMA_INVALID`.
+
+The exact accepted bytes are:
+
+```text
+{"schema_version":1,"expected_origin_fetch_url":"...","expected_origin_push_url":"..."}\n
+```
+
+Use `json.dumps(value, ensure_ascii=True, separators=(",", ":"))`, construct insertion order exactly `schema_version`, `expected_origin_fetch_url`, `expected_origin_push_url`, append one LF, and require reserialized UTF-8 bytes to equal original bytes exactly. Reject alternate whitespace, formatting, escaping, order, or serialization.
+
+Use deterministic duplicate detection through `object_pairs_hook` or an exact equivalent. Require one top-level object of exactly three ordered pairs, exact case-sensitive keys, no duplicate/unknown/missing keys, `type(schema_version) is int and schema_version == 1` (reject bool), and `type(value) is str` for both URLs. Arrays, null, booleans, nested objects, alternate number forms, escaped keys, duplicate keys, surrogate escapes, and noncanonical valid JSON are `SOURCE_SCHEMA_INVALID`.
+
+The exact comparator-compatible full-string ASCII grammar for each URL is:
+
+```text
+git@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*\.git
+```
+
+It requires literal `git@`, lowercase host, exactly one owner/repository slash, nonempty owner/repository, terminal `.git`, and case preservation for owner/repository. It rejects whitespace, controls, NUL, query, fragment, alternate scheme/user, embedded credential, DNS resolution, SSH, and network access. Fetch and push grammar failures are `SOURCE_FETCH_URL_INVALID` and `SOURCE_PUSH_URL_INVALID`. Both fields are mandatory and separate; equal values are allowed, while fallback, normalization, rewriting, and frozen actual URL values are forbidden.
+
+### Result, failures, effects, and composition
+
+Private result `_Phase12RepositoryRemoteExpectationSourceResultV1` is `@dataclass(frozen=True, slots=True, kw_only=True)` with exact field order `is_loaded`, `failure_codes`, `expected_origin_fetch_url`, `expected_origin_push_url`. Success has `is_loaded=True`, `failure_codes=()`, and both URLs; failure has `is_loaded=False`, exactly one code, and both fields `None`. Repr exposes only load state and failure count, never path, URLs, file bytes, metadata, or exception details.
+
+The exact 13 codes are:
+
+```text
+PATH_TYPE_INVALID
+SOURCE_UNAVAILABLE
+SOURCE_SYMLINK_REJECTED
+SOURCE_OWNER_MISMATCH
+SOURCE_MODE_MISMATCH
+SOURCE_TYPE_INVALID
+SOURCE_LINK_COUNT_INVALID
+SOURCE_SIZE_INVALID
+SOURCE_ENCODING_INVALID
+SOURCE_SCHEMA_INVALID
+SOURCE_FETCH_URL_INVALID
+SOURCE_PUSH_URL_INVALID
+SOURCE_CHANGED_DURING_READ
+```
+
+Exact first-precedence order is caller type/path grammar; root/parent traversal; source availability; source type; owner; mode; link count; initial size; bounded one-read outcome; UTF-8/BOM; terminal LF/canonical serialization; JSON duplicate/key/order/schema; fetch URL; push URL; final snapshot; success. Unknown ordinary exceptions and every `BaseException` propagate unchanged; broad `Exception` catching is forbidden. Close failures never mask a selected result or propagated exception; otherwise an expected close `OSError` is `SOURCE_UNAVAILABLE`.
+
+Allowed effects are bounded metadata reads, symlink-safe descriptor opens, one bounded descriptor read, immutable result construction, and descriptor cleanup. File creation/mutation, chmod/chown, environment reads, Git, subprocesses, network, DNS, SSH, credential access, logging, mutable cache, marker/approval/key/revocation/replay access, comparator invocation, policy population, and activation are prohibited.
+
+Future composition is authorization parsing → semantic verification → public-key loading → revocation-state loading → owner signature verification → repository remote expectation source → repository comparator → durable replay check-and-record → production-policy decision → executable/service activation. The source receives only `source_path`, not repository identity, accepted commit, repository path, Git facts, approval/marker/replay/comparator state, and does not verify source-path provenance.
+
+Success proves only selected local source-file filesystem, canonical-schema, URL-grammar, and stable-metadata facts. It does not prove URL ownership, hosting identity, availability/freshness, SSH authenticity, credentials, repository identity/content, source trustworthiness, production authorization, or readiness.
+
+### Operational dependencies, RED, scope, and authorization
+
+Actual URL values remain undefined. The operational policy file remains absent; its creation/population, source-path ownership, deployment placement, comparator wiring, and production-policy population are separately unauthorized. These dependencies do not block isolated source implementation.
+
+The RED contract has exactly 101 unique top-level static tests, with no parametrization, dynamic generation, skip, xfail, `sys.modules` mutation, implementation substitute, operational source path, Git, subprocess, or network. Allocation is: 6 public surface/result; 9 caller type/path; 8 parent/leaf symlink; 11 owner/mode/type/link/size; 8 descriptor lifetime/one-read; 6 UTF-8/BOM; 7 terminal LF/canonical serialization; 7 duplicate/unknown keys; 6 schema version/key order; 6 fetch URL grammar; 6 push URL grammar; 5 metadata drift; 4 exception propagation; 7 prohibited effects; 5 trust non-overclaim. Use deterministic fake-filesystem seams and only bounded pytest-managed temporary files for genuine descriptor behavior, with no root privilege requirement.
+
+Future cumulative scope is exactly this document, `tests/test_phase_12_repository_remote_expectation_source_v1.py`, and `engine/phase_12_repository_remote_expectation_source_v1.py`. Exact subjects are `docs: freeze phase 12 repository remote expectation source design`, `test: define phase 12 repository remote expectation source`, and `feat: add phase 12 repository remote expectation source`. Fixture-repair commits are forbidden absent a proven committed contradiction.
+
+This detailed design authorizes no test, implementation, policy file, URL population, source-path wiring, comparator wiring, activation, or production action. Documentation mutation is authorized only by the corresponding design-freeze step; all production gates remain closed.
