@@ -311,8 +311,11 @@ def test_unavailable_revocation_state_fails_closed():
     payload, signature, public, key_id, _ = _vector(); _failure(_verify(payload, signature, public, key_id, revocation_state_available=False, active_signing_key_identifier=None, revoked_signing_key_identifiers=None, revocation_state_checkpoint_identifier=None), "REVOCATION_STATE_UNAVAILABLE")
 
 
-def test_revoked_key_fails_closed():
-    payload, signature, public, key_id, _ = _vector(); _failure(_verify(payload, signature, public, key_id, revoked_signing_key_identifiers=(key_id,)), "SIGNING_KEY_REVOKED")
+def test_active_key_in_revoked_ids_is_type_error():
+    payload, signature, public, key_id, _ = _vector()
+    with pytest.raises(TypeError) as caught:
+        _verify(payload, signature, public, key_id, revoked_signing_key_identifiers=(key_id,))
+    assert caught.value.args == ()
 
 
 def test_duplicate_revoked_ids_are_type_error():
@@ -326,7 +329,10 @@ def test_signature_is_64_bytes():
 
 
 def test_invalid_signature_maps_exactly():
-    payload, signature, public, key_id, _ = _vector(); _failure(_verify(payload + b"x", signature, public, key_id), "SIGNATURE_MISMATCH")
+    payload, signature, public, key_id, _ = _vector()
+    nonmatching_signature = b"\x00" * 64
+    assert len(nonmatching_signature) == 64
+    _failure(_verify(payload, nonmatching_signature, public, key_id), "SIGNATURE_MISMATCH")
 
 
 def test_signature_covers_exact_bytes_only():
