@@ -1005,8 +1005,9 @@ validation coordinator, or credential-aware executable. It performs no
 metadata inspection or validation, decoding, parsing, canonical-path selection,
 authenticity verification, repository comparison, approval lookup, policy
 composition, executable wiring, or service action. Canonical-path-to-reader,
-inspector-to-validator, parser, and all higher-level composition remain absent
-and require separately authorized gating.
+parser, and all higher-level composition remain absent and require separately
+authorized gating. The separately documented metadata validation composition
+does not involve this reader.
 
 There is no import-time filesystem action, canonical-marker access, environment
 or argv lookup, configuration or credential read, logging, subprocess, systemd,
@@ -1079,10 +1080,164 @@ Canonical activation configuration remains `CLOSED`. The production verifier
 policy remains immutable, empty, and fail-closed, and the accepted-commit
 placeholder remains unchanged. The reader is unwired and undeployed; the real
 marker path and parent were not inspected or accessed. The service remains
-disabled and non-running. No canonical-path/inspector/validator/parser
-composition, authenticity, repository comparison, approval source, policy
-composition, executable wiring, or operational authorization exists. All
-production gates remain closed.
+disabled and non-running. No canonical-path-to-reader, reader/parser, authenticity, repository comparison,
+approval source, policy-source or production-policy composition, executable
+wiring, or operational authorization exists. The pure inspector-facts-to-validator
+adapter remains caller-driven, unwired, and non-authorizing. All production gates
+remain closed.
+
+
+### Accepted-locked-commit marker metadata validation composition
+
+The local, unwired, undeployed pure adapter is implemented in
+`engine.phase_12_activation_mode_accepted_locked_commit_marker_metadata_validation_composition_v1`.
+Its `__all__` contains exactly:
+
+    compose_phase_12_activation_accepted_locked_commit_marker_metadata_validation_v1
+
+All implementation-only names are underscore-prefixed. There is no composition
+facts wrapper, composition error type, registry, cache, override, setter, or
+reset API. Its exact required keyword-only signature is:
+
+    compose_phase_12_activation_accepted_locked_commit_marker_metadata_validation_v1(
+        *,
+        inspection_facts: Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionFactsV1,
+        policy: Phase12ActivationAcceptedLockedCommitMarkerMetadataPolicyV1,
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerMetadataValidationResultV1
+
+#### Design provenance and input contract
+
+The first design freeze required same-object inspector-facts handoff, no
+reconstruction, and no policy input. It was blocked before implementation as
+`BLOCKED_METADATA_VALIDATION_COMPOSITION_DESIGN_FREEZE`, not as an
+implementation or regression failure. The locked inspector produces exact
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataInspectionFactsV1`, while
+the locked validator accepts exact
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataV1` and rejects inspector
+facts as validator metadata. The validator also requires exact
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataPolicyV1`; no valid
+validator invocation could be frozen under the original constraints.
+
+The accepted revised decision is exactly:
+
+    AUTHORIZE_FIELD_PRESERVING_INSPECTION_FACTS_TO_VALIDATOR_METADATA_ADAPTATION_WITH_EXPLICIT_EXACT_VALIDATOR_POLICY_INPUT
+
+Neither locked API changed. `inspection_facts` must be the exact inspector facts
+type and `policy` must be the exact validator policy type. Subclasses, proxies,
+mappings, tuples, protocol-compatible values, `None`, and arbitrary objects are
+rejected with empty `TypeError()` before metadata construction or validator
+invocation. There is no coercion or hostile attribute interaction before exact
+type checking.
+
+#### Exact adapter, policy, call, output, and propagation
+
+The adapter constructs exactly one
+`Phase12ActivationAcceptedLockedCommitMarkerMetadataV1` with exactly these six
+unchanged field transfers:
+
+    entry_kind=inspection_facts.entry_kind
+    link_count=inspection_facts.link_count
+    owner_uid=inspection_facts.owner_uid
+    group_gid=inspection_facts.group_gid
+    permission_mode=inspection_facts.permission_mode
+    size_bytes=inspection_facts.size_bytes
+
+There are no omitted or extra fields, normalization, coercion, recomputation,
+reinterpretation, defaults, or mutation of inspection facts. Same-object
+handoff is impossible because the locked source and destination types differ;
+it is not claimed. Field-value preservation replaces same-object handoff.
+
+Policy is explicitly caller supplied. The exact original policy object is passed
+unchanged: no copy, reconstruction, default, lookup, source, selection,
+approval, mutation, or duplicated policy-rule evaluation occurs. The adapter
+makes exactly one call:
+
+    validate_phase_12_activation_accepted_locked_commit_marker_metadata_v1(
+        metadata=<single constructed metadata object>,
+        policy=policy,
+    )
+
+The single constructed metadata object and original policy object are passed by
+identity. There is no retry, fallback, duplicate validation, pre-validation, or
+post-validation reinterpretation. The exact validator result is returned
+unchanged by identity, with no wrapper, copy, reconstruction, boolean
+extraction, failure-code transformation, or composition-owned result
+validation. Hostile monkeypatched validator results are consequently returned
+directly.
+
+Validator-domain errors, ordinary `Exception` values from metadata construction
+or validator invocation, and `BaseException` values from either boundary
+propagate unchanged. There is no wrapping, translation, retry, fallback,
+cleanup side effect, or dynamic disclosure.
+
+Only the locked validator owns entry kind, regular-file requirement,
+symbolic-link rules, link count, owner UID, group GID, permission mode, size
+limit, and every other metadata mismatch rule. The adapter does not duplicate
+these checks; `MetadataV1` retains its locked construction invariants.
+
+#### Boundaries, purity, and TOCTOU limitation
+
+The adapter has no path parameter, canonical-path lookup, filesystem API,
+metadata-inspector invocation, marker reader, marker parser, authorization
+verifier, validation coordinator, or credential-aware executable. It does not
+read bytes, decode, trim, parse, or interpret marker content; establish
+authenticity, repository equality, approval, a policy source, production-policy
+composition, executable wiring, or operational authorization.
+
+Its input is a prior metadata snapshot. Validation is not bound to a later
+descriptor or read, does not prove filesystem continuity, does not eliminate
+races, and is not a secure inspector-reader transaction. Success does not prove
+canonical-path provenance, marker-content validity, authenticity, repository
+equality, policy approval, or production readiness.
+
+There is no import-time metadata construction, validator invocation,
+filesystem action, configuration/environment/credential access, logging,
+subprocess, systemd, Telegram, network/provider activity, clock, random, UUID,
+sleep, mutable registry, cache, override, setter, or reset.
+
+#### Validation evidence and operational posture
+
+The expected RED contract run produced 18 failures, zero passes, exit 1, and
+zero internal or unexpected failures in 0.67s, solely because the composition
+module/API was absent:
+`EXPECTED_ABSENT_MARKER_METADATA_VALIDATION_COMPOSITION_MODULE_OR_PUBLIC_API`.
+Isolated GREEN collected and passed 18 tests in 0.16s, with zero failures,
+errors, skips, xfails, retries, and internal errors.
+
+Compilation covered implementation and contract test once, exited 0 with empty
+stdout and stderr, and preserved source hashes. `py_compile` created exactly
+two attributable composition-specific `.pyc` files; both were removed, and no
+composition-specific bytecode remains. This does not claim that
+`PYTHONDONTWRITEBYTECODE` prevents `py_compile` output.
+
+The single combined focused run preserved inspector, validator, and composition
+contracts: `58 + 97 + 18 = 173`, with 173 passed in 0.69s. The single durable
+full regression preserved tracked repository content and source hashes:
+`4,511 + 18 = 4,529`, with 4,529 collected and passed in 55.12s. It used one
+pytest process and one tee process, captured `PIPESTATUS` atomically with two
+elements, and recorded pytest/tee statuses `0/0`. All isolated, focused, and
+full evidence had zero failures, errors, skips, xfails, retries, and internal
+errors. The temporary full-regression log was outside the repository, evidence
+was extracted, and it was removed.
+
+The implementation SHA-256 is
+`e15f5eec5b21ff5bcc6d7881aabf7529175c31ac3687e15aa41954cdc7e229d7`.
+The contract-test SHA-256 is
+`6b71dd3e2df4454352c22263a1df8e6a8321d9d0f6dd8e1a1bc6d6026152c681`.
+
+Canonical activation configuration remains `CLOSED`. The production verifier
+policy remains immutable, empty, and fail-closed; the accepted-commit
+placeholder remains unchanged. The real marker path and parent were not
+inspected or accessed. This adapter is unwired and undeployed, has no policy
+source, makes no production-readiness claim, and leaves the service disabled
+and non-running. All production gates remain closed.
+
+This slice does not change inspector or validator APIs; provide same-object
+inspector-facts handoff; source, approve, default, or select policy; select a
+canonical path; inspect or read a marker; bind a descriptor; eliminate TOCTOU;
+parse content; establish content validity, authenticity, repository equality,
+approval, production-policy composition, executable wiring, operational
+authorization, service activation, or production readiness.
 
 ## Result taxonomy
 
