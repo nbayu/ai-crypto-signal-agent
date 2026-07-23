@@ -1838,3 +1838,148 @@ Future composition is authorization parsing → semantic verification → public
 The RED contract has exactly 108 static tests, without parametrization, dynamic generation, skip, or xfail: 6 public surface/signature/result/repr; 10 caller types/grammars; 8 path grammar; 9 parent traversal/metadata; 8 database leaf metadata; 4 existing-only open; 7 PRAGMA policy; 9 schema/object introspection; 5 metadata/deployment; 5 quick-check/corruption; 5 first-use; 4 already-consumed; 4 row/page capacity; 4 concurrent insertion; 3 busy/locking; 4 commit ambiguity; 3 post-operation identity drift; 3 immutable result shapes; 3 exception propagation; and 4 purity/trust-boundary tests. Fixtures use only pytest-managed SQLite stores and deterministic descriptor/metadata seams, with exactly one Linux fork-context multiprocess concurrency test. No real operational path or root privilege is required.
 
 The future cumulative scope is exactly this document, `tests/test_phase_12_owner_approval_durable_replay_guard_v1.py`, and `engine/phase_12_owner_approval_durable_replay_guard_v1.py`. Future subjects are exactly: `docs: freeze phase 12 owner approval durable replay guard design`, `test: define phase 12 owner approval durable replay guard`, and `feat: add phase 12 owner approval durable replay guard`. A fixture-repair commit is forbidden unless a specific committed test contradiction is later proven. This frozen design authorizes no implementation, test creation, path access, policy population, wiring, activation, or production action; all production gates remain closed.
+
+
+## Phase 12 repository identity and accepted locked-commit comparator v1 — frozen detailed design
+
+### Capability, module, and caller contract
+
+Capability: **repository identity and accepted locked-commit comparator**. It owns only bounded inspection of one local Git repository, comparison of caller-owned expected facts with selected local facts, and immutable result construction. It is not a repository, source-authenticity, remote-freshness, release, deployment, or production-authorization authority.
+
+Module: `engine.phase_12_repository_identity_locked_commit_comparator_v1`. Implementation file: `engine/phase_12_repository_identity_locked_commit_comparator_v1.py`. Future test file: `tests/test_phase_12_repository_identity_locked_commit_comparator_v1.py`.
+
+```python
+__all__ = ("compare_phase_12_repository_identity_and_locked_commit_v1",)
+
+def compare_phase_12_repository_identity_and_locked_commit_v1(
+    *,
+    repository_path: str,
+    repository_identity: str,
+    accepted_locked_commit: str,
+    expected_origin_fetch_url: str,
+    expected_origin_push_url: str,
+) -> _Phase12RepositoryIdentityLockedCommitComparatorResultV1:
+```
+
+There is no public inspect, resolve, validate, query, Git-runner, status, remote, or cleanup operation. All five inputs require `type(value) is str`; malformed caller facts raise empty `TypeError()`. `repository_identity` is `[a-z0-9][a-z0-9-]{0,63}` and `accepted_locked_commit` is `[0-9a-f]{40}`. Repository failures return immutable results.
+
+URLs support only strict ASCII SSH scp-like `git@<lowercase-host>:<owner>/<repository>.git`: nonempty host/owner/repository, terminal `.git`, no whitespace/control/NUL/newline/query/fragment/trailing slash/alternate scheme/credentials beyond literal `git@`. Comparison is exact and case-sensitive; no URL is hard-coded or rewritten.
+
+### Path, filesystem identity, and topology
+
+`repository_path` is nonempty normalized absolute, has exactly one leading slash, is not `/`, and has no NUL, empty interior, `.`/`..`, or trailing slash. It is caller-owned; no canonical path exists. Open `/` and all parents with `os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW`, retain descriptors through completion, and treat `/` only as a traversal anchor. Repository root and direct `.git` must be non-symlink directories, UID 0, and not group/other writable; group is unconstrained, no exact mode or recursive tree audit applies.
+
+Snapshot `st_dev`, `st_ino`, `st_mode`, `st_uid`, and `st_gid` for repository root and direct `.git` before Git observations and recheck afterward. Persistent drift returns `REPOSITORY_CHANGED_DURING_OPERATION`. Do not check nlink, recursively snapshot the tree, or claim protection from privileged swap-and-restore attacks.
+
+Require ordinary non-bare worktree, top-level exactly `repository_path`, direct real `.git`, absolute Git dir equal to direct `.git`, common dir equal to Git dir, and no linked worktree/gitfile/submodule-style gitfile/separate common directory.
+
+### Private Git runner, environment, and isolation
+
+Use only `/usr/bin/git` through a private binary-mode bounded `subprocess.Popen` runner: `shell=False`, fixed argv, `cwd=repository_path`, `stdin=subprocess.DEVNULL`, `stdout=subprocess.PIPE`, `stderr=subprocess.PIPE`, `close_fds=True`, `start_new_session=True`. No TTY, retry, caller Git argv, Python Git library, direct object parsing, or alternate backend. Drain pipes with 65536-byte caps, strict UTF-8, exact output grammars, 5-second command deadline, and 60-second monotonic operation deadline. On timeout terminate process group, bounded-drain, kill if needed, wait/reap, and close descriptors. Timeout, signal exit, overflow, invalid UTF-8, malformed output, and unexpected nonzero exit fail closed; unbounded `subprocess.run(..., capture_output=True)` is forbidden.
+
+The exact non-inherited environment is `PATH=/usr/bin:/bin`, `LANG=C`, `LC_ALL=C`, `HOME=/nonexistent`, `XDG_CONFIG_HOME=/nonexistent`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_ATTR_NOSYSTEM=1`, `GIT_OPTIONAL_LOCKS=0`, `GIT_TERMINAL_PROMPT=0`, `GIT_PAGER=cat`, `PAGER=cat`, `GIT_EXTERNAL_DIFF=`, `GIT_CONFIG_COUNT=0`, and `GIT_NO_REPLACE_OBJECTS=1`. Exclude Git directory/worktree/common-dir/index/object/alternate/namespace/shallow/discovery overrides, SSH agent, proxies, credentials, pager/editor/tracing, user and system config overrides.
+
+Read local config only using `git config --local --no-includes`. Reject local `include.path`, `includeIf.*`, `url.*.insteadOf`, and `url.*.pushInsteadOf`; `git remote get-url` is forbidden. Status/index commands add fixed `-c core.fsmonitor=false -c core.untrackedCache=false -c core.preloadIndex=false -c submodule.recurse=false`. No hooks, diff/textconv, filters, LFS, fsmonitor, pager, editor, credentials, network, lazy fetch, maintenance, or repository/index mutation is allowed.
+
+### Exact 28-command allowlist
+
+The deterministic allowlist and output contracts are exactly:
+
+1. `git rev-parse --is-inside-work-tree` → `true\n`.
+2. `git rev-parse --show-toplevel` → one normalized absolute line equal to `repository_path`.
+3. `git rev-parse --absolute-git-dir` → one normalized absolute line equal to `repository_path/.git`.
+4. `git rev-parse --git-common-dir` → one normalized absolute line equal to `repository_path/.git`.
+5. `git rev-parse --is-bare-repository` → `false\n`.
+6. `git config --local --no-includes --name-only --get-regexp '^(include|includeIf)\.'` → only exit 1 and empty output.
+7. `git config --local --no-includes --name-only --get-regexp '^url\..*\.(insteadOf|pushInsteadOf)$'` → only exit 1 and empty output.
+8. `git rev-parse --show-object-format` → `sha1\n`.
+9. `git rev-parse --is-shallow-repository` → `false\n`.
+10. Descriptor-relative existence check for `.git/objects/info/alternates` → absent only.
+11. `git config --local --no-includes --get extensions.partialClone` → only exit 1 and empty output.
+12. `git config --local --no-includes --get-regexp '^remote\..*\.promisor$'` → only exit 1 and empty output.
+13. `git config --local --no-includes --get-regexp '^remote\..*\.partialclonefilter$'` → only exit 1 and empty output.
+14. `git for-each-ref --format=%(refname) refs/replace/` → empty output.
+15. `git config --local --no-includes --bool --get core.sparseCheckout` → absent or `false`; `true` rejects.
+16. `git -c core.fsmonitor=false -c core.untrackedCache=false -c core.preloadIndex=false -c submodule.recurse=false ls-files -v -z` → bounded tags; lowercase assume-unchanged and `S` skip-worktree reject.
+17. `git -c core.fsmonitor=false -c core.untrackedCache=false -c core.preloadIndex=false -c submodule.recurse=false ls-files --stage -z` → bounded stage grammar; intent-to-add and mode `160000` reject.
+18. `git config --local --no-includes --get-regexp '^submodule\.'` → only exit 1 and empty output.
+19. `git symbolic-ref --quiet HEAD` → `refs/heads/master\n`; exit 1 is detached HEAD.
+20. `git cat-file -t --end-of-options <accepted_locked_commit>` → `commit\n`.
+21. `git rev-parse --verify --end-of-options <accepted_locked_commit>^{commit}` → accepted hash plus LF.
+22. `git rev-parse --verify refs/remotes/origin/master^{commit}` → accepted hash plus LF.
+23. `git rev-parse --verify HEAD^{commit}` → accepted hash plus LF.
+24. `git config --local --no-includes --get remote.origin.url` → exactly one strict fetch URL plus LF.
+25. `git config --local --no-includes --get remote.origin.pushurl` → exactly one strict push URL plus LF.
+26. `git symbolic-ref --quiet refs/remotes/origin/HEAD` → `refs/remotes/origin/master\n`.
+27. `git -c core.fsmonitor=false -c core.untrackedCache=false -c core.preloadIndex=false -c submodule.recurse=false status --porcelain=v2 -z --untracked-files=all --ignore-submodules=none` → empty stdout.
+28. Final descriptor-relative root and `.git` snapshot recheck → exact initial five-field snapshots.
+
+Only specified optional absence exits are accepted. Required HEAD, object, origin URL/push URL, origin/master, and origin/HEAD absence fails closed.
+
+### Object, refs, cleanliness, and history
+
+V1 is SHA-1 only; SHA-256 fails closed pending a new comparator/marker contract. Accepted commit must be full lowercase 40-hex, locally present, type `commit`, exactly resolve to itself, and exactly equal HEAD. No abbreviation, arbitrary revision, ancestor semantics, tag relevance, or signature verification. Subject and parent are not inputs, predicates, or result facts.
+
+HEAD must symbolically be `refs/heads/master`; detached HEAD fails. Local origin/master must equal the accepted commit and symbolic origin/HEAD must target origin/master. These are local observations only and do not prove remote freshness. Exactly one explicit local fetch and push URL must equal caller values; missing, empty, duplicate, include-derived, rewritten, or fallback values fail. URLs are not returned.
+
+NUL porcelain-v2 output must be empty. Any changed, renamed, unmerged, untracked, staged, unstaged, conflict, intent-to-add, or submodule status is `REPOSITORY_DIRTY`. Ignored files may exist but are not requested, parsed, or inspected. Assume-unchanged, skip-worktree, sparse state, registered submodules, shallow state, replace refs, alternates, and promisor/partial-clone state reject. Required object/ref validation is bounded; no `git fsck`, full-history traversal, or complete object-db integrity claim.
+
+### Observation order, result, and errors
+
+Exact first-precedence order: caller grammar; path grammar; root/parent traversal; repository/.git metadata; initial snapshots; worktree/top-level/Git-dir/common-dir/bare topology; config isolation; object format; shallow; alternates; promisor/partial clone; replace refs; sparse; index flags/intent-to-add; submodules; symbolic branch; accepted object type; accepted resolution; HEAD equality; fetch URL; push URL; origin/master; origin/HEAD; cleanliness; final snapshots; success.
+
+Private result `_Phase12RepositoryIdentityLockedCommitComparatorResultV1` is frozen, slotted, keyword-only, with fields in exact order: `is_match`, `failure_codes`, `repository_identity`, `repository_top_level`, `head_commit`, `branch_name`, `origin_master_commit`, `origin_head_target`, `object_format`, `is_clean`. Success is true with no codes and all facts. Failure is false with one code and all facts `None`. Repr exposes only match state and failure count.
+
+The exact 33 stable codes are:
+
+```
+PATH_TYPE_INVALID
+REPOSITORY_UNAVAILABLE
+REPOSITORY_PATH_MISMATCH
+REPOSITORY_SYMLINK_REJECTED
+REPOSITORY_OWNER_MISMATCH
+REPOSITORY_MODE_MISMATCH
+REPOSITORY_NOT_GIT_WORKTREE
+REPOSITORY_GIT_DIR_MISMATCH
+REPOSITORY_LINKED_WORKTREE_REJECTED
+REPOSITORY_OBJECT_FORMAT_UNSUPPORTED
+REPOSITORY_ACCEPTED_COMMIT_INVALID
+REPOSITORY_OBJECT_MISSING
+REPOSITORY_OBJECT_TYPE_MISMATCH
+REPOSITORY_DETACHED_HEAD
+REPOSITORY_BRANCH_MISMATCH
+REPOSITORY_HEAD_MISMATCH
+REPOSITORY_REMOTE_MISSING
+REPOSITORY_REMOTE_URL_MISMATCH
+REPOSITORY_ORIGIN_MASTER_MISMATCH
+REPOSITORY_ORIGIN_HEAD_MISMATCH
+REPOSITORY_DIRTY
+REPOSITORY_SPARSE_CHECKOUT_REJECTED
+REPOSITORY_INDEX_FLAG_REJECTED
+REPOSITORY_SUBMODULE_REJECTED
+REPOSITORY_SHALLOW_REJECTED
+REPOSITORY_REPLACE_REFS_PRESENT
+REPOSITORY_ALTERNATES_REJECTED
+REPOSITORY_PROMISOR_REJECTED
+REPOSITORY_CHANGED_DURING_OPERATION
+REPOSITORY_COMMAND_FAILED
+REPOSITORY_COMMAND_TIMEOUT
+REPOSITORY_OUTPUT_TOO_LARGE
+REPOSITORY_OUTPUT_INVALID
+```
+
+Expected process/filesystem/Git conditions map only through these codes. Unknown ordinary Python exceptions and every `BaseException` propagate unchanged; broad `Exception` catching is forbidden.
+
+### Composition, trust, RED, and future scope
+
+Allowed effects are bounded metadata reads, existing root/parent/repository/`.git` descriptor opens, fixed local read-only Git subprocesses, monotonic deadline reads, immutable result construction, and cleanup. Git/index mutation or locks; fetch/pull/push/checkout/reset/clean/add/commit/stash/merge/rebase/tag/branch/config mutation; hooks; diff/textconv; filters; LFS; fsmonitor; maintenance; GC; fsck; lazy fetch; credentials; network; marker/key/revocation/replay access; policy/wiring/activation; logging; cache; and authorization claims are prohibited.
+
+Composition is authorization parsing → semantic verification → public-key loading → revocation-state loading → signature verification → repository comparator → durable replay check-and-record → production-policy decision → executable/service activation. The comparator verifies no caller provenance, reads no marker, and imports/calls none of the marker, authorization, key, revocation, signature, replay, policy, executable, or service components. Success proves selected local facts at observation time only; it does not prove freshness, hosting identity, authorship, signatures, source trust, whole-db integrity, host integrity, ignored-file safety, reproducibility, deployment equivalence, activation, authorization, or readiness.
+
+`expected_origin_fetch_url` and `expected_origin_push_url` are required API facts, but their source is intentionally undefined. Existing marker and approval components do not provide them. This design authorizes no marker/approval/config field, hard-coded URL, caller-fact source, or wiring; a separately approved source is required before composition. Design, RED, and isolated implementation can proceed independently.
+
+The RED contract has exactly 163 unique top-level static tests, with no parametrization, dynamic generation, skip, or xfail: 6 public surface/result; 12 caller type/grammar; 9 path grammar; 10 path symlink/metadata; 9 `.git` topology; 8 bounded runner; 7 environment; 8 command order; 6 output bounds; 5 timeouts; 7 malformed output; 4 object format; 5 accepted object/type/resolution; 5 branch/detached; 5 origin URLs; 5 origin refs; 7 cleanliness; 5 sparse/index; 4 submodules; 3 shallow; 4 replace refs; 4 alternates; 5 promisor/partial clone; 4 filesystem drift; 4 exception propagation; 7 prohibited effects; 5 trust non-overclaim. Fixtures use deterministic fake-process seams and only bounded pytest-managed local offline repositories. No root privilege, network, operational path, or production repository mutation.
+
+Future cumulative scope is exactly this document, `tests/test_phase_12_repository_identity_locked_commit_comparator_v1.py`, and `engine/phase_12_repository_identity_locked_commit_comparator_v1.py`. Future subjects are exactly `docs: freeze phase 12 repository identity and locked-commit comparator design`, `test: define phase 12 repository identity and locked-commit comparator`, and `feat: add phase 12 repository identity and locked-commit comparator`. Fixture-repair commits are forbidden absent a proven committed contradiction.
+
+This frozen design authorizes no implementation, test creation, caller-fact source, path access, policy population, wiring, activation, or production action. All production gates remain closed.
