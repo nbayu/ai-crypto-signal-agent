@@ -138,7 +138,7 @@ def test_parent_symlink_is_rejected(tmp_path, monkeypatch):
             return original_open(name, flags, mode)
         return original_open(name, flags, mode, dir_fd=dir_fd)
     monkeypatch.setattr(os, "open", parent_loop)
-    _failure(_load(str(link / path.name), fingerprint), "REVOCATION_STATE_SYMLINK_REJECTED")
+    _failure(_load(str(link / os.path.basename(path)), fingerprint), "REVOCATION_STATE_SYMLINK_REJECTED")
 
 
 def test_non_directory_parent_is_rejected(tmp_path, monkeypatch):
