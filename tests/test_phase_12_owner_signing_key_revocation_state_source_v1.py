@@ -1,7 +1,8 @@
 """RED contract for the unwired Phase 12 owner signing-key revocation-state source."""
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
+import errno
 import hashlib
 import inspect
 import os
@@ -16,6 +17,19 @@ CHECKPOINT = "phase12-revocation-checkpoint-0123456789abcdef"
 KEY_A = "ed25519-sha256:" + "1" * 64
 KEY_B = "ed25519-sha256:" + "2" * 64
 KEY_C = "ed25519-sha256:" + "3" * 64
+
+
+@dataclass(frozen=True, slots=True)
+class _FixtureMetadata:
+    st_dev: int
+    st_ino: int
+    st_mode: int
+    st_uid: int
+    st_gid: int
+    st_nlink: int
+    st_size: int
+    st_mtime_ns: int
+    st_ctime_ns: int
 
 
 def _artifact(*ids: str, schema: str = SCHEMA, checkpoint: str = CHECKPOINT, count: str | None = None) -> bytes:
@@ -41,12 +55,15 @@ def _failure(value, code: str) -> None:
     assert value.revoked_signing_key_identifiers == () and value.artifact_fingerprint is None
 
 
-def _secure(monkeypatch) -> None:
+def _secure(monkeypatch, *, preserve_nlink_for=None) -> None:
     real_fstat, real_stat = os.fstat, os.stat
-    def secure(item):
-        fields = list(item); fields[0] &= ~0o022; fields[3] = 1; fields[4] = 0
+    def secure(item, descriptor=None):
+        fields = list(item); fields[0] &= ~0o022
+        if preserve_nlink_for is None or not preserve_nlink_for(descriptor):
+            fields[3] = 1
+        fields[4] = 0
         return os.stat_result(fields)
-    monkeypatch.setattr(os, "fstat", lambda fd: secure(real_fstat(fd)))
+    monkeypatch.setattr(os, "fstat", lambda fd: secure(real_fstat(fd), fd))
     monkeypatch.setattr(os, "stat", lambda *args, **kwargs: secure(real_stat(*args, **kwargs)))
 
 
@@ -109,7 +126,19 @@ def test_final_symlink_is_rejected(tmp_path, monkeypatch):
 
 
 def test_parent_symlink_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); link = tmp_path.parent / "revocation-link"; link.symlink_to(tmp_path, target_is_directory=True); _secure(monkeypatch); _failure(_load(str(link / os.path.basename(path)), fingerprint), "REVOCATION_STATE_SYMLINK_REJECTED")
+    path, _, fingerprint = _write(tmp_path)
+    link = tmp_path.parent / "revocation-link"
+    link.symlink_to(tmp_path, target_is_directory=True)
+    _secure(monkeypatch)
+    original_open = os.open
+    def parent_loop(name, flags, mode=0o777, *, dir_fd=None):
+        if name == "revocation-link" and flags & os.O_DIRECTORY:
+            raise OSError(errno.ELOOP, "parent symlink")
+        if dir_fd is None:
+            return original_open(name, flags, mode)
+        return original_open(name, flags, mode, dir_fd=dir_fd)
+    monkeypatch.setattr(os, "open", parent_loop)
+    _failure(_load(str(link / path.name), fingerprint), "REVOCATION_STATE_SYMLINK_REJECTED")
 
 
 def test_non_directory_parent_is_rejected(tmp_path, monkeypatch):
@@ -133,25 +162,70 @@ def test_leaf_must_be_regular(tmp_path, monkeypatch):
 
 
 def test_leaf_uid_mismatch_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); _secure(monkeypatch); original = os.fstat; calls = 0
+    path, _, fingerprint = _write(tmp_path)
+    leaf_fd = None
+    original_open = os.open
+    def record_leaf(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_fd
+        if dir_fd is None:
+            opened = original_open(name, flags, mode)
+        else:
+            opened = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_fd = opened
+        return opened
+    monkeypatch.setattr(os, "open", record_leaf)
+    _secure(monkeypatch)
+    original_fstat = os.fstat
     def changed(fd):
-        nonlocal calls; calls += 1; fields = list(original(fd));
-        if calls > 1: fields[4] = 1
+        fields = list(original_fstat(fd))
+        if fd == leaf_fd:
+            fields[4] = 1
         return os.stat_result(fields)
     monkeypatch.setattr(os, "fstat", changed); _failure(_load(path, fingerprint), "REVOCATION_STATE_OWNER_MISMATCH")
 
 
 def test_leaf_mode_mismatch_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); _secure(monkeypatch); original = os.fstat; calls = 0
+    path, _, fingerprint = _write(tmp_path)
+    leaf_fd = None
+    original_open = os.open
+    def record_leaf(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_fd
+        if dir_fd is None:
+            opened = original_open(name, flags, mode)
+        else:
+            opened = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_fd = opened
+        return opened
+    monkeypatch.setattr(os, "open", record_leaf)
+    _secure(monkeypatch)
+    original_fstat = os.fstat
     def changed(fd):
-        nonlocal calls; calls += 1; fields = list(original(fd));
-        if calls > 1: fields[0] |= 0o022
+        fields = list(original_fstat(fd))
+        if fd == leaf_fd:
+            fields[0] |= 0o022
         return os.stat_result(fields)
     monkeypatch.setattr(os, "fstat", changed); _failure(_load(path, fingerprint), "REVOCATION_STATE_MODE_MISMATCH")
 
 
 def test_leaf_hard_link_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); os.link(path, tmp_path / "other"); _secure(monkeypatch); _failure(_load(path, fingerprint), "REVOCATION_STATE_HARD_LINK_REJECTED")
+    path, _, fingerprint = _write(tmp_path)
+    os.link(path, tmp_path / "other")
+    leaf_fd = None
+    original_open = os.open
+    def record_leaf(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_fd
+        if dir_fd is None:
+            opened = original_open(name, flags, mode)
+        else:
+            opened = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_fd = opened
+        return opened
+    monkeypatch.setattr(os, "open", record_leaf)
+    _secure(monkeypatch, preserve_nlink_for=lambda fd: fd == leaf_fd)
+    _failure(_load(path, fingerprint), "REVOCATION_STATE_HARD_LINK_REJECTED")
 
 
 def test_initial_oversize_is_rejected(tmp_path, monkeypatch):
@@ -194,21 +268,67 @@ def test_read_overflow_is_detected_even_if_size_lies(tmp_path, monkeypatch):
 
 
 def test_mutated_mtime_ns_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); _secure(monkeypatch); original = os.fstat; calls = 0
+    path, _, fingerprint = _write(tmp_path)
+    leaf_fd = None
+    original_open = os.open
+    def record_leaf(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_fd
+        if dir_fd is None:
+            opened = original_open(name, flags, mode)
+        else:
+            opened = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_fd = opened
+        return opened
+    monkeypatch.setattr(os, "open", record_leaf)
+    _secure(monkeypatch)
+    original_fstat = os.fstat
+    snapshots = 0
     def changed(fd):
-        nonlocal calls; calls += 1; value = original(fd); fields = list(value)
-        if calls > 2: fields[8] += 1
-        return os.stat_result(fields)
-    monkeypatch.setattr(os, "fstat", changed); _failure(_load(path, fingerprint), "REVOCATION_STATE_CHANGED_DURING_READ")
+        nonlocal snapshots
+        value = original_fstat(fd)
+        if fd != leaf_fd:
+            return value
+        snapshots += 1
+        return _FixtureMetadata(
+            value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size,
+            1_000_000_000 + int(snapshots == 2), 2_000_000_000,
+        )
+    monkeypatch.setattr(os, "fstat", changed)
+    _failure(_load(path, fingerprint), "REVOCATION_STATE_CHANGED_DURING_READ")
 
 
 def test_mutated_ctime_ns_is_rejected(tmp_path, monkeypatch):
-    path, _, fingerprint = _write(tmp_path); _secure(monkeypatch); original = os.fstat; calls = 0
+    path, _, fingerprint = _write(tmp_path)
+    leaf_fd = None
+    original_open = os.open
+    def record_leaf(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_fd
+        if dir_fd is None:
+            opened = original_open(name, flags, mode)
+        else:
+            opened = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_fd = opened
+        return opened
+    monkeypatch.setattr(os, "open", record_leaf)
+    _secure(monkeypatch)
+    original_fstat = os.fstat
+    snapshots = 0
     def changed(fd):
-        nonlocal calls; calls += 1; value = original(fd); fields = list(value)
-        if calls > 2: fields[9] += 1
-        return os.stat_result(fields)
-    monkeypatch.setattr(os, "fstat", changed); _failure(_load(path, fingerprint), "REVOCATION_STATE_CHANGED_DURING_READ")
+        nonlocal snapshots
+        value = original_fstat(fd)
+        if fd != leaf_fd:
+            return value
+        snapshots += 1
+        return _FixtureMetadata(
+            value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size,
+            1_000_000_000, 2_000_000_000 + int(snapshots == 2),
+        )
+    monkeypatch.setattr(os, "fstat", changed)
+    _failure(_load(path, fingerprint), "REVOCATION_STATE_CHANGED_DURING_READ")
 
 
 def test_source_does_not_depend_on_float_timestamps():
