@@ -239,31 +239,77 @@ def test_short_reads_are_accumulated(tmp_path, monkeypatch):
 
 def test_mutation_during_read_is_rejected(tmp_path, monkeypatch):
     path, _, fingerprint, key_id = _write_key(tmp_path)
+    leaf_descriptor = None
+    original_open = os.open
+
+    def record_leaf_descriptor(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_descriptor
+        if dir_fd is None:
+            descriptor = original_open(name, flags, mode)
+        else:
+            descriptor = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_descriptor = descriptor
+        return descriptor
+
+    monkeypatch.setattr(os, "open", record_leaf_descriptor)
     _root_secure_metadata(monkeypatch)
-    original, changed = os.read, False
+    original_read = os.read
+    original_fstat = os.fstat
+    mutation_started = False
+    leaf_snapshots = 0
+
     def mutate(descriptor, size):
-        nonlocal changed
-        value = original(descriptor, size)
-        if not changed:
-            changed = True
-            os.utime(path, None)
+        nonlocal mutation_started
+        value = original_read(descriptor, size)
+        if descriptor == leaf_descriptor:
+            mutation_started = True
         return value
+
+    def changed_leaf_metadata(descriptor):
+        nonlocal leaf_snapshots
+        fields = list(original_fstat(descriptor))
+        if descriptor == leaf_descriptor:
+            leaf_snapshots += 1
+            if mutation_started and leaf_snapshots == 2:
+                fields[8] += 1
+        return os.stat_result(fields)
+
     monkeypatch.setattr(os, "read", mutate)
+    monkeypatch.setattr(os, "fstat", changed_leaf_metadata)
     _failure(_load(path, fingerprint, key_id), "TRUST_MATERIAL_CHANGED_DURING_READ")
 
 
 def test_descriptor_metadata_change_is_rejected(tmp_path, monkeypatch):
     path, _, fingerprint, key_id = _write_key(tmp_path)
+    leaf_descriptor = None
+    original_open = os.open
+
+    def record_leaf_descriptor(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_descriptor
+        if dir_fd is None:
+            descriptor = original_open(name, flags, mode)
+        else:
+            descriptor = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_descriptor = descriptor
+        return descriptor
+
+    monkeypatch.setattr(os, "open", record_leaf_descriptor)
     _root_secure_metadata(monkeypatch)
-    original, calls = os.fstat, 0
-    def changed(descriptor):
-        nonlocal calls
-        calls += 1
-        fields = list(original(descriptor))
-        if calls > 1:
-            fields[8] += 1
+    original_fstat = os.fstat
+    leaf_snapshots = 0
+
+    def changed_leaf_metadata(descriptor):
+        nonlocal leaf_snapshots
+        fields = list(original_fstat(descriptor))
+        if descriptor == leaf_descriptor:
+            leaf_snapshots += 1
+            if leaf_snapshots == 2:
+                fields[8] += 1
         return os.stat_result(fields)
-    monkeypatch.setattr(os, "fstat", changed)
+
+    monkeypatch.setattr(os, "fstat", changed_leaf_metadata)
     _failure(_load(path, fingerprint, key_id), "TRUST_MATERIAL_CHANGED_DURING_READ")
 
 
