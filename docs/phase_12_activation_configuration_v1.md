@@ -1477,3 +1477,90 @@ configuration deployment, real credential reading, Telegram connectivity or star
 service execution, polling, update handling, worker/provider execution, publication, ledger
 mutation, trading, controlled workload execution, or production activation. Every operational
 approval remains a later separately authorized step.
+
+## Phase 12 owner approval signature verifier — frozen detailed design
+
+Capability: **owner approval signature verifier**. The future pure component is
+`engine.phase_12_activation_owner_approval_signature_verifier_v1.py` and exposes only
+`verify_phase_12_activation_owner_approval_signature_v1` through `__all__`.
+
+```python
+def verify_phase_12_activation_owner_approval_signature_v1(
+    *,
+    canonical_payload_bytes: bytes,
+    signature_bytes: bytes,
+    public_key_bytes: bytes | None,
+    expected_signing_key_identifier: str,
+    revocation_state_available: bool,
+    active_signing_key_identifier: str | None,
+    revoked_signing_key_identifiers: tuple[str, ...] | None,
+    revocation_state_checkpoint_identifier: str | None,
+    expected_environment_identifier: str,
+    expected_deployment_identifier: str,
+    expected_checkpoint_identifier: str,
+    now_utc: datetime | None,
+) -> _Phase12OwnerApprovalSignatureVerificationResultV1:
+```
+
+All non-sentinel inputs require exact runtime type identity. Available revocation state requires an
+exact active ID, a unique exact tuple of revoked IDs, and an exact state-checkpoint ID; unavailable
+state requires all three facts to be `None`. The active key may not be listed as revoked. The
+function accepts keyword-only canonical payload bytes, detached signature bytes, raw public-key
+bytes or `None`, expected signing-key ID, revocation facts, expected environment/deployment/checkpoint
+IDs, and aware-UTC `now_utc` or `None`. `None` public key means
+`TRUST_MATERIAL_UNAVAILABLE`; unavailable revocation facts mean
+`REVOCATION_STATE_UNAVAILABLE`; `now_utc=None` means `CLOCK_EVIDENCE_UNAVAILABLE`.
+
+The canonical payload is ASCII-only UTF-8, at most 2048 bytes, and exactly sixteen LF-terminated
+`field=value` lines in this order: `payload_schema_version`,
+`signature_algorithm_identifier`, `signing_key_identifier`, `activation_mode`,
+`owner_authorization_id`, `checkpoint_id`, `approved_locked_commit`, `accepted_locked_commit`,
+`approval_timestamp`, `expiry`, `environment_identifier`, `deployment_identifier`,
+`replay_control_value`, `repository_identity`, `repository_commit`, and `approval_scope`.
+
+Each line has exactly one equals delimiter. There is exactly one terminal LF; no BOM, CR, blank
+line, comment, duplicate/extra/omitted field, leading/trailing whitespace, free text, or Unicode
+normalization. The exact literals are `phase12-owner-approval-signature-v1`,
+`PHASE12-ED25519-SHA512-RAW-V1`, `ai-crypto-signal-agent-production-v1`, and
+`EXACT_ACTIVATION_ATTEMPT`. Activation mode is exactly one of `CREDENTIAL_VALIDATION`,
+`TELEGRAM_CONNECTIVITY_VALIDATION`, `TELEGRAM_START_VALIDATION`, or `CONTROLLED_WORKLOAD`.
+
+The verifier accepts only a raw 32-byte Ed25519 public key and a raw 64-byte detached signature;
+it performs no PEM parsing. Its key fingerprint is `sha256(public_key_bytes).hexdigest()` and the
+key ID is `ed25519-sha256:<64-lowercase-hex>`. Available caller-supplied revocation state has one
+active key ID, a unique immutable tuple of revoked key IDs, and a state checkpoint; unavailable
+state has no facts. The verifier neither loads nor establishes provenance for such facts.
+
+Timestamps are exactly `YYYY-MM-DDTHH:MM:SSZ`. A supplied clock must be an aware `datetime` whose
+timezone identity is `timezone.utc`. Approval may be at most 60 seconds in the future, expiry is
+mandatory, `now_utc >= expiry` is expired, and expiry must be greater than approval time with a
+maximum 15-minute lifetime.
+
+Validation order is fixed: caller API shape; canonical framing and grammar; schema; algorithm;
+trust-material availability; public-key construction; fingerprint; signed/expected/active key IDs;
+revocation availability and revocation; signature framing; Ed25519 verification; signed commit
+equality; signed environment/deployment/checkpoint/scope; then clock and lifetime checks. The
+verifier checks `approved_locked_commit == accepted_locked_commit`, but performs no Git access or
+repository comparison.
+
+The immutable result contract is `is_valid`, `failure_codes`, and `verified_approval`. There is
+exactly one first-precedence failure code and authenticated facts are present only on success. The
+stable code ordering is `UNKNOWN_PAYLOAD_SCHEMA`, `UNKNOWN_SIGNATURE_ALGORITHM`,
+`UNKNOWN_SIGNING_KEY_ID`, `TRUST_MATERIAL_UNAVAILABLE`, `REVOCATION_STATE_UNAVAILABLE`,
+`SIGNING_KEY_REVOKED`, `MALFORMED_CANONICAL_PAYLOAD`, `MALFORMED_SIGNATURE`,
+`SIGNATURE_MISMATCH`, `APPROVAL_TIMESTAMP_IN_FUTURE`, `APPROVAL_EXPIRED`,
+`CLOCK_EVIDENCE_UNAVAILABLE`, `WRONG_ENVIRONMENT`, `WRONG_DEPLOYMENT`, `WRONG_CHECKPOINT`,
+`REPOSITORY_IDENTITY_MISMATCH`, `REPOSITORY_COMMIT_MISMATCH`, `REPLAY_STATE_UNAVAILABLE`,
+`REPLAY_STATE_ROLLBACK_DETECTED`, `CHECKPOINT_ALREADY_CONSUMED`, `REPLAY_STATE_CONFLICT`,
+`AMBIGUOUS_APPROVAL`, `MALFORMED_PUBLIC_KEY`, `PUBLIC_KEY_FINGERPRINT_MISMATCH`,
+`WRONG_APPROVAL_SCOPE`, `EXCESSIVE_APPROVAL_LIFETIME`, and
+`APPROVED_ACCEPTED_COMMIT_MISMATCH`. Repository/replay/ambiguity codes are reserved and never
+emitted by this pure verifier.
+
+Cryptography is exactly `Ed25519PublicKey.from_public_bytes(public_key_bytes)` followed by
+`key.verify(signature_bytes, canonical_payload_bytes)`. `InvalidSignature` maps only to
+`SIGNATURE_MISMATCH`; public-key construction `ValueError` maps only to `MALFORMED_PUBLIC_KEY`;
+unexpected `Exception` and every `BaseException` propagate unchanged.
+
+The verifier authenticates and returns checkpoint/replay fields but does not read/mutate replay
+state, consume checkpoints, or claim replay prevention. It does not prove key or revocation
