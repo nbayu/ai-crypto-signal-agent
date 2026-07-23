@@ -34,17 +34,18 @@ def _write_key(tmp_path, content: bytes | None = None) -> tuple[str, bytes, str,
     return str(selected), raw, fingerprint, key_id
 
 
-def _root_secure_metadata(monkeypatch) -> None:
+def _root_secure_metadata(monkeypatch, *, preserve_nlink_for=None) -> None:
     real_fstat, real_stat = os.fstat, os.stat
 
-    def secured(value):
+    def secured(value, descriptor=None):
         fields = list(value)
         fields[0] &= ~0o022
-        fields[3] = 1
+        if preserve_nlink_for is None or not preserve_nlink_for(descriptor):
+            fields[3] = 1
         fields[4] = 0
         return os.stat_result(fields)
 
-    monkeypatch.setattr(os, "fstat", lambda descriptor: secured(real_fstat(descriptor)))
+    monkeypatch.setattr(os, "fstat", lambda descriptor: secured(real_fstat(descriptor), descriptor))
     monkeypatch.setattr(os, "stat", lambda *args, **kwargs: secured(real_stat(*args, **kwargs)))
 
 
@@ -157,22 +158,50 @@ def test_leaf_must_be_regular_file(tmp_path, monkeypatch):
 
 def test_leaf_owner_mismatch_is_rejected(tmp_path, monkeypatch):
     path, _, fingerprint, key_id = _write_key(tmp_path)
+    leaf_descriptor = None
+    original_open = os.open
+
+    def record_leaf_descriptor(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_descriptor
+        if dir_fd is None:
+            descriptor = original_open(name, flags, mode)
+        else:
+            descriptor = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_descriptor = descriptor
+        return descriptor
+
+    monkeypatch.setattr(os, "open", record_leaf_descriptor)
     _root_secure_metadata(monkeypatch)
     original = os.fstat
-    calls = 0
+
     def wrong_leaf_uid(descriptor):
-        nonlocal calls
-        calls += 1
         fields = list(original(descriptor))
-        if calls > 1: fields[4] = 1
+        if descriptor == leaf_descriptor:
+            fields[4] = 1
         return os.stat_result(fields)
+
     monkeypatch.setattr(os, "fstat", wrong_leaf_uid)
     _failure(_load(path, fingerprint, key_id), "TRUST_MATERIAL_OWNER_MISMATCH")
 
 
 def test_leaf_mode_and_hard_link_contract_is_enforced(tmp_path, monkeypatch):
     path, _, fingerprint, key_id = _write_key(tmp_path)
-    _root_secure_metadata(monkeypatch)
+    leaf_descriptor = None
+    original_open = os.open
+
+    def record_leaf_descriptor(name, flags, mode=0o777, *, dir_fd=None):
+        nonlocal leaf_descriptor
+        if dir_fd is None:
+            descriptor = original_open(name, flags, mode)
+        else:
+            descriptor = original_open(name, flags, mode, dir_fd=dir_fd)
+        if not flags & os.O_DIRECTORY:
+            leaf_descriptor = descriptor
+        return descriptor
+
+    monkeypatch.setattr(os, "open", record_leaf_descriptor)
+    _root_secure_metadata(monkeypatch, preserve_nlink_for=lambda descriptor: descriptor == leaf_descriptor)
     linked = tmp_path / "other.pem"
     os.link(path, linked)
     _failure(_load(path, fingerprint, key_id), "TRUST_MATERIAL_HARD_LINK_REJECTED")
