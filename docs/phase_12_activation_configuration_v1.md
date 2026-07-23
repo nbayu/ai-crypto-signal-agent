@@ -1564,3 +1564,107 @@ unexpected `Exception` and every `BaseException` propagate unchanged.
 
 The verifier authenticates and returns checkpoint/replay fields but does not read/mutate replay
 state, consume checkpoints, or claim replay prevention. It does not prove key or revocation
+
+## Phase 12 owner verification public-key loader — frozen detailed design
+
+Capability: **owner verification public-key loader**. The future component is
+`engine.phase_12_owner_verification_public_key_loader_v1.py`, exposes only
+`load_phase_12_owner_verification_public_key_v1` through `__all__`, and has this exact interface:
+
+```python
+def load_phase_12_owner_verification_public_key_v1(
+    *,
+    path: str,
+    expected_public_key_fingerprint: str,
+    expected_signing_key_identifier: str,
+) -> _Phase12OwnerVerificationPublicKeyLoadResultV1:
+```
+
+Every caller value has exact runtime type identity. `path` is a nonempty normalized absolute `str`
+with no NUL, empty interior component, `.` or `..` component, or trailing slash; `/` itself is
+invalid. Invalid path form returns `PATH_TYPE_INVALID`. The expected fingerprint is exactly 64
+lowercase hexadecimal characters. The expected key ID is exactly
+`ed25519-sha256:<64-lowercase-hex>`. Wrong caller types or malformed expected facts raise empty
+`TypeError()`. The loader owns no canonical production path and does not infer or open any path
+unless a later caller supplies it.
+
+The only accepted source is one canonical PEM SubjectPublicKeyInfo Ed25519 public-key block, at
+most 4096 nonempty bytes. Certificates, private keys, encrypted material, OpenSSH keys, raw bytes,
+multiple blocks, trailing or leading bytes, alternate line endings, and noncanonical wrapping are
+rejected. The output is raw 32-byte Ed25519 public-key `bytes`.
+
+Traversal starts at `/` using directory descriptors. Every parent component is opened with
+`os.open` using `O_RDONLY`, `O_DIRECTORY`, `O_CLOEXEC`, and `O_NOFOLLOW`; it must be a non-symlink
+directory with UID zero and no group/other write bit. The leaf is opened relative to its final
+directory descriptor using `O_RDONLY`, `O_CLOEXEC`, `O_NOFOLLOW`, and `O_NONBLOCK`. It must be a
+regular non-symlink file with UID zero, exactly one hard link, `st_mode & 0o022 == 0`, unconstrained
+group identity, at most 4096 bytes, and nonempty. No convenience full-path read is permitted.
+
+The loader performs `fstat` before a bounded `os.read` loop and again afterwards. It compares
+`st_dev`, `st_ino`, `st_mode`, `st_uid`, `st_gid`, `st_nlink`, `st_size`, `st_mtime_ns`, and
+`st_ctime_ns`; it then re-stats the leaf name with `follow_symlinks=False` and requires the same
+device/inode. Any changed, substituted, or unstable descriptor is rejected. These checks reduce
+but cannot eliminate privileged races after the final check, root-account compromise, mount-level
+replacement, or later path changes; they do not establish deployment authenticity.
+
+Cryptography is exactly:
+
+```python
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, load_pem_public_key
+```
+
+`load_pem_public_key(file_bytes)` maps `ValueError` to `MALFORMED_PUBLIC_KEY_CONTAINER` and
+`UnsupportedAlgorithm` to `UNSUPPORTED_PUBLIC_KEY_TYPE`. A parser-call `TypeError` propagates as
+an implementation defect; unrelated `Exception` and every `BaseException` propagate unchanged.
+The decoded object must satisfy `isinstance(decoded, Ed25519PublicKey)`; no duck typing is allowed,
+and every successfully parsed non-Ed25519 key is `UNSUPPORTED_PUBLIC_KEY_TYPE`. Canonicality is
+enforced by exact equality with:
+
+```python
+decoded.public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
+```
+
+Raw export is exactly `decoded.public_bytes(Encoding.Raw, PublicFormat.Raw)` and must be exact
+`bytes` of length 32 or is `MALFORMED_PUBLIC_KEY`. The fingerprint is
+`sha256(raw_public_key_bytes).hexdigest()` and the derived key ID is
+`"ed25519-sha256:" + fingerprint`; both must equal caller expectations.
+
+The private frozen, slotted, keyword-only result has fields `is_loaded`, `failure_codes`,
+`raw_public_key_bytes`, and `derived_signing_key_identifier`. Success is true, has no codes, and
+contains the exact raw bytes and key ID. Failure is false, has exactly one first-precedence code,
+and contains neither bytes nor identifier. Result repr and failure output disclose no raw key,
+PEM, path, fingerprint, or key ID.
+
+Frozen failure order is: `PATH_TYPE_INVALID`, `TRUST_MATERIAL_UNAVAILABLE`,
+`TRUST_MATERIAL_PARENT_DIRECTORY_MISMATCH`, `TRUST_MATERIAL_NOT_REGULAR_FILE`,
+`TRUST_MATERIAL_SYMLINK_REJECTED`, `TRUST_MATERIAL_OWNER_MISMATCH`,
+`TRUST_MATERIAL_MODE_MISMATCH`, `TRUST_MATERIAL_HARD_LINK_REJECTED`,
+`TRUST_MATERIAL_TOO_LARGE`, `TRUST_MATERIAL_EMPTY`, `TRUST_MATERIAL_CHANGED_DURING_READ`,
+`MALFORMED_PUBLIC_KEY_CONTAINER`, `UNSUPPORTED_PUBLIC_KEY_TYPE`, `MALFORMED_PUBLIC_KEY`,
+`PUBLIC_KEY_FINGERPRINT_MISMATCH`, and `PUBLIC_KEY_IDENTIFIER_MISMATCH`.
+
+Validation precedence is caller API shape; path form; parent traversal/open; leaf open; leaf
+metadata; bounded read plus descriptor/name-restat mutation checks; PEM `ValueError` then
+`UnsupportedAlgorithm`; `isinstance` key type; canonical PEM equality; raw export; fingerprint;
+key ID; success. Only frozen expected `OSError` cases are mapped. The component proves only that
+the observed descriptor met these checks and decoded/matched caller expectations. It does not prove
+owner approval, out-of-band verification, provisioning authenticity, root integrity, post-read path
+stability, revocation freshness, signature authorization, repository equality, policy legitimacy, or
+operational authorization.
+
+Composition is loader result → raw 32-byte public key → pure owner approval signature verifier.
+The loader does not load approval/revocation artifacts, read replay state, compare repositories,
+compose policy, decide activation, or authorize operation. It performs bounded read-only filesystem
+work only: no writes, permission/ownership changes, installation, configuration or credential
+access, Git, clock lookup, network/provider/Telegram, subprocess/systemd, trust-material logging,
+mutable cache/registry/setter/override, key/signature generation, or activation.
+
+The future RED contract has exactly 60 tests: 4 public-surface/signature/type; 12
+path/symlink/parent/metadata; 9 bounded-read/mutation; 8 strict PEM/container/key-type; 8
+raw-key/fingerprint/key-ID; 7 exception/precedence; 6 immutable-result/no-bytes-on-failure; and 6
+side-effect/non-overclaim tests. Future file scope is exactly this document,
+`tests/test_phase_12_owner_verification_public_key_loader_v1.py`, and
+`engine/phase_12_owner_verification_public_key_loader_v1.py`; the future implementation subject is
+`feat: add phase 12 owner verification public-key loader`.
