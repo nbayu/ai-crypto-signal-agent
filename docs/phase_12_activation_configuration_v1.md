@@ -879,6 +879,211 @@ authenticity, repository equality, approval authority, a nonempty production
 policy, executable wiring, operational authorization, service activation, or
 production readiness.
 
+### Accepted-locked-commit marker reader
+
+The local, unwired, undeployed reader component is implemented in
+`engine.phase_12_activation_mode_accepted_locked_commit_marker_reader_v1`.
+It is an explicit caller-path, bounded raw-byte acquisition boundary only. Its
+`__all__` contains exactly:
+
+    Phase12ActivationAcceptedLockedCommitMarkerReadFactsV1
+    Phase12ActivationAcceptedLockedCommitMarkerReadErrorV1
+    read_phase_12_activation_accepted_locked_commit_marker_v1
+
+All implementation-only names are underscore-prefixed. There is no
+canonical-path getter, metadata inspector or validator API, parser API,
+composition API, authenticity API, policy API, wiring API, or authorization
+API in this component.
+
+#### Facts model and reader signature
+
+The exact facts model is:
+
+    @dataclass(frozen=True, slots=True, kw_only=True, repr=False)
+    class Phase12ActivationAcceptedLockedCommitMarkerReadFactsV1:
+        content_bytes: bytes
+
+It has exactly one field, `content_bytes`, no default, no `__dict__`,
+frozen/slotted keyword-only construction, equality by value, and immutable
+hash-compatible value semantics. Its fixed sanitized representation is
+`Phase12ActivationAcceptedLockedCommitMarkerReadFactsV1()`.
+
+`content_bytes` must be exact built-in `bytes`; non-exact values, including
+subclasses, `bytearray`, `memoryview`, and proxies, are rejected before hostile
+interaction with empty `TypeError()`. Exact byte strings of lengths 0 through
+4096 are accepted. Exact byte strings longer than 4096 are rejected with empty
+`ValueError()`. No decoding, copying, trimming, parsing, content mutation, or
+newline normalization occurs, and no content appears in an error or repr.
+
+The exact reader signature is:
+
+    read_phase_12_activation_accepted_locked_commit_marker_v1(
+        *,
+        path: str,
+    ) -> Phase12ActivationAcceptedLockedCommitMarkerReadFactsV1
+
+`path` is required and keyword-only. It must be exact built-in `str`, nonempty,
+absolute, and NUL-free. A valid caller value is used verbatim: there is no
+trimming, normalization, expansion, resolution, canonical-path lookup,
+environment lookup, configuration lookup, or fallback. Invalid paths raise the
+fixed sanitized reader error code
+`INVALID_ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH` without caller evidence.
+
+#### Bounded I/O and error contract
+
+The reader uses exactly these flags:
+
+    os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+
+Its lifecycle is exactly one `os.open(path, flags)`, validation that the result
+is an exact nonnegative built-in `int` descriptor, one `os.read(fd, 4097)`, and
+one `os.close(fd)`. Close is attempted exactly once for every validated
+descriptor. There is no preflight; `stat`, `lstat`, builtin `open`, pathlib,
+existence check, readlink, retry, read loop, fallback, second open, second read,
+or second close.
+
+The reader requests 4097 bytes. Raw exact built-in bytes of lengths 0 through
+4096 are returned unchanged. A 4097-byte read result raises
+`ACCEPTED_LOCKED_COMMIT_MARKER_READ_TOO_LARGE`. A malformed descriptor, read
+result, or otherwise-successful close result raises
+`ACCEPTED_LOCKED_COMMIT_MARKER_READ_MALFORMED_RESULT`; exact-type checks occur
+before arbitrary interaction with hostile values.
+
+`Phase12ActivationAcceptedLockedCommitMarkerReadErrorV1` is a fixed,
+sanitized, immutable error with representation
+`Phase12ActivationAcceptedLockedCommitMarkerReadErrorV1()`. Its string is one
+of exactly these codes, and it never includes a path, content, errno message,
+descriptor, host detail, or other dynamic evidence:
+
+    INVALID_ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH_ABSENT
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_PERMISSION_DENIED
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_SYMBOLIC_LINK_REJECTED
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH_COMPONENT_NOT_DIRECTORY
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_OPEN_FAILED
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_FAILED
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_CLOSE_FAILED
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_TOO_LARGE
+    ACCEPTED_LOCKED_COMMIT_MARKER_READ_MALFORMED_RESULT
+
+For `os.open`, `FileNotFoundError` or `ENOENT` maps to
+`ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH_ABSENT`; `PermissionError`, `EACCES`,
+or `EPERM` maps to `ACCEPTED_LOCKED_COMMIT_MARKER_READ_PERMISSION_DENIED`;
+`ELOOP` maps to `ACCEPTED_LOCKED_COMMIT_MARKER_READ_SYMBOLIC_LINK_REJECTED`;
+`ENOTDIR` maps to
+`ACCEPTED_LOCKED_COMMIT_MARKER_READ_PATH_COMPONENT_NOT_DIRECTORY`; all other
+`OSError` values map to `ACCEPTED_LOCKED_COMMIT_MARKER_READ_OPEN_FAILED`.
+Any read `OSError` maps to `ACCEPTED_LOCKED_COMMIT_MARKER_READ_FAILED`; a close
+`OSError` after an otherwise successful valid read maps to
+`ACCEPTED_LOCKED_COMMIT_MARKER_READ_CLOSE_FAILED`. `os.close` must return exactly
+`None`; a non-`None` result is malformed. Ordinary non-`OSError` exceptions and
+`BaseException` values from `os.open` propagate unchanged; no descriptor exists
+for cleanup in that case.
+
+A prior read outcome wins over a later close failure. Thus a mapped read error,
+ordinary read exception, `BaseException` read outcome, oversized result, or
+malformed read result remains controlling after one cleanup attempt. Ordinary
+and `BaseException` read outcomes propagate unchanged after that cleanup
+attempt. Close controls only after an otherwise successful valid read: a
+malformed close return maps to `MALFORMED_RESULT`, while ordinary and
+`BaseException` close outcomes then propagate unchanged. No suppressed cleanup
+evidence is disclosed.
+
+#### Boundaries, separation, and non-goals
+
+Successful reading establishes only bounded acquisition of raw bytes from an
+explicit caller-supplied path. It does not establish canonical path selection,
+marker existence before the attempt, metadata validity, ownership legitimacy,
+permission or file-type safety, freshness, source legitimacy, content validity,
+commit-hash interpretation, authenticity, approval, repository equality, policy
+satisfaction, or operational authorization. `O_NONBLOCK` does not prove
+regular-file safety.
+
+The reader imports or invokes none of the canonical marker-path component,
+metadata inspector, metadata validator, marker parser, authorization verifier,
+validation coordinator, or credential-aware executable. It performs no
+metadata inspection or validation, decoding, parsing, canonical-path selection,
+authenticity verification, repository comparison, approval lookup, policy
+composition, executable wiring, or service action. Canonical-path-to-reader,
+inspector-to-validator, parser, and all higher-level composition remain absent
+and require separately authorized gating.
+
+There is no import-time filesystem action, canonical-marker access, environment
+or argv lookup, configuration or credential read, logging, subprocess, systemd,
+Telegram, network, provider, clock, random, UUID, sleep, mutable registry, or
+override mutation. The reader does not create or deploy a marker. This slice is
+not a production-readiness claim and does not establish canonical-path-to-reader
+composition, metadata composition, parser composition, authenticity,
+repository comparison, an approval source, policy composition, executable
+wiring, operational authorization, service activation, or production readiness.
+
+#### Contract-test repair provenance and validation evidence
+
+The expected RED contract run collected 25 tests and produced 25 failures in
+0.97s, exit 1, solely because the frozen reader module/API was absent
+(`EXPECTED_ABSENT_ACCEPTED_LOCKED_COMMIT_MARKER_READER_MODULE_OR_PUBLIC_API`).
+It had zero internal errors and zero unexpected failures.
+
+The initial GREEN produced 21 passed and 4 failed in 0.33s; implementation
+defects were zero. The four failures were test defects only: direct non-exact
+facts construction incorrectly expected the reader error rather than empty
+`TypeError()`; direct oversized facts construction incorrectly expected the
+reader error rather than empty `ValueError()`; a parser-separation guard rejected
+the required `accepted_locked_commit` public-name substring; and a global
+monkeypatch guard detected its own literal.
+
+The authorized test-only repair corrected those four expectations/guards while
+preserving the distinct direct-model and reader-I/O contracts, precise
+parser/content-interpretation separation, and global-monkeypatch safety. The
+required public names remain permitted. No contract weakening, skip, xfail,
+retry, or bypass occurred; the repaired suite retained exactly 25 tests. The
+implementation hash remained unchanged. Repaired isolated GREEN was 25 passed
+in 0.29s with zero failures, errors, skips, xfails, retries, and internal errors.
+
+Compilation covered exactly the implementation and contract test once; it
+exited 0 with empty stdout and stderr. Both compiled and source hashes remained
+unchanged. `py_compile` generated exactly two attributable reader-specific
+`.pyc` files; both were removed, and no bytecode remains. This evidence does
+not claim that `PYTHONDONTWRITEBYTECODE` prevents `py_compile` output.
+
+The initially proposed focused total of 216 was blocked before execution
+because it conflicted with locked adjacent-suite counts; it was provenance, not
+a failed regression. The authoritative correlation is marker parser 48,
+metadata validator 97, metadata inspector 58, canonical marker path 25, and
+marker reader 25: `48 + 97 + 58 + 25 + 25 = 253`. The corrected single focused
+run collected and passed 253 tests in 1.12s with zero failures, errors, skips,
+xfails, retries, and internal errors; source hashes and adjacent locked tests
+remained unchanged.
+
+The durable full repository regression used one pytest and one tee process:
+
+    set -o pipefail
+    PYTHONDONTWRITEBYTECODE=1 /opt/ai-crypto-signal-agent/.venv/bin/python -m pytest -q \
+      2>&1 | tee /tmp/phase12_marker_reader_full_regression.log
+    statuses=("${PIPESTATUS[@]}")
+
+The `PIPESTATUS` array was captured atomically, immediately after the pipeline,
+with two elements. Pytest status and tee status were both 0. The prior locked
+full count was 4,486; the reader adds 25: `4,486 + 25 = 4,511`. The run passed
+4,511 tests in 62.61s with zero failures, errors, skips, xfails, retries, and
+internal errors. Its external temporary log was created outside the repository,
+evidence was extracted, and the log was removed. Source hashes and all tracked
+repository content remained unchanged.
+
+The implementation SHA-256 is
+`dd22d4fdd647c4ae92f6ad9784c683d5af682c326f74de8b5e87a33b71d3e7aa`.
+The repaired test SHA-256 is
+`9339afa2cb7429317d3ebeae565e3b63be59557555dd97c391f9d89d6b15f391`.
+
+Canonical activation configuration remains `CLOSED`. The production verifier
+policy remains immutable, empty, and fail-closed, and the accepted-commit
+placeholder remains unchanged. The reader is unwired and undeployed; the real
+marker path and parent were not inspected or accessed. The service remains
+disabled and non-running. No canonical-path/inspector/validator/parser
+composition, authenticity, repository comparison, approval source, policy
+composition, executable wiring, or operational authorization exists. All
+production gates remain closed.
+
 ## Result taxonomy
 
 | Condition | Fixed result | Exit |
