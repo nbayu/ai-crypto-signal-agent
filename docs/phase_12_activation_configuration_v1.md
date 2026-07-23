@@ -1674,3 +1674,167 @@ side-effect/non-overclaim tests. Future file scope is exactly this document,
 Capability: **owner signing-key revocation-state source**. Future module: `engine/phase_12_owner_signing_key_revocation_state_source_v1.py`; function-only surface: `__all__ = ("load_phase_12_owner_signing_key_revocation_state_v1",)`. Exact function: `load_phase_12_owner_signing_key_revocation_state_v1(*, path: str, expected_artifact_fingerprint: str, expected_schema_identifier: str, expected_checkpoint_identifier: str, active_signing_key_identifier: str) -> _Phase12OwnerSigningKeyRevocationStateLoadResultV1`. Every caller value has exact `str` identity; malformed expected facts raise empty `TypeError()`. Fingerprint is `[0-9a-f]{64}`, expected schema is exactly `PHASE12-OWNER-SIGNING-KEY-REVOCATION-STATE-V1`, expected checkpoint is `phase12-revocation-checkpoint-[0-9a-f]{16}`, and active key is `ed25519-sha256:[0-9a-f]{64}`. Path is nonempty normalized absolute, has no NUL, empty interior component, `.` or `..`, trailing slash, or root form; invalid form is `PATH_TYPE_INVALID`; no canonical path is owned. The private frozen, slotted, keyword-only result fields are `is_loaded`, `failure_codes`, `schema_identifier`, `checkpoint_identifier`, `revoked_signing_key_identifiers`, and `artifact_fingerprint`; success has facts and ordered immutable IDs, failure has one code and no partial state, and the fixed repr discloses neither path, bytes, schema, checkpoint, IDs, fingerprint, nor active key.
 
 The unsigned root-owned local artifact is bound only by `sha256(exact_artifact_bytes).hexdigest()` equality to caller expectation; no owner-intent, authenticity, freshness, or authorization claim is made. Parent flags are `O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW`; leaf flags are `O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK`. Traversal starts at `/`, is descriptor-relative, closes every descriptor, never uses convenience reads, and requires each parent to be a UID-zero directory with `st_mode & 0o022 == 0`. Leaf is regular, UID zero, no group/other write bit, hard-link count one, and `0 < st_size <= 65536`; group is unconstrained. Parent/leaf `ENOENT`/`EACCES` map unavailable, parent `ENOTDIR` maps parent mismatch, and initial parent/leaf `ELOOP` maps symlink rejection. Bounded reads total at most 65537 bytes: overflow is `REVOCATION_STATE_TOO_LARGE`, empty is `REVOCATION_STATE_EMPTY`; exactly one leaf `fstat` occurs before and after read and compares only `st_dev`, `st_ino`, `st_mode`, `st_uid`, `st_gid`, `st_nlink`, `st_size`, `st_mtime_ns`, and `st_ctime_ns` (no float timestamps). Descriptor-relative non-following name restat requires regular same device/inode; post-read replacement/symlink is changed-during-read. Unexpected exceptions and `BaseException` propagate.
+
+## Phase 12 owner approval durable replay guard v1 — frozen detailed design
+
+### Capability, module, and caller surface
+
+Capability: **owner approval durable replay guard**. It owns only local durable replay check-and-record facts. It is not an approval authority, replay oracle, activation authority, global replay-prevention authority, or production-authorization authority.
+
+Future module: `engine.phase_12_owner_approval_durable_replay_guard_v1`; implementation file: `engine/phase_12_owner_approval_durable_replay_guard_v1.py`; future test file: `tests/test_phase_12_owner_approval_durable_replay_guard_v1.py`. Its sole public export is:
+
+```python
+__all__ = ("check_and_record_phase_12_owner_approval_replay_v1",)
+```
+
+```python
+def check_and_record_phase_12_owner_approval_replay_v1(
+    *,
+    path: str,
+    replay_identity: str,
+    expected_schema_identifier: str,
+    expected_deployment_identifier: str,
+) -> _Phase12OwnerApprovalDurableReplayGuardResultV1:
+```
+
+There is no separate public check, insert, query, initialize, repair, migrate, delete, reset, or list operation. All four inputs require exact runtime `str` identity. Malformed caller-owned expected facts raise empty `TypeError()`. `replay_identity` is `[0-9a-f]{64}`; `expected_schema_identifier` is exactly `PHASE12-OWNER-APPROVAL-REPLAY-STORE-V1`; `expected_deployment_identifier` is `phase12-replay-deployment-[0-9a-f]{16}`. Invalid path form returns `PATH_TYPE_INVALID`.
+
+`path` is nonempty and normalized absolute with exactly one leading slash. `/` itself is invalid; NUL, empty interior components, `.`, `..`, and a trailing slash are invalid. The guard receives a caller-selected path and owns no canonical production-path constant.
+
+The replay identity is the caller-supplied lowercase SHA-256 digest of the exact canonical signed 16-field approval-payload bytes. The guard receives only that digest: it neither receives nor reconstructs payload bytes, verifies a signature or provenance, or claims collision impossibility. Byte-identical approvals intentionally have the same identity.
+
+Replay mutation is permitted only after upstream composition has established canonical authorization parsing, semantic authorization verification, public-key loading, revocation-state loading, owner signature verification, checkpoint equality, and repository identity plus accepted locked-commit comparison. The guard neither redoes nor imports those components. Failed upstream parse, semantic, key, revocation, signature, checkpoint, or repository attempts are not recorded.
+
+### Filesystem, URI, and race-bounded store access
+
+The deployment class is `ROOT_OWNED_LOCAL_MUTABLE_SQLITE_STORE`. Root anchor and every parent open descriptor-relatively with `os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW`. The root anchor must be a UID-zero directory with no group/other write bit. Each traversed path parent must be a UID-zero non-symlink directory with exact permission bits `0o700`. The existing database leaf is pre-opened with `os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK`; it must be a non-symlink regular file, UID zero, exact mode `0o600`, and hard-link count exactly one. Group identity is unconstrained. Every descriptor remains open through the operation and closes on every result or propagated exception. No directory, database, or schema creation is allowed.
+
+Before SQLite connects, the guard traverses from `/`, validates held parent and leaf descriptors, then retraverses from `/` and requires matching parent identities and matching leaf `st_dev` and `st_ino`. SQLite connects through the original normalized path with existing-only URI semantics. After transaction completion it retraverses again and compares path/descriptor identity plus `st_dev`, `st_ino`, `st_mode`, `st_uid`, `st_gid`, and `st_nlink`. Database size and timestamps are not compared because SQLite may legitimately change them. This detects persistent ordinary replacement and permission drift; it does not claim protection from a privileged swap-and-restore adversary.
+
+```python
+sqlite3.connect(
+    f"file:{quote(path, safe='/')}?mode=rw",
+    uri=True,
+    timeout=5.0,
+    isolation_level=None,
+    detect_types=0,
+    check_same_thread=True,
+    factory=sqlite3.Connection,
+    cached_statements=0,
+)
+```
+
+The guard uses one dedicated connection per operation, existing-only non-creating semantics, and disabled extension loading. Connection-factory substitution, `ATTACH`, UDFs, and alternate backends are forbidden.
+
+Apply and validate PRAGMAs in this exact order: `foreign_keys=ON` (`1`), `journal_mode=DELETE` (`delete`), `synchronous=FULL` (`2`), `temp_store=MEMORY` (`2`), `trusted_schema=OFF` (`0`), and `busy_timeout=5000` (`5000`); then read and require `page_size == 4096` and `max_page_count == 262144`. Unsupported `trusted_schema` is `REPLAY_STORE_CONNECTION_POLICY_MISMATCH`; it must not silently weaken policy. `max_page_count` is validation-only during guard execution. WAL, persistent WAL/shared-memory sidecars, manual fsync, and manual filesystem mutation are forbidden; SQLite's transient DELETE-mode rollback journal is the sole allowed sidecar.
+
+### Exact SQLite schema and validation
+
+The pre-provisioned store has exactly this schema:
+
+```sql
+CREATE TABLE phase_12_owner_approval_replay_metadata_v1 (
+    singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+    schema_identifier TEXT NOT NULL
+        CHECK (
+            schema_identifier =
+            'PHASE12-OWNER-APPROVAL-REPLAY-STORE-V1'
+        ),
+    deployment_identifier TEXT NOT NULL CHECK (
+        length(deployment_identifier) = 42
+        AND substr(deployment_identifier, 1, 26) =
+            'phase12-replay-deployment-'
+        AND substr(deployment_identifier, 27)
+            NOT GLOB '*[^0-9a-f]*'
+    )
+) WITHOUT ROWID;
+
+CREATE TABLE phase_12_owner_approval_replay_consumed_v1 (
+    replay_identity TEXT NOT NULL PRIMARY KEY CHECK (
+        length(replay_identity) = 64
+        AND replay_identity NOT GLOB '*[^0-9a-f]*'
+    )
+) WITHOUT ROWID;
+```
+
+The metadata table contains exactly one singleton-`1` row whose schema is exact and whose deployment identifier equals caller expectation. The consumed table contains only `replay_identity`. No timestamp, payload, signature, key, authorization record, checkpoint, commit, environment, scope, status, sequence, operator, or secret is stored.
+
+Only those two application tables are allowed: no application-defined index, view, trigger, foreign key, or additional application table. The primary-key index surfaced by `PRAGMA index_list` is allowed only when `unique=1`, `origin='pk'`, `partial=0`, and its exact primary-key column matches its table. Introspection uses fixed queries and bounded `fetchmany` limits, never unbounded `fetchall` against attacker-controlled schema output. `PRAGMA quick_check(1)` must yield exactly one `ok` row.
+
+### Atomic operation, capacity, and crash semantics
+
+The exact operation order is:
+
+1. caller type and grammar;
+2. path grammar;
+3. root, parent, and leaf descriptor validation;
+4. pre-connection path/descriptor identity check;
+5. existing-only SQLite open;
+6. connection-policy and PRAGMA validation;
+7. `BEGIN IMMEDIATE`;
+8. in-transaction path/descriptor identity recheck;
+9. `sqlite_schema` validation;
+10. table-column and primary-key validation;
+11. metadata singleton validation;
+12. schema identifier validation;
+13. deployment identifier validation;
+14. `quick_check(1)`;
+15. replay-identity lookup;
+16. if already present, `ROLLBACK` and return already consumed;
+17. otherwise require consumed row count `< 1000000`;
+18. require `page_count < 262144`;
+19. insert exactly one replay identity;
+20. `COMMIT`;
+21. post-commit path/descriptor identity recheck;
+22. close resources; and
+23. return success.
+
+Already-consumed truth precedes capacity checks. `BEGIN IMMEDIATE`, SQLite writer locking, and the `replay_identity` primary key own atomicity across threads, local processes, repeated starts, and simultaneous activation attempts. Busy or locked longer than 5000 ms fails closed and there is no internal retry.
+
+Successful first use requires completed `COMMIT` under DELETE journaling and FULL synchronous mode; no result is successful before that boundary. Replay identities remain permanently consumed. There is no pruning, expiry, row deletion, administrative reuse, rollback after a successful commit, or history-removing compaction. The exact row limit is `1000000`, page size is `4096`, and maximum page count is `262144`; capacity fails closed without history deletion.
+
+A commit exception is `REPLAY_DURABILITY_NOT_CONFIRMED`: the identity may have persisted and is never treated as cleanly absent. A confirmed commit followed by path/metadata identity drift is `REPLAY_STORE_CHANGED_DURING_OPERATION`; a close failure after confirmed commit is `REPLAY_DURABILITY_NOT_CONFIRMED`. Future same-identity calls resolve status only through this same guard. Downstream policy, wiring, activation, operator abort, crash, or restart never restores reuse.
+
+Malformed databases, unsupported schema or objects, metadata/deployment/page-policy mismatch, quick-check failure, permission or hard-link drift, path replacement, partial state, and corruption all fail closed. Repair, migration, recreation, replacement, automatic restoration, and empty-store fallback are forbidden. Recovery is a separate owner-authorized offline procedure that preserves complete consumed history and the same deployment identifier; the guard cannot prove backup completeness.
+
+### Failure, result, side-effect, and trust boundaries
+
+The exact stable failure set is:
+
+```text
+PATH_TYPE_INVALID
+REPLAY_STORE_UNAVAILABLE
+REPLAY_STORE_PARENT_DIRECTORY_MISMATCH
+REPLAY_STORE_SYMLINK_REJECTED
+REPLAY_STORE_OWNER_MISMATCH
+REPLAY_STORE_MODE_MISMATCH
+REPLAY_STORE_NOT_REGULAR_FILE
+REPLAY_STORE_HARD_LINK_REJECTED
+REPLAY_STORE_CHANGED_DURING_OPERATION
+REPLAY_STORE_OPEN_FAILED
+REPLAY_STORE_BUSY
+REPLAY_STORE_CONNECTION_POLICY_MISMATCH
+REPLAY_STORE_PAGE_POLICY_MISMATCH
+REPLAY_STORE_SCHEMA_MISMATCH
+REPLAY_STORE_DEPLOYMENT_MISMATCH
+REPLAY_STORE_UNSUPPORTED_OBJECT
+REPLAY_STORE_CORRUPT
+REPLAY_STORE_CAPACITY_EXCEEDED
+REPLAY_IDENTITY_ALREADY_CONSUMED
+REPLAY_RECORD_FAILED
+REPLAY_DURABILITY_NOT_CONFIRMED
+```
+
+Busy/locked maps to `REPLAY_STORE_BUSY`; primary-key conflict maps to `REPLAY_IDENTITY_ALREADY_CONSUMED`; `CANTOPEN` maps to `REPLAY_STORE_OPEN_FAILED`; and `CORRUPT`/`NOTADB` map to `REPLAY_STORE_CORRUPT`. Unknown ordinary exceptions and every `BaseException` propagate unchanged; implementation must not broadly catch `Exception`. First failure precedence is exactly the numbered operation order above, with insertion conflict between insert and commit.
+
+The private frozen, slotted, keyword-only result fields are `is_recorded`, `was_already_consumed`, `failure_codes`, `replay_identity`, `schema_identifier`, and `deployment_identifier`. Success is recorded with no codes and all facts. Already-consumed has false/true status, `(REPLAY_IDENTITY_ALREADY_CONSUMED,)`, and all facts. Every other failure has false/false status, one code, and no replay/store facts. A fixed repr reveals only both booleans and failure count; it does not disclose path, replay identity, deployment identifier, SQL, metadata, or approval facts.
+
+Allowed side effects are descriptor and bounded SQLite metadata reads, one existing-store open, fixed PRAGMA execution, SQLite locks, the transient DELETE rollback journal, one replay-identity insert, FULL synchronous commit, identity rechecks, and resource closure. Forbidden are database or directory creation, schema creation/migration, repair/replacement, chmod/chown/mkdir/rename/unlink, manual fsync, WAL, ATTACH, VACUUM, deletion/pruning, Git, network, configuration, credentials, marker, public-key, revocation, subprocess, systemd, logging, mutable cache, policy population, activation, and any operational-authorization claim.
+
+Future composition is authorization parsing → semantic verification → public-key loading → revocation-state loading → signature verification → repository and locked-commit comparison → durable replay check-and-record → production-policy decision → executable/service activation. The guard imports or calls none of those upstream or downstream components. Success proves only local durable replay recording under the frozen store/filesystem/transaction/metadata rules. It does not prove caller provenance, signature or approval validity, host/root integrity, hardware flush honesty, backup completeness, cross-host/global replay prevention, repository correctness, policy legitimacy, activation success, production authorization, or production readiness.
+
+### Future RED and commit boundaries
+
+The RED contract has exactly 108 static tests, without parametrization, dynamic generation, skip, or xfail: 6 public surface/signature/result/repr; 10 caller types/grammars; 8 path grammar; 9 parent traversal/metadata; 8 database leaf metadata; 4 existing-only open; 7 PRAGMA policy; 9 schema/object introspection; 5 metadata/deployment; 5 quick-check/corruption; 5 first-use; 4 already-consumed; 4 row/page capacity; 4 concurrent insertion; 3 busy/locking; 4 commit ambiguity; 3 post-operation identity drift; 3 immutable result shapes; 3 exception propagation; and 4 purity/trust-boundary tests. Fixtures use only pytest-managed SQLite stores and deterministic descriptor/metadata seams, with exactly one Linux fork-context multiprocess concurrency test. No real operational path or root privilege is required.
+
+The future cumulative scope is exactly this document, `tests/test_phase_12_owner_approval_durable_replay_guard_v1.py`, and `engine/phase_12_owner_approval_durable_replay_guard_v1.py`. Future subjects are exactly: `docs: freeze phase 12 owner approval durable replay guard design`, `test: define phase 12 owner approval durable replay guard`, and `feat: add phase 12 owner approval durable replay guard`. A fixture-repair commit is forbidden unless a specific committed test contradiction is later proven. This frozen design authorizes no implementation, test creation, path access, policy population, wiring, activation, or production action; all production gates remain closed.
