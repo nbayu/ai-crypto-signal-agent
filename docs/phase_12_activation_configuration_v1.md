@@ -2654,3 +2654,56 @@ Only downstream seams are prevalidated with `callable()` in exact order: `accept
 First failure is downstream callable validation, adapter construction, downstream invocation, bounded authorization, marker, repository/comparator, replay guard, then unchanged downstream result. Exceptions and BaseException propagate unchanged; structured downstream failures return unchanged. No catch, translation, retry, fallback, rollback, compensation, aggregation, or duplicated domain validation exists. Repository/deployment/replay identity remain downstream-owned; accepted-commit consistency, marker validation, and repository comparison remain separate locked claims. Upstream, adapter, downstream, coordinator, and tests remain immutable.
 
 Allowed effects are five callable checks, one builder call, forwarding, one downstream call, unchanged return. Direct operational access and mutation are prohibited. Runtime wiring remains separate; activation is unauthorized. The RED contract is exactly 100 explicit tests with allocation `4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4/4` across the 25 frozen categories; RED is sole absent-module error, GREEN is 100 passing tests and clean compilation. Scope is this document plus `tests/test_phase_12_authorization_validation_repository_orchestration_composition_v1.py` and `engine/phase_12_authorization_validation_repository_orchestration_composition_v1.py`; commits are docs, RED, implementation. Corrections, contradictions, and unresolved decisions are zero; no mutation beyond this documentation commit is authorized.
+
+## Phase 12 authorization repository structural request builders v1 — frozen detailed design
+
+### Capability identity
+
+Capability: authorization repository structural request builders v1. Module and implementation: `engine.phase_12_authorization_repository_validation_composition_v1`. Implementation file: `engine/phase_12_authorization_repository_validation_composition_v1.py`. Dedicated tests: `tests/test_phase_12_authorization_repository_structural_request_builders_v1.py`. Documentation: `docs/phase_12_activation_configuration_v1.md`. Side-effect class: pure immutable request construction.
+
+### Correction and preservation boundary
+
+This separately documented, RED-defined, audited, remotely locked bounded correction creates only a public construction boundary for six existing private exact-type request objects. It does not reopen or weaken the completed orchestration slice or authorize runtime, configuration, coordinator, service, provider, Telegram, policy, or activation ownership. `_Phase12AuthorizationRequestV1`, `_Phase12AuthorizationTrustExpectationsV1`, `_Phase12ValidationContextV1`, `_Phase12AcceptedMarkerRequestV1`, `_Phase12RepositoryVerificationRequestV1`, and `_Phase12ReplayRequestV1` remain private, unexported, frozen, slotted, keyword-only, repr-suppressed, identity-preserved, and unchanged in module, fields/order/annotations, constructor behavior, and downstream acceptance. They are not renamed, promoted, aliased, duplicated, moved, wrapped, subclassed, or exported.
+
+`run_phase_12_authorization_repository_validation_composition_v1` remains byte-for-byte unchanged: name, signature, annotations, parameter order, exact private-type and callable checks, first-failure precedence, authorization/marker/repository/replay order, results, exceptions, identity/trust ownership, and side-effect boundary.
+
+### Exact future public export
+
+```python
+__all__ = (
+    "build_phase_12_authorization_request_v1",
+    "build_phase_12_authorization_trust_expectations_v1",
+    "build_phase_12_validation_context_v1",
+    "build_phase_12_accepted_marker_request_v1",
+    "build_phase_12_repository_verification_request_v1",
+    "build_phase_12_replay_request_v1",
+    "run_phase_12_authorization_repository_validation_composition_v1",
+)
+```
+
+No other function, class, Protocol, alias, constant, helper, bundle, adapter, result type, or private request type is public.
+
+### Exact six public builders
+
+All builders are keyword-only, have no defaults or variadics, use the existing private-dataclass field annotations, return `object`, directly construct exactly one matching private object, and forward every value unchanged by matching keyword. There is no inspection, conversion, normalization, copying, parsing, verification, timestamp/accepted-commit/path/policy validation, operational access, helper, common factory, dispatch, loop, registry, mapping, bundle, wrapper, proxy, lambda, partial, closure, cache, mutable state, or hidden default.
+
+1. `build_phase_12_authorization_request_v1(*, document: str, canonical_payload_bytes: bytes, signature_bytes: bytes, activation_mode: str, owner_authorization_id: str, approval_checkpoint_id: str, approved_locked_commit: str, approved_at: str, expires_at: str, accepted_locked_commit_expectation: str) -> object` returns `_Phase12AuthorizationRequestV1`.
+2. `build_phase_12_authorization_trust_expectations_v1(*, public_key_path: str, expected_public_key_fingerprint: str, expected_signing_key_identifier: str, revocation_state_path: str, expected_revocation_artifact_fingerprint: str, expected_revocation_schema_identifier: str, expected_revocation_checkpoint_identifier: str, expected_environment_identifier: str, expected_deployment_identifier: str) -> object` returns `_Phase12AuthorizationTrustExpectationsV1`.
+3. `build_phase_12_validation_context_v1(*, configuration: object, now_utc: object) -> object` returns `_Phase12ValidationContextV1`.
+4. `build_phase_12_accepted_marker_request_v1(*, path: str, expected_metadata_policy: object) -> object` returns `_Phase12AcceptedMarkerRequestV1`.
+5. `build_phase_12_repository_verification_request_v1(*, source_path: str, repository_path: str) -> object` returns `_Phase12RepositoryVerificationRequestV1`.
+6. `build_phase_12_replay_request_v1(*, path: str, expected_schema_identifier: str, expected_deployment_identifier: str) -> object` returns `_Phase12ReplayRequestV1`.
+
+### Validation, exception, return, and exact-type acceptance
+
+Builders rely only on Python signature binding and existing private dataclass construction; the private dataclasses add no constructor-time validation. Missing, unexpected, and positional calls raise normal Python signature `TypeError`. Construction, ordinary, and `BaseException` failures propagate unchanged. There are no catches, translation, inspection, retry, fallback, rollback, compensation, aggregation, custom errors, or secret disclosure. Builders return the exact private frozen/slotted object with no public Protocol/shared type/request type/alias/tuple/mapping/proxy/result wrapper. Callers forward it unchanged. The following checks remain unchanged and builder objects must pass them: `type(authorization_request) is _Phase12AuthorizationRequestV1`; `type(trust_expectations) is _Phase12AuthorizationTrustExpectationsV1`; `type(validation_context) is _Phase12ValidationContextV1`; `type(accepted_marker_request) is _Phase12AcceptedMarkerRequestV1`; `type(repository_verification_request) is _Phase12RepositoryVerificationRequestV1`; `type(replay_request) is _Phase12ReplayRequestV1`.
+
+### Operational, trust, and locked-component boundary
+
+Builders do not access filesystem, Git, subprocess, environment/cwd, credentials, authorization/key/revocation/marker/repository/replay/policy contents, network, clock, coordinator, runtime, service, provider, Telegram, activation, logging, cache, or serialization. Success proves only exact keyword-only acceptance, construction of one existing private immutable request, and field assignment; it proves no authorization, key, revocation, marker, repository, replay, path, configuration, policy, runtime, activation, service, infrastructure, provider, or Telegram condition. No change is permitted to the orchestration/tests, bounded authorization validation, callable adapter, marker/repository/remote-expectation/comparator/replay components, activation coordinator, or their tests.
+
+### RED, GREEN, scope, and runtime prerequisite effect
+
+RED is exactly 75 explicit unique top-level `test_` functions, allocation `3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3/3`, across preserved run operation/export; six signatures; private construction/forwarding/immutability/acceptance; validation and call-shape errors; exception propagation; private export/run-operation/operational/shared-contract/runtime/orchestration immutability; trust; and future runtime composability. No parametrization, generation, skips, xfails, import substitution, operational values, or real dependency invocation. RED imports the existing module and directly imports absent `build_phase_12_authorization_request_v1`: sole collection `ImportError`, pytest 2, tee 0, collected/executed 0, zero warnings. GREEN is 75 passed with no failures/skips/xfails/xpasses/warnings and virtualenv compilation passing.
+
+Exact scope: `docs/phase_12_activation_configuration_v1.md`, `tests/test_phase_12_authorization_repository_structural_request_builders_v1.py`, and `engine/phase_12_authorization_repository_validation_composition_v1.py`. Exact commits: `docs: freeze phase 12 authorization repository structural request builder design`; `test: define phase 12 authorization repository structural request builders`; `feat: add phase 12 authorization repository structural request builders`. Remote lock unlocks only public construction of six opaque requests; runtime composition, configuration schema/references, operational binding, replay/time ownership, result handoff, coordinator/service integration, policy, provider, Telegram, and activation remain separate unauthorized prerequisites. Canonical configuration remains CLOSED and all production gates remain closed.
