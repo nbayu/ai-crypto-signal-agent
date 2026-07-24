@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError, MISSING, fields, is_dataclass
 import ast
 import inspect
 from pathlib import Path
+import typing
 
 import pytest
 
@@ -196,12 +197,21 @@ def test_c08_01_clock_field_annotation_is_exact_callable_object() -> None:
 
 
 def test_c08_02_clock_annotation_has_zero_argument_contract() -> None:
-    assert _field_annotation().__args__[0] == []
+    annotation = _field_annotation()
+    assert (
+        typing.get_origin(annotation) is Callable
+        and typing.get_args(annotation) == ([], object)
+    )
 
 
 def test_c08_03_clock_annotation_has_object_return_without_datetime_semantics() -> None:
-    annotation = _field_annotation()
-    assert annotation.__args__[1] is object and "datetime" not in str(annotation).lower()
+    field_annotation = _field_annotation()
+    builder_annotation = _builder_annotations()["clock"]
+    assert (
+        field_annotation == builder_annotation == Callable[[], object]
+        and typing.get_args(field_annotation)[1] is object
+        and "datetime" not in str(field_annotation).lower()
+    )
 
 
 def test_c09_01_builder_has_exact_single_keyword_only_parameter() -> None:
@@ -296,8 +306,25 @@ def test_c14_01_builder_source_does_not_inspect_callable_signature() -> None:
 
 
 def test_c14_02_builder_source_does_not_wrap_adapt_or_partially_apply_clock() -> None:
-    names = {node.id.lower() for node in ast.walk(_builder_node()) if isinstance(node, ast.Name)}
-    assert {"partial", "proxy", "adapter", "lambda"}.isdisjoint(names) and not any(isinstance(node, ast.Lambda) for node in ast.walk(_builder_node())) and not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) for node in ast.walk(_builder_node()) if node is not _builder_node())
+    builder_node = _builder_node()
+    names = {node.id.lower() for node in ast.walk(builder_node) if isinstance(node, ast.Name)}
+    returns = [node for node in ast.walk(builder_node) if isinstance(node, ast.Return)]
+    assert (
+        {"partial", "proxy", "adapter", "lambda"}.isdisjoint(names)
+        and not any(isinstance(node, ast.Lambda) for node in ast.walk(builder_node))
+        and not any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            for node in ast.walk(builder_node)
+            if node is not builder_node
+        )
+        and len(returns) == 1
+        and isinstance(returns[0].value, ast.Call)
+        and isinstance(returns[0].value.func, ast.Name)
+        and returns[0].value.func.id
+        == "Phase12AuthorizationValidationInjectedCallableClockV1"
+        and [(keyword.arg, getattr(keyword.value, "id", None)) for keyword in returns[0].value.keywords]
+        == [("clock", "clock")]
+    )
 
 
 def test_c14_03_builder_source_does_not_copy_convert_normalize_cache_or_memoize_clock() -> None:
