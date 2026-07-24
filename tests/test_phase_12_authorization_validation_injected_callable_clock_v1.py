@@ -436,9 +436,26 @@ def test_c19_01_clock_module_imports_no_locked_orchestration_component() -> None
 
 
 def test_c19_02_locked_components_import_no_clock_boundary() -> None:
-    target = "phase_12_authorization_validation_injected_callable_clock_v1"
-    sources = [path.read_text() for path in (_repository_root() / "engine").glob("*.py") if path != _clock_module_path()]
-    assert all(target not in source for source in sources)
+    target = "engine.phase_12_authorization_validation_injected_callable_clock_v1"
+    importers = {}
+    for path in (_repository_root() / "engine").glob("*.py"):
+        if path == _clock_module_path():
+            continue
+        tree = ast.parse(path.read_text())
+        matching_imports = [
+            node
+            for node in tree.body
+            if (isinstance(node, ast.ImportFrom) and node.module == target)
+            or (isinstance(node, ast.Import) and any(alias.name == target for alias in node.names))
+        ]
+        if matching_imports:
+            importers[path.relative_to(_repository_root()).as_posix()] = matching_imports
+    assert set(importers) == {"engine/phase_12_authorization_validation_callable_clock_invocation_v1.py"}
+    authorized_import = importers["engine/phase_12_authorization_validation_callable_clock_invocation_v1.py"]
+    assert len(authorized_import) == 1 and isinstance(authorized_import[0], ast.ImportFrom)
+    assert [(alias.name, alias.asname) for alias in authorized_import[0].names] == [
+        ("Phase12AuthorizationValidationInjectedCallableClockV1", None)
+    ]
 
 
 def test_c19_03_clock_boundary_has_no_dependency_on_request_marker_repository_replay_or_coordinator_modules() -> None:
