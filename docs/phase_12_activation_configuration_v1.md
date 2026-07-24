@@ -2077,3 +2077,78 @@ The RED contract has exactly 101 unique top-level static tests, with no parametr
 Future cumulative scope is exactly this document, `tests/test_phase_12_repository_remote_expectation_source_v1.py`, and `engine/phase_12_repository_remote_expectation_source_v1.py`. Exact subjects are `docs: freeze phase 12 repository remote expectation source design`, `test: define phase 12 repository remote expectation source`, and `feat: add phase 12 repository remote expectation source`. Fixture-repair commits are forbidden absent a proven committed contradiction.
 
 This detailed design authorizes no test, implementation, policy file, URL population, source-path wiring, comparator wiring, activation, or production action. Documentation mutation is authorized only by the corresponding design-freeze step; all production gates remain closed.
+
+
+## Phase 12 repository verification composition v1 — frozen detailed design
+
+### Capability, module, and sole public surface
+
+Repository verification composition is a dedicated independent v1 capability. It invokes an injected repository remote expectation source, validates its bounded result shape, forwards its two URL facts into an injected repository comparator, validates the comparator's bounded outcome shape, and returns one immutable least-disclosing composition result. It does not establish path provenance, URL ownership/freshness, approval or marker validity, replay state, production policy, activation, production authorization, or readiness.
+
+Module: engine.phase_12_repository_verification_composition_v1. Future implementation: engine/phase_12_repository_verification_composition_v1.py. Future tests: tests/test_phase_12_repository_verification_composition_v1.py. This document is the design record. The exact sole public surface is:
+
+~~~python
+__all__ = (
+    "run_phase_12_repository_verification_composition_v1",
+)
+
+def run_phase_12_repository_verification_composition_v1(
+    *,
+    source_path: str,
+    repository_path: str,
+    repository_identity: str,
+    accepted_locked_commit: str,
+    remote_expectation_source: _Phase12RemoteExpectationSourceCallableV1,
+    repository_comparator: _Phase12RepositoryComparatorCallableV1,
+) -> _Phase12RepositoryVerificationCompositionResultV1:
+~~~
+
+No other public helper, alias, validate, compare, load, replay, policy, or activation operation exists.
+
+### Caller contract and injected protocols
+
+Validate exactly in this order: source_path, repository_path, repository_identity, accepted_locked_commit, remote_expectation_source, repository_comparator. Each fact requires type(value) is str, rejecting str subclasses; each dependency requires callable(value). Any violation raises empty TypeError() before any invocation. Do not duplicate dependency-owned path, identity, or commit grammars.
+
+Private non-runtime-checkable Protocols are _Phase12RemoteExpectationSourceCallableV1 with __call__(*, source_path: str) -> object and _Phase12RepositoryComparatorCallableV1 with __call__(*, repository_path: str, repository_identity: str, accepted_locked_commit: str, expected_origin_fetch_url: str, expected_origin_push_url: str) -> object. Runtime validation is callable() only; signature introspection is prohibited; dependencies remain explicitly injected.
+
+### Source invocation, validation, and URL lifetime
+
+Invoke exactly once as remote_expectation_source(source_path=source_path), with no positional argument, extra keyword, transformation, retry, loop, fallback, or cache. Preflight required attributes is_loaded, failure_codes, expected_origin_fetch_url, and expected_origin_push_url using inspect.getattr_static so a missing attribute is distinguishable from an existing property exception.
+
+Source success is exact bool is_loaded is True, exact tuple failure_codes == (), and both URLs exact str. A valid unsuccessful source result has exact bool false, a nonempty exact tuple of exact str entries, and both URLs None. None, missing attributes, wrong types, success with failures or absent/non-str URLs, failure with empty failures or URLs, non-string failures, and every contradiction are malformed. Complete shape validation precedes unsuccessful classification: contradictory/malformed shape wins even if is_loaded is false.
+
+Missing attributes map to REMOTE_EXPECTATION_SOURCE_RESULT_INVALID. A valid unsuccessful result maps to REMOTE_EXPECTATION_SOURCE_FAILED. Raw source codes are never returned. Unknown ordinary existing-property exceptions and every BaseException propagate unchanged. No comparator or later action follows source failure, malformed result, or exception. URLs are local-only, forwarded once to the comparator, never logged, cached, stored, or passed to replay, policy, or activation, and become unreachable on return or propagation.
+
+### Comparator invocation and bounded outcome validation
+
+Only after valid source success invoke exactly once as repository_comparator(repository_path=repository_path, repository_identity=repository_identity, accepted_locked_commit=accepted_locked_commit, expected_origin_fetch_url=expected_origin_fetch_url, expected_origin_push_url=expected_origin_push_url). There are no positional arguments, extra keywords, rewriting, normalization, retry, loop, fallback, or cache.
+
+Inspect only outcome attributes is_match and failure_codes; the comparator's eight evidence fields remain deliberately uninspected. Success is exact bool is_match is True and exact tuple failure_codes == (). A valid unsuccessful result has exact bool false and a nonempty exact tuple of exact str entries. None, missing outcome attributes, wrong types, false with empty failures, true with nonempty failures, non-string failure entries, and contradictory shapes are malformed; full shape validation precedes unsuccessful classification.
+
+Missing attributes map to REPOSITORY_COMPARATOR_RESULT_INVALID; valid unsuccessful results map to REPOSITORY_COMPARATOR_FAILED; raw comparator codes are never returned. Existing-property ordinary exceptions and every BaseException propagate unchanged. No replay or later action follows comparator failure, malformed result, or exception.
+
+### Immutable result, precedence, exception, and effect boundary
+
+_Phase12RepositoryVerificationCompositionResultV1 is @dataclass(frozen=True, slots=True, kw_only=True), with exact field order is_verified: bool then failure_codes: tuple[str, ...]. Success is is_verified=True and failure_codes=(). Failure is is_verified=False and exactly one permitted code. The exact four-code set is REMOTE_EXPECTATION_SOURCE_FAILED, REMOTE_EXPECTATION_SOURCE_RESULT_INVALID, REPOSITORY_COMPARATOR_FAILED, and REPOSITORY_COMPARATOR_RESULT_INVALID. There is no caller failure code. Repr reveals only is_verified and failure_count, never paths, identity, accepted commit, URLs, results/codes, exception details, Git output, or metadata.
+
+Exact first-failure precedence is source-path type; repository-path type; repository-identity type; accepted-commit type; source callable; comparator callable; source invocation exception propagation; source complete-shape validation; source unsuccessful translation; comparator invocation exception propagation; comparator complete-shape validation; comparator unsuccessful translation; success. First failure only; no aggregation. Caller violations raise empty TypeError(). Unknown ordinary invocation/property exceptions and every BaseException propagate unchanged; broad Exception catches, exception text copying, and cleanup that masks propagation are prohibited.
+
+Allowed effects are exact caller/callable checks, static attribute-presence checks, result attribute reads, one source call, one conditional comparator call, and immutable result construction. Permitted imports are future annotations, dataclasses, typing, and inspect.getattr_static. Direct os, pathlib, subprocess, socket, SSL, URL/HTTP clients, Git libraries, environment/current-directory access, logging, mutable cache, filesystem access, marker/approval/key/revocation/replay/policy access, service control, and activation are prohibited. Filesystem and Git behavior may occur only inside injected remotely locked dependencies.
+
+### Composition, trust, policy, and operational dependencies
+
+Future higher-level order is authorization parsing → semantic verification → public-key loading → revocation-state loading → signature verification → accepted locked-commit marker composition → repository verification composition → durable replay guard → production-policy decision → activation. This component receives already verified caller facts, runs before replay, and proves only valid dependency success shapes plus exact caller-fact and URL forwarding.
+
+It does not prove path provenance, URL ownership, remote freshness, hosting identity, DNS/SSH authenticity, availability, code safety, broader owner intent, production authorization, or readiness. Repository verification success is only a mandatory Boolean prerequisite for future policy evaluation. This component neither populates nor decides policy and exposes no URLs/paths to policy.
+
+Actual source_path and repository_path, deployment placement, policy file, URL values, approval/marker orchestration, replay integration, policy integration, and activation integration remain undefined or unwired; validation coordinator v1 remains unchanged. These external dependencies do not block isolated implementation.
+
+### Future RED contract, scope, and authorization
+
+The RED contract is exactly 68 unique top-level static tests: 6 sole public surface/immutable result; 8 keyword-only caller facts and validation order; 4 injected callable contracts; 3 exact source invocation; 4 source unsuccessful short-circuit; 7 source malformed handling; 3 comparator argument flow; 4 comparator unsuccessful short-circuit; 7 comparator malformed handling; 4 first-failure precedence; 2 no replay/policy/activation; 4 least-disclosing result/repr; 5 exception propagation; 4 prohibited-effect boundary; 3 trust/policy assertions.
+
+Tests use unique top-level functions only: no parametrization, dynamic generation, skip, xfail, sys.modules mutation, import hook, implementation substitute, real policy file, operational path, Git repository, subprocess, network, or replay state. Use deterministic fake dependency results and call recorders only.
+
+Future cumulative scope is exactly this document, tests/test_phase_12_repository_verification_composition_v1.py, and engine/phase_12_repository_verification_composition_v1.py. Exact subjects are docs: freeze phase 12 repository verification composition design; test: define phase 12 repository verification composition; feat: add phase 12 repository verification composition. Fixture-repair commits are forbidden absent a specific committed contradiction.
+
+This documentation commit authorizes no test, implementation, operational-path definition, policy-file creation, URL population, source/comparator wiring, replay/policy integration, coordinator modification, executable wiring, activation, or production action. All production gates remain closed.
