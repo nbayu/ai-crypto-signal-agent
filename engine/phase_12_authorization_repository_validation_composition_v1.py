@@ -6,6 +6,12 @@ from inspect import getattr_static
 from typing import Protocol
 
 __all__ = (
+    "build_phase_12_authorization_request_v1",
+    "build_phase_12_authorization_trust_expectations_v1",
+    "build_phase_12_validation_context_v1",
+    "build_phase_12_accepted_marker_request_v1",
+    "build_phase_12_repository_verification_request_v1",
+    "build_phase_12_replay_request_v1",
     "run_phase_12_authorization_repository_validation_composition_v1",
 )
 
@@ -90,6 +96,104 @@ class _Phase12ValidationContextV1:
     def __repr__(self) -> str:
         return "_Phase12ValidationContextV1(field_count=2)"
 
+
+
+def build_phase_12_authorization_request_v1(
+    *,
+    document: str,
+    canonical_payload_bytes: bytes,
+    signature_bytes: bytes,
+    activation_mode: str,
+    owner_authorization_id: str,
+    approval_checkpoint_id: str,
+    approved_locked_commit: str,
+    approved_at: str,
+    expires_at: str,
+    accepted_locked_commit_expectation: str,
+) -> object:
+    return _Phase12AuthorizationRequestV1(
+        document=document,
+        canonical_payload_bytes=canonical_payload_bytes,
+        signature_bytes=signature_bytes,
+        activation_mode=activation_mode,
+        owner_authorization_id=owner_authorization_id,
+        approval_checkpoint_id=approval_checkpoint_id,
+        approved_locked_commit=approved_locked_commit,
+        approved_at=approved_at,
+        expires_at=expires_at,
+        accepted_locked_commit_expectation=accepted_locked_commit_expectation,
+    )
+
+
+def build_phase_12_authorization_trust_expectations_v1(
+    *,
+    public_key_path: str,
+    expected_public_key_fingerprint: str,
+    expected_signing_key_identifier: str,
+    revocation_state_path: str,
+    expected_revocation_artifact_fingerprint: str,
+    expected_revocation_schema_identifier: str,
+    expected_revocation_checkpoint_identifier: str,
+    expected_environment_identifier: str,
+    expected_deployment_identifier: str,
+) -> object:
+    return _Phase12AuthorizationTrustExpectationsV1(
+        public_key_path=public_key_path,
+        expected_public_key_fingerprint=expected_public_key_fingerprint,
+        expected_signing_key_identifier=expected_signing_key_identifier,
+        revocation_state_path=revocation_state_path,
+        expected_revocation_artifact_fingerprint=expected_revocation_artifact_fingerprint,
+        expected_revocation_schema_identifier=expected_revocation_schema_identifier,
+        expected_revocation_checkpoint_identifier=expected_revocation_checkpoint_identifier,
+        expected_environment_identifier=expected_environment_identifier,
+        expected_deployment_identifier=expected_deployment_identifier,
+    )
+
+
+def build_phase_12_validation_context_v1(
+    *,
+    configuration: object,
+    now_utc: object,
+) -> object:
+    return _Phase12ValidationContextV1(
+        configuration=configuration,
+        now_utc=now_utc,
+    )
+
+
+def build_phase_12_accepted_marker_request_v1(
+    *,
+    path: str,
+    expected_metadata_policy: object,
+) -> object:
+    return _Phase12AcceptedMarkerRequestV1(
+        path=path,
+        expected_metadata_policy=expected_metadata_policy,
+    )
+
+
+def build_phase_12_repository_verification_request_v1(
+    *,
+    source_path: str,
+    repository_path: str,
+) -> object:
+    return _Phase12RepositoryVerificationRequestV1(
+        source_path=source_path,
+        repository_path=repository_path,
+    )
+
+
+def build_phase_12_replay_request_v1(
+    *,
+    path: str,
+    expected_schema_identifier: str,
+    expected_deployment_identifier: str,
+) -> object:
+    return _Phase12ReplayRequestV1(
+        path=path,
+        expected_schema_identifier=expected_schema_identifier,
+        expected_deployment_identifier=expected_deployment_identifier,
+    )
 
 class _Phase12AuthorizationValidationCallableV1(Protocol):
     def __call__(self, *, authorization_request: _Phase12AuthorizationRequestV1, trust_expectations: _Phase12AuthorizationTrustExpectationsV1, validation_context: _Phase12ValidationContextV1) -> object: ...
