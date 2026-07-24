@@ -2729,3 +2729,61 @@ The accepted implementation provenance is four linear commits: `docs: freeze pha
 This provenance correction is itself committed separately after implementation because pre-push audit found the stale plan after implementation history already existed; documentation must describe actual committed provenance, and amend, squash, rebase, reset, and history rewrite remain prohibited. The final five-commit local provenance is: `docs: freeze phase 12 authorization validation injected callable clock design`; `test: define phase 12 authorization validation injected callable clock`; `test: correct phase 12 authorization validation injected callable clock assertions`; `feat: add phase 12 authorization validation injected callable clock`; and `docs: correct phase 12 authorization validation injected callable clock provenance`.
 
 The capability contract is unchanged: `Callable[[], object]`, one immutable public binding type, one keyword-only public builder, sole `clock` field, direct identity forwarding, zero invocation, no datetime or temporal widening, no validation or exception translation, exact two-name export, no operational access, no invocation operation, and no consumer wiring. Accepted evidence remains isolated 60 passed, focused proven 14-file surface 1030 passed with unsupported 1671 and 1731 focused counts retired, and canonical full 5825 passed; evidence logs were hashed and removed. This documentation correction creates neither test nor implementation. The boundary binds no reference, expectation, request, validation context, runtime root, result handoff, service, provider, Telegram, deployment, activation, or production action. Next likely prerequisite is `authorization-validation callable clock invocation v1`, not authorized. The coordinator remains CLOSED authority, canonical configuration remains CLOSED, and all production gates remain closed.
+
+### Authorization validation callable clock invocation v1
+
+Capability: `authorization validation callable clock invocation v1`. Module: `engine.phase_12_authorization_validation_callable_clock_invocation_v1`; implementation: `engine/phase_12_authorization_validation_callable_clock_invocation_v1.py`; tests: `tests/test_phase_12_authorization_validation_callable_clock_invocation_v1.py`; documentation: this file. Its side-effect classification is exactly one invocation of a caller-owned stored callable.
+
+#### Prerequisite and public dependency
+
+The remotely locked injected callable-clock binding already owns `Callable[[], object]`. Invoking that bound callable is independently meaningful and uniquely minimal: it requires no protected reference, expectation schema, configuration-state contract, validation-context construction, coordinator, runtime root, consumer wiring, or temporal semantics. The future implementation imports only `Phase12AuthorizationValidationInjectedCallableClockV1` from `engine.phase_12_authorization_validation_injected_callable_clock_v1`; it imports no private binding detail, raw callable public input, Protocol, structural adapter, or runtime dependency container.
+
+The sole public export is exactly:
+
+~~~python
+__all__ = (
+    "invoke_phase_12_authorization_validation_callable_clock_v1",
+)
+~~~
+
+The sole public operation is exactly:
+
+~~~python
+def invoke_phase_12_authorization_validation_callable_clock_v1(
+    *,
+    clock_binding: Phase12AuthorizationValidationInjectedCallableClockV1,
+) -> object:
+    return clock_binding.clock()
+~~~
+
+It has exactly one keyword-only parameter named `clock_binding`, no default, no positional public form, and no variadic parameter. Its public signature prohibits raw callable input; no `isinstance` or custom runtime validation is added, so structurally invalid values retain ordinary Python attribute behavior.
+
+#### Exact invocation, return, validation, and exception ownership
+
+The operation performs one direct `clock_binding.clock` field access, one exact callable invocation, and one direct return. It creates no local conversion, wrapper, result type, intermediate semantic object, helper, or shared factory. Each successful operation call invokes the stored callable exactly once: there is no invocation before entry, duplicate acquisition, retry, fallback, cache, memoization, prefetch, global storage, or result storage. The returned object is preserved unchanged by identity.
+
+The return contract is exactly `object`, with no datetime, timezone-awareness, freshness, monotonicity, ordering, temporal-validity, determinism, authorization-validity, configuration-eligibility, runtime-readiness, activation-readiness, or production-readiness guarantee. No temporal-value schema exists.
+
+Validation ownership is normal Python signature binding, normal attribute access, and normal callable invocation only. There is no `isinstance`, `callable()` validation, binding/result/null/datetime/timezone/semantic validation. Missing `clock_binding`, positional invocation, and unexpected keywords retain normal `TypeError`; a missing `clock` attribute retains normal `AttributeError`; a non-callable `clock` value retains normal `TypeError`. A callable ordinary `Exception` and every callable `BaseException` propagate as the exact instance. There is no try, except, translation, retry, fallback, rollback, compensation, aggregation, or custom error.
+
+No binding alias, Protocol, helper, result wrapper, default/system clock, dependency container, runtime root, or consumer adapter is exported.
+
+#### Operational, dependency, trust, and consumer boundary
+
+There is no direct access to `datetime.now`, `datetime.utcnow`, `date.today`, `time.time`, `time.monotonic`, `perf_counter`, `process_time`, environment variables, filesystem/paths, subprocess, Git, repository, replay, network, request builders, validation context, coordinator, runtime, service, provider, Telegram, activation, deployment, or production state. The only permitted side effect is exactly one invocation of the caller-owned stored callable.
+
+The implementation imports no validation context, coordinator, authorization parser/verifier, repository orchestration, request builder, runtime/service, provider, or Telegram module. Its positive guarantees are only that Python accepted the public call, the binding's stored callable was accessed and invoked exactly once, and the exact returned object was returned unchanged. It guarantees neither callable correctness/safety nor returned-object, temporal, authorization, configuration, runtime, production, infrastructure, network, service, provider, or Telegram health.
+
+A later separately authorized slice may forward the returned opaque object unchanged to validation-context `now_utc` or activation-coordinator `now_utc`. This slice does not build validation context, call the coordinator, perform either handoff, duplicate acquisition, store the result, or create runtime state. The injected clock binding and its corrected tests, authorization/repository validation composition, repository orchestration, bounded composition, callable adapter, activation coordinator, structural request builders, parser, verifier, key, revocation, marker, repository, comparator, replay, runtime, service, provider, Telegram modules, and their existing tests remain immutable.
+
+#### RED and substantive test contract
+
+Future RED imports absent `invoke_phase_12_authorization_validation_callable_clock_v1` from absent `engine.phase_12_authorization_validation_callable_clock_invocation_v1`: one `ModuleNotFoundError`, pytest exit 2, tee exit 0, collected/executed 0, errors 1, failures/skips/xfails/xpasses/warnings 0, and no secondary error.
+
+The future dedicated contract is exactly 36 unique explicit top-level tests: 12 categories x 3 tests. The categories are: public operation identity and exact export; exact signature and annotations; direct field access/invocation/return; exactly-once cardinality and returned-object identity; keyword-only and invalid public call shapes; missing-field and non-callable-field ownership; ordinary Exception propagation; BaseException propagation; no validation/retry/fallback/cache/conversion; no operational access; locked-component immutability; and trust non-overclaim with future composability without wiring. There is no parametrization, dynamic generation, alias, placeholder, `assert True`, pass, ellipsis, empty body, skip, xfail, import hook, `sys.modules` mutation, substitute implementation, real system clock, or operational dependency invocation. Tests use deterministic synthetic bindings/callables, exactly-once counters, and identity sentinels only.
+
+#### Scope, commits, and prerequisite effect
+
+Exact future scope is this documentation file, `tests/test_phase_12_authorization_validation_callable_clock_invocation_v1.py`, and `engine/phase_12_authorization_validation_callable_clock_invocation_v1.py`. Exact commits are: `docs: freeze phase 12 authorization validation callable clock invocation design`; `test: define phase 12 authorization validation callable clock invocation`; and `feat: add phase 12 authorization validation callable clock invocation`. No amend, squash, merge, rebase, reset, cherry-pick, or history rewrite is authorized.
+
+This capability invokes the caller-owned bound callable exactly once and returns its opaque object unchanged. It binds no protected reference, creates no expectation schema, changes no coordinator authority, builds no validation context, performs no temporal handoff, maps no authorization request, creates no runtime composition, exposes no result handoff, and authorizes no service, provider, Telegram, activation, deployment, or production action. Likely later prerequisites are validation-context temporal-value handoff v1 and coordinator temporal-value handoff v1; both remain unselected and unauthorized. The coordinator remains CLOSED authority, canonical configuration remains CLOSED, and all production gates remain closed.
