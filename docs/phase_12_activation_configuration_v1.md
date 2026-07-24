@@ -2152,3 +2152,201 @@ Tests use unique top-level functions only: no parametrization, dynamic generatio
 Future cumulative scope is exactly this document, tests/test_phase_12_repository_verification_composition_v1.py, and engine/phase_12_repository_verification_composition_v1.py. Exact subjects are docs: freeze phase 12 repository verification composition design; test: define phase 12 repository verification composition; feat: add phase 12 repository verification composition. Fixture-repair commits are forbidden absent a specific committed contradiction.
 
 This documentation commit authorizes no test, implementation, operational-path definition, policy-file creation, URL population, source/comparator wiring, replay/policy integration, coordinator modification, executable wiring, activation, or production action. All production gates remain closed.
+
+
+## Phase 12 authorization repository validation composition v1 — frozen detailed design
+
+### Capability, module, and sole public surface
+
+Authorization repository validation composition v1 is a dedicated independent capability. It invokes one bounded authorization-validation callable, one bounded accepted-marker composition callable, the remotely locked repository-verification composition, and the remotely locked durable replay guard. It forwards injected remote-expectation-source and repository-comparator seams unchanged to repository composition and returns one immutable least-disclosing policy-prerequisite result.
+
+It does not decide production policy; activate services; create configuration or policy files; derive or discover operational paths; invoke remote source or repository comparator directly; inspect URLs or comparator facts; retry or roll back replay; establish path provenance, URL ownership/freshness, production authorization, or production readiness.
+
+Module: `engine.phase_12_authorization_repository_validation_composition_v1`. Future implementation: `engine/phase_12_authorization_repository_validation_composition_v1.py`. Future tests: `tests/test_phase_12_authorization_repository_validation_composition_v1.py`. This document is the design record. The exact sole public surface is:
+
+~~~python
+__all__ = (
+    "run_phase_12_authorization_repository_validation_composition_v1",
+)
+
+def run_phase_12_authorization_repository_validation_composition_v1(
+    *,
+    authorization_request: _Phase12AuthorizationRequestV1,
+    trust_expectations: _Phase12AuthorizationTrustExpectationsV1,
+    accepted_marker_request: _Phase12AcceptedMarkerRequestV1,
+    repository_verification_request: _Phase12RepositoryVerificationRequestV1,
+    replay_request: _Phase12ReplayRequestV1,
+    validation_context: _Phase12ValidationContextV1,
+    authorization_validation: _Phase12AuthorizationValidationCallableV1,
+    accepted_marker_composition: _Phase12AcceptedMarkerCompositionCallableV1,
+    repository_verification_composition: _Phase12RepositoryVerificationCompositionCallableV1,
+    remote_expectation_source: _Phase12RemoteExpectationSourceCallableV1,
+    repository_comparator: _Phase12RepositoryComparatorCallableV1,
+    replay_guard: _Phase12ReplayGuardCallableV1,
+) -> _Phase12AuthorizationRepositoryValidationCompositionResultV1:
+~~~
+
+No additional public class, function, protocol, constant, alias, or helper exists.
+
+### Private bundles, caller contract, and callable protocols
+
+The six private input bundles are each `@dataclass(frozen=True, slots=True, kw_only=True, repr=False)`. They are passive immutable carriers: no normalization, ambient discovery, callable field, default factory, or value validation occurs in construction. Each has a fixed repr revealing only its class name and field count. Values, including documents, signatures, paths, key expectations, and metadata policy, never appear in repr. The public caller boundary rejects subclasses through exact type checks.
+
+The exact bundle field orders and annotations are:
+
+~~~python
+class _Phase12AuthorizationRequestV1:
+    document: str
+    canonical_payload_bytes: bytes
+    signature_bytes: bytes
+    activation_mode: str
+    owner_authorization_id: str
+    approval_checkpoint_id: str
+    approved_locked_commit: str
+    approved_at: str
+    expires_at: str
+    accepted_locked_commit_expectation: str
+
+class _Phase12AuthorizationTrustExpectationsV1:
+    public_key_path: str
+    expected_public_key_fingerprint: str
+    expected_signing_key_identifier: str
+    revocation_state_path: str
+    expected_revocation_artifact_fingerprint: str
+    expected_revocation_schema_identifier: str
+    expected_revocation_checkpoint_identifier: str
+    expected_environment_identifier: str
+    expected_deployment_identifier: str
+
+class _Phase12AcceptedMarkerRequestV1:
+    path: str
+    expected_metadata_policy: object
+
+class _Phase12RepositoryVerificationRequestV1:
+    source_path: str
+    repository_path: str
+
+class _Phase12ReplayRequestV1:
+    path: str
+    expected_schema_identifier: str
+    expected_deployment_identifier: str
+
+class _Phase12ValidationContextV1:
+    configuration: object
+    now_utc: object
+~~~
+
+The trust bundle uses distinct expected environment, deployment, and checkpoint facts because the locked signature verifier has distinct context expectations; no undefined singular signature-context field is introduced. The marker metadata-policy object is caller supplied and forwarded only to the bounded marker callable. Bundle fields are never used for path discovery.
+
+The exact keyword-only caller-validation order is: authorization-request exact type; trust-expectations exact type; accepted-marker-request exact type; repository-verification-request exact type; replay-request exact type; validation-context exact type; authorization-validation callable; accepted-marker-composition callable; repository-verification-composition callable; remote-expectation-source callable; repository-comparator callable; replay-guard callable; repository request `source_path` exact `str`; repository request `repository_path` exact `str`; replay request `path` exact `str`; replay request `expected_schema_identifier` exact `str`; replay request `expected_deployment_identifier` exact `str`. The first violation raises empty `TypeError()`. `isinstance`, subclass acceptance, and callable-signature introspection are prohibited. No dependency is invoked before all seventeen checks pass.
+
+The six private non-runtime-checkable Protocols are exactly:
+
+~~~python
+class _Phase12AuthorizationValidationCallableV1(Protocol):
+    def __call__(self, *, authorization_request: _Phase12AuthorizationRequestV1,
+                 trust_expectations: _Phase12AuthorizationTrustExpectationsV1,
+                 validation_context: _Phase12ValidationContextV1) -> object: ...
+
+class _Phase12AcceptedMarkerCompositionCallableV1(Protocol):
+    def __call__(self, *, accepted_marker_request: _Phase12AcceptedMarkerRequestV1) -> object: ...
+
+class _Phase12RepositoryVerificationCompositionCallableV1(Protocol):
+    def __call__(self, *, source_path: str, repository_path: str,
+                 repository_identity: str, accepted_locked_commit: str,
+                 remote_expectation_source: _Phase12RemoteExpectationSourceCallableV1,
+                 repository_comparator: _Phase12RepositoryComparatorCallableV1) -> object: ...
+
+class _Phase12RemoteExpectationSourceCallableV1(Protocol):
+    def __call__(self, *, source_path: str) -> object: ...
+
+class _Phase12RepositoryComparatorCallableV1(Protocol):
+    def __call__(self, *, repository_path: str, repository_identity: str,
+                 accepted_locked_commit: str, expected_origin_fetch_url: str,
+                 expected_origin_push_url: str) -> object: ...
+
+class _Phase12ReplayGuardCallableV1(Protocol):
+    def __call__(self, *, path: str, replay_identity: str,
+                 expected_schema_identifier: str,
+                 expected_deployment_identifier: str) -> object: ...
+~~~
+
+Runtime validation uses `callable()` only. There are no positional calls, retry, loop, fallback, cache, or adapter.
+
+### Authorization, marker, repository, and replay composition
+
+Authorization validation is invoked exactly once:
+
+~~~python
+authorization_validation(
+    authorization_request=authorization_request,
+    trust_expectations=trust_expectations,
+    validation_context=validation_context,
+)
+~~~
+
+Its required attributes are `is_validated`, `failure_codes`, `repository_identity`, `deployment_identifier`, and `replay_identity`. Success is exact bool true, exact empty failure tuple, and exact-string repository, deployment, and replay identities; returned deployment identity must exactly equal `replay_request.expected_deployment_identifier`. A valid unsuccessful result is exact bool false, a nonempty exact tuple of exact-string failures, and all three facts `None`. Every other, missing, wrong, or contradictory shape, including deployment mismatch, is malformed. Valid unsuccessful maps to `AUTHORIZATION_VALIDATION_FAILED`; malformed maps to `AUTHORIZATION_VALIDATION_RESULT_INVALID`. Raw dependency codes remain private, and no marker or later dependency runs after authorization failure, malformed result, or exception.
+
+After authorization success, accepted-marker composition is invoked exactly once:
+
+~~~python
+accepted_marker_composition(
+    accepted_marker_request=accepted_marker_request,
+)
+~~~
+
+Its required attributes are `is_validated`, `failure_codes`, and `accepted_locked_commit`. Success is exact bool true, exact empty failure tuple, and exact-string accepted commit. A valid unsuccessful result is exact bool false, a nonempty exact tuple of exact-string failures, and `accepted_locked_commit is None`. All other shapes are malformed. Valid unsuccessful maps to `ACCEPTED_MARKER_VALIDATION_FAILED`; malformed maps to `ACCEPTED_MARKER_VALIDATION_RESULT_INVALID`. Raw marker codes remain private. No repository or replay call follows marker failure, malformed result, or exception.
+
+After marker success, invoke remotely locked repository-verification composition exactly once with its exact six arguments:
+
+~~~python
+repository_verification_composition(
+    source_path=repository_verification_request.source_path,
+    repository_path=repository_verification_request.repository_path,
+    repository_identity=authorization_result.repository_identity,
+    accepted_locked_commit=marker_result.accepted_locked_commit,
+    remote_expectation_source=remote_expectation_source,
+    repository_comparator=repository_comparator,
+)
+~~~
+
+There are no positional or extra keywords and no rewriting or normalization. Remote source and comparator seams are forwarded unchanged, stored in no bundle, and never invoked directly here. URLs, comparator facts, Git output, and repository metadata are never inspected. No adapter is introduced.
+
+Repository result requires only `is_verified` and `failure_codes`. Success is exact bool true and exact empty tuple. A valid unsuccessful result is exact bool false and a nonempty exact tuple of exact-string failures. Every other shape is malformed. Valid unsuccessful maps to `REPOSITORY_VERIFICATION_FAILED`; malformed maps to `REPOSITORY_VERIFICATION_RESULT_INVALID`. No replay call follows repository failure, malformed result, or exception.
+
+After repository success, invoke replay guard exactly once:
+
+~~~python
+replay_guard(
+    path=replay_request.path,
+    replay_identity=authorization_result.replay_identity,
+    expected_schema_identifier=replay_request.expected_schema_identifier,
+    expected_deployment_identifier=replay_request.expected_deployment_identifier,
+)
+~~~
+
+Replay required attributes are `is_recorded`, `was_already_consumed`, `failure_codes`, `replay_identity`, `schema_identifier`, and `deployment_identifier`. Success is exact bool `True`/`False`, exact empty tuple, and all three bounded facts exactly equal supplied inputs. Valid already-consumed is exact bool `False`/`True`, exactly `("REPLAY_IDENTITY_ALREADY_CONSUMED",)`, and all three bounded facts equal supplied inputs; it maps to `REPLAY_ALREADY_CONSUMED`. Other valid unsuccessful result is exact bool `False`/`False`, a one-entry exact-string failure tuple whose code differs from `REPLAY_IDENTITY_ALREADY_CONSUMED`, and all three bounded facts `None`; it maps to `REPLAY_CHECK_AND_RECORD_FAILED`. Every other missing, wrong, contradictory, or mismatched shape maps to `REPLAY_RESULT_INVALID`. Complete structure validation precedes already-consumed and other-failure classification. Raw replay codes and all replay/store details remain private.
+
+For all four dependency results, `inspect.getattr_static` checks required-attribute presence only. Missing attributes map to the stage invalid-result code; normal property access follows preflight. Unknown ordinary property or invocation exceptions and every `BaseException` propagate unchanged. Broad `Exception` catches, exception text copying, and cleanup that masks propagation are prohibited.
+
+### Result, precedence, replay safety, and effect boundary
+
+The exact short-circuit order is: all seventeen caller checks; authorization invocation exception; authorization complete-shape validation; authorization unsuccessful translation; marker invocation exception; marker complete-shape validation; marker unsuccessful translation; repository invocation exception; repository complete-shape validation; repository unsuccessful translation; replay invocation exception; replay complete-shape validation; replay already-consumed translation; replay other-failure translation; success construction. Malformed or contradictory results take invalid-result precedence. First failure only; no aggregation; no later dependency call after an earlier failure, malformed result, or exception.
+
+`_Phase12AuthorizationRepositoryValidationCompositionResultV1` is `@dataclass(frozen=True, slots=True, kw_only=True)` with exact field order `is_validated: bool`, then `failure_codes: tuple[str, ...]`. Success is `is_validated=True` and `failure_codes=()`. Failure is `is_validated=False` and exactly one permitted code. The exact nine-code set is `AUTHORIZATION_VALIDATION_FAILED`, `AUTHORIZATION_VALIDATION_RESULT_INVALID`, `ACCEPTED_MARKER_VALIDATION_FAILED`, `ACCEPTED_MARKER_VALIDATION_RESULT_INVALID`, `REPOSITORY_VERIFICATION_FAILED`, `REPOSITORY_VERIFICATION_RESULT_INVALID`, `REPLAY_CHECK_AND_RECORD_FAILED`, `REPLAY_RESULT_INVALID`, and `REPLAY_ALREADY_CONSUMED`. Fixed repr reveals only `is_validated` and `failure_count`; it reveals neither code values nor bundle, authorization, path, identity, commit, key, signature, URL, repository, comparator, replay, dependency-result, or exception facts.
+
+Replay is the only mutation and repository verification is final non-mutating check. Exactly one replay call occurs only on sole valid pre-replay path. No dependency call, cleanup callback, logging, retry, rollback, or compensating action occurs after replay. Result construction is trivial and deterministic. If it unexpectedly raises after replay commit, exception propagates, replay remains consumed, and caller must not automatically retry.
+
+Permitted imports are only future annotations, dataclasses, `inspect.getattr_static`, and `typing.Protocol`. Allowed effects are caller checks, bundle-field reads, static presence checks, normal result-property reads, one authorization call, one conditional marker call, one conditional repository call, unchanged seam forwarding, one conditional replay mutation, and immutable result construction. Direct filesystem, Git, subprocess, environment/current-directory, credential, network/DNS/SSH/HTTP, logging, mutable cache, policy, coordinator, activation, service, Telegram, provider, retry, fallback, adapter, and file mutation outside injected replay guard are prohibited.
+
+### Trust, policy, RED contract, scope, and authorization
+
+Success proves only exact valid authorization, marker, repository, and replay successes together with exact verified-fact and seam forwarding. It does not prove operational-path provenance, URL ownership/freshness, infrastructure health, repository code safety, broader owner intent, policy approval, activation, production authorization, or readiness. Future policy may receive only overall Boolean validation success or this bounded result; policy versioning, implementation, runtime wiring, and activation remain separately unauthorized.
+
+RED contract is exactly 113 unique top-level static tests across twenty categories with allocation `7/12/13/7/3/7/3/2/6/3/5/5/3/4/9/5/7/4/5/3`: 7 public surface/immutable result; 12 six bundles/bounded repr; 13 twelve-parameter API/caller validation; 7 six protocols/no signature introspection; 3 authorization invocation/bundle flow; 7 authorization malformed/unsuccessful handling; 3 authorization short-circuit; 2 marker invocation/bundle flow; 6 marker malformed/unsuccessful handling; 3 marker short-circuit; 5 repository six-argument invocation/fact-and-seam forwarding; 5 repository malformed/unsuccessful handling; 3 repository short-circuit; 4 replay inputs/count/position; 9 replay success/already-consumed/malformed/other failure; 5 first-failure precedence; 7 least-disclosing result/exception propagation; 4 replay-only mutation/post-commit safety; 5 prohibited direct access/no policy-coordinator-activation action; and 3 trust/policy non-overclaim.
+
+Tests use unique top-level functions, deterministic local fakes, descriptors, and call recorders only. Parametrization, dynamic generation, skip, xfail, `sys.modules` mutation, import hooks, implementation substitutes, operational paths, real policy files, Git repositories, subprocesses, network, and real replay stores are prohibited.
+
+Future cumulative scope is exactly this document, `tests/test_phase_12_authorization_repository_validation_composition_v1.py`, and `engine/phase_12_authorization_repository_validation_composition_v1.py`. Exact subjects are `docs: freeze phase 12 authorization repository validation composition design`, `test: define phase 12 authorization repository validation composition`, and `feat: add phase 12 authorization repository validation composition`. Fixture-repair commits are forbidden absent a specific committed contradiction.
+
+Cumulative owner-policy correction count is three; committed contradiction, unresolved owner-decision, and unresolved technical-decision counts are zero. This documentation commit authorizes no test, implementation, adapter creation, operational path population, policy-file creation, URL population, dependency invocation, replay consumption, policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
