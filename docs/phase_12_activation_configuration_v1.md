@@ -2350,3 +2350,78 @@ Tests use unique top-level functions, deterministic local fakes, descriptors, an
 Future cumulative scope is exactly this document, `tests/test_phase_12_authorization_repository_validation_composition_v1.py`, and `engine/phase_12_authorization_repository_validation_composition_v1.py`. Exact subjects are `docs: freeze phase 12 authorization repository validation composition design`, `test: define phase 12 authorization repository validation composition`, and `feat: add phase 12 authorization repository validation composition`. Fixture-repair commits are forbidden absent a specific committed contradiction.
 
 Cumulative owner-policy correction count is three; committed contradiction, unresolved owner-decision, and unresolved technical-decision counts are zero. This documentation commit authorizes no test, implementation, adapter creation, operational path population, policy-file creation, URL population, dependency invocation, replay consumption, policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
+
+## Phase 12 canonical replay identity derivation v1 — frozen detailed design
+
+### Capability, module, and public surface
+
+Canonical replay identity derivation v1 is a separate pure capability. It validates six exact verified strings, serializes a fixed domain label and the six facts, computes one deterministic SHA-256 digest, and returns one lowercase 64-hex replay identity. It does not authenticate inputs; verify signatures, deployment, environment, repository, or marker facts; inspect or mutate replay state; decide policy or activation; or access filesystem, Git, subprocesses, environment/current directory, network, credentials, services, Telegram, or providers.
+
+Module: `engine.phase_12_canonical_replay_identity_derivation_v1`. Future implementation: `engine/phase_12_canonical_replay_identity_derivation_v1.py`. Future tests: `tests/test_phase_12_canonical_replay_identity_derivation_v1.py`. This document is the design record. The exact sole public surface is:
+
+~~~python
+__all__ = (
+    "derive_phase_12_canonical_replay_identity_v1",
+)
+
+def derive_phase_12_canonical_replay_identity_v1(
+    *,
+    replay_control_value: str,
+    deployment_identifier: str,
+    owner_authorization_id: str,
+    checkpoint_id: str,
+    approved_locked_commit: str,
+    environment_identifier: str,
+) -> str:
+~~~
+
+There is no other public class, function, constant, helper, alias, result type, default, variadic argument, positional call, mapping, or object bundle. The six keyword-only parameters, annotations, and order are immutable.
+
+### Caller contract, domain, and serialization
+
+The exact twelve caller checks are: exact `str` then nonempty `replay_control_value`; exact `str` then nonempty `deployment_identifier`; exact `str` then nonempty `owner_authorization_id`; exact `str` then nonempty `checkpoint_id`; exact `str` then nonempty `approved_locked_commit`; and exact `str` then nonempty `environment_identifier`. The first violation raises empty `TypeError()`. `isinstance`, subclass acceptance, aggregate validation, normalization, and encoding before all twelve checks are prohibited.
+
+The private fixed, non-exported, V1-immutable constant is:
+
+~~~python
+_PHASE_12_CANONICAL_REPLAY_IDENTITY_DOMAIN_V1 = (
+    "AI_CRYPTO_SIGNAL_AGENT_PHASE_12_OWNER_APPROVAL_REPLAY_IDENTITY_V1"
+)
+~~~
+
+The exact seven-field sequence is domain label, replay control value, deployment identifier, owner authorization identifier, checkpoint identifier, approved locked commit, and environment identifier. For every field, encode once as UTF-8 and append exactly `len(encoded).to_bytes(8, "big", signed=False) + encoded`. Serialized bytes are the direct concatenation of all seven prefixed fields: no delimiter, trailing bytes, JSON, repr, pickle, struct, map, platform encoding, reusable public serializer, trimming, Unicode normalization, case folding, integer conversion, or path normalization. A local ephemeral list of bytes is permitted only as transient construction state, never as a global or persistent mutable cache.
+
+The exact imports are:
+
+~~~python
+from __future__ import annotations
+from hashlib import sha256
+~~~
+
+No other import is permitted. The exact one-construction, one-hexdigest invocation is `sha256(serialized).hexdigest()`, returned directly. No redundant output validation, truncation, uppercasing, prefix, suffix, separator, base64, salt, nonce, HMAC, secret key, or random value exists. Standard-library SHA-256 hexdigest therefore returns exact `str`, 64 characters, lowercase `0-9a-f` only.
+
+### Exceptions, effects, disclosure, and trust
+
+Wrong type and empty field each raise empty `TypeError()`. UTF-8 encoding exceptions, unsigned eight-byte length-conversion `OverflowError`, SHA-256 construction or hexdigest ordinary exceptions, and every `BaseException` propagate unchanged. There is no `try`/`except`, `finally`, conversion, aggregation, cleanup callback, or exception text disclosure.
+
+Allowed effects are the caller checks, local tuple/list/bytes construction, UTF-8 encoding, unsigned length conversion, concatenation, one SHA-256 computation, and direct string return. Direct filesystem, Git, subprocess, environment/current-directory, credential, network/DNS/SSH/HTTP, logging, cache, persistent state, replay store/mutation, marker/repository, policy, coordinator, runtime, activation, service, Telegram, provider, dependency injection, callback, retry, fallback, or alternate algorithm behavior is prohibited.
+
+The sole output is replay identity: no result class or repr object, logging, input reflection, serialized bytes, digest bytes, domain metadata, or runtime input value in errors/comments/logs. The fixed domain label may appear in source comments and documentation. Identical exact strings give identical identity; changed bytes or code points change serialized input; eight-byte prefixes prevent field-boundary ambiguity; byte-distinct Unicode, whitespace, and case remain distinct; empty fields are rejected; and field order is immutable. SHA-256 is described as collision-resistant, never collision-impossible.
+
+The derivation authenticates nothing and assumes its strings were already verified. It verifies no signature, deployment/environment consistency, repository identity, marker state, replay state, policy, or activation. Success proves only deterministic V1 application to six supplied exact strings.
+
+### Future integration, versioning, and RED contract
+
+Future bounded authorization validation injects this capability as dependency six after parser, semantic verifier, public-key loader, revocation source, signature verifier, complete signature-result validation, all cross-stage equality checks, and deployment consistency. It passes only successful signature facts: replay control value, deployment identifier, owner authorization identifier, checkpoint identifier, approved locked commit, and environment identifier. It calls derivation exactly once; never after an earlier failure, malformed result, or exception; never retries, falls back, or selects another algorithm. The higher-level composition validates exact `str`, length 64, and `0-9a-f`, then forwards the value unchanged into its locked five-attribute result. This module neither imports nor knows that downstream result class.
+
+V1 field set/order, domain label, UTF-8 encoding, eight-byte unsigned big-endian prefix, and SHA-256 algorithm are immutable. Any change requires a new versioned capability. Silent migration, dual algorithms, fallback, replay-store migration in this slice, and duplicate implementation elsewhere are prohibited. Bounded authorization validation remains blocked until this derivation slice is pushed and remotely locked.
+
+The RED contract is exactly 85 unique explicit top-level static tests with allocation `7/24/2/2/3/3/4/2/3/6/2/3/2/3/3/3/5/2/4/2`: public surface/signature 7; caller validation/precedence 24; domain constant 2; field order 2; UTF-8 3; eight-byte prefixes 3; known vectors/determinism 4; lowercase grammar 2; boundary ambiguity 3; per-field sensitivity 6; Unicode distinction 2; whitespace/case significance 3; no normalization 2; no nondeterminism/HMAC/secret 3; imports 3; hash invocation 3; exception/no-broad-catch 5; least disclosure 2; prohibited access 4; versioning/trust non-overclaim 2.
+
+Tests require the sole export/signature, six wrong-type and six empty-field checks, twelve precedence checks, no-positional and subclass rejection, exact private constant and seven-field serialization, independent expected vectors including one hard-coded offline vector, determinism, grammar, ambiguity, every-field sensitivity, Unicode/whitespace/case behavior, import/hash/source inspections, static overflow contract without unsafe allocation, exception identity propagation, and non-overclaim. Minimal monkeypatching of module-level `sha256` is permitted only for exact invocation count and exception-instance propagation. Parametrization, generation, loop-created tests, skip, xfail, `sys.modules` mutation, import hooks, implementation substitutes, operational paths, real policy files, credentials/secrets, real replay store, subprocess, network, massive allocation, timing, probabilistic testing, and monkeypatching real filesystem/environment/network/replay/policy/coordinator/runtime are prohibited.
+
+Before implementation, isolated collection fails only with `ModuleNotFoundError` for `engine.phase_12_canonical_replay_identity_derivation_v1`: pytest 2, tee 0, zero collected/executed, and no secondary, syntax, fixture, warning, skip, or xfail outcome. After implementation, exactly 85 tests pass with no skip, xfail, xpass, or warning, and compilation passes.
+
+Future scope is exactly this document, `tests/test_phase_12_canonical_replay_identity_derivation_v1.py`, and `engine/phase_12_canonical_replay_identity_derivation_v1.py`. Exact subjects are `docs: freeze phase 12 canonical replay identity derivation design`, `test: define phase 12 canonical replay identity derivation`, and `feat: add phase 12 canonical replay identity derivation`. No fixture repair occurs absent a proven committed contradiction.
+
+Owner-policy and detailed-design correction counts are zero; committed contradictions, unresolved owner decisions, and unresolved technical decisions are zero. This documentation commit authorizes no test, implementation, hashing execution, dependency invocation, replay consumption, path/URL/policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
