@@ -2524,3 +2524,119 @@ Before implementation, isolated collection fails solely for absent `engine.phase
 Scope is exactly this document, `tests/test_phase_12_bounded_authorization_validation_composition_v1.py`, and `engine/phase_12_bounded_authorization_validation_composition_v1.py`. Commit subjects are `docs: freeze phase 12 bounded authorization validation composition design`, `test: define phase 12 bounded authorization validation composition`, and `feat: add phase 12 bounded authorization validation composition`; no fixture repair occurs absent a proven committed contradiction. This component is later injected as `authorization_validation` into `engine.phase_12_authorization_repository_validation_composition_v1`; that locked component is unchanged here, no adapter is created, and integration is separately assessed only after this slice is remotely locked.
 
 Owner-policy correction count is zero; detailed-design correction count is one; committed contradictions, unresolved owner decisions, and unresolved technical decisions are zero. This documentation commit authorizes no test, implementation, hashing, dependency invocation, replay consumption, path/URL/policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
+
+## Phase 12 authorization validation callable adapter v1 — frozen detailed design
+
+### Capability, integration purpose, and public surface
+
+Capability: authorization validation callable adapter v1. Module: `engine.phase_12_bounded_authorization_validation_callable_adapter_v1`. Implementation: `engine/phase_12_bounded_authorization_validation_callable_adapter_v1.py`. Tests: `tests/test_phase_12_bounded_authorization_validation_callable_adapter_v1.py`. Documentation: this file.
+
+The adapter only binds the six primitive callable seams required by `run_phase_12_bounded_authorization_validation_composition_v1` and exposes the locked downstream callable shape:
+
+```python
+authorization_validation(
+    authorization_request=authorization_request,
+    trust_expectations=trust_expectations,
+    validation_context=validation_context,
+)
+```
+
+Direct upstream injection is incompatible because its six keyword-only seams would be missing. Structural input and five-field result compatibility are complete. No conversion, reshaping, exception translation, upstream mutation, or downstream mutation is required.
+
+```python
+__all__ = (
+    "build_phase_12_bounded_authorization_validation_callable_adapter_v1",
+)
+
+def build_phase_12_bounded_authorization_validation_callable_adapter_v1(
+    *,
+    authorization_record_parser: _Phase12AuthorizationRecordParserCallableV1,
+    semantic_authorization_verifier: _Phase12SemanticAuthorizationVerifierCallableV1,
+    public_key_loader: _Phase12PublicKeyLoaderCallableV1,
+    revocation_state_source: _Phase12RevocationStateSourceCallableV1,
+    owner_approval_signature_verifier: _Phase12OwnerApprovalSignatureVerifierCallableV1,
+    canonical_replay_identity_derivation: _Phase12CanonicalReplayIdentityDerivationCallableV1,
+) -> _Phase12BoundedAuthorizationValidationCallableAdapterV1:
+```
+
+This is the sole public surface: exact order, keyword-only boundary, private Protocol annotations, private callable-adapter result annotation, and no defaults, variadics, public class, Protocol, result type, alias, constant, helper, or bundle.
+
+### Imports, private protocols, and immutable callable binding
+
+Permitted imports are exactly `from __future__ import annotations`, `from dataclasses import dataclass`, `from typing import Protocol`, and:
+
+```python
+from engine.phase_12_bounded_authorization_validation_composition_v1 import (
+    run_phase_12_bounded_authorization_validation_composition_v1,
+)
+```
+
+No other import is permitted unless solely annotation-required and proven necessary. Downstream private Protocol/class imports, upstream private Protocol/result imports, reflection, `functools.partial`, filesystem, Git, subprocess, environment/cwd, network, logging, replay, repository, marker, policy, coordinator, runtime, activation, service, Telegram, provider, cache, serialization, retry, fallback, and direct primitive imports are prohibited.
+
+Exactly six private typing-only Protocols are defined: `_Phase12AuthorizationRecordParserCallableV1`, `_Phase12SemanticAuthorizationVerifierCallableV1`, `_Phase12PublicKeyLoaderCallableV1`, `_Phase12RevocationStateSourceCallableV1`, `_Phase12OwnerApprovalSignatureVerifierCallableV1`, and `_Phase12CanonicalReplayIdentityDerivationCallableV1`. Their keyword-only signatures mirror the locked parser, semantic verifier, public-key loader, revocation source, signature verifier, and replay-derivation contracts. They are not exported, runtime-checkable, or used in runtime checks.
+
+Exactly one private callable representation exists:
+
+```python
+@dataclass(frozen=True, slots=True, kw_only=True, repr=False)
+class _Phase12BoundedAuthorizationValidationCallableAdapterV1:
+    authorization_record_parser: _Phase12AuthorizationRecordParserCallableV1
+    semantic_authorization_verifier: _Phase12SemanticAuthorizationVerifierCallableV1
+    public_key_loader: _Phase12PublicKeyLoaderCallableV1
+    revocation_state_source: _Phase12RevocationStateSourceCallableV1
+    owner_approval_signature_verifier: _Phase12OwnerApprovalSignatureVerifierCallableV1
+    canonical_replay_identity_derivation: _Phase12CanonicalReplayIdentityDerivationCallableV1
+```
+
+These are the exact ordered fields, with no additional field, default, post-init mutation, public alias, custom repr/equality/hash, serialization, mutable state, closure, partial, registry, ambient discovery, copying, wrapper-per-seam, or tuple/dictionary bundle.
+
+### Builder, forwarding, result, and exception contract
+
+The builder validates exactly once with `callable(value)`, in this order: authorization record parser; semantic authorization verifier; public key loader; revocation state source; owner approval signature verifier; canonical replay identity derivation. The first invalid seam raises empty `TypeError()`. There is no invocation-time seam revalidation, `isinstance`, `inspect.signature`, runtime Protocol check, trial invocation, normalization, wrapping, default, or fallback resolution. After all checks it constructs exactly one private adapter using the six supplied callables unchanged.
+
+Its exact callable method is:
+
+```python
+def __call__(
+    self,
+    *,
+    authorization_request: object,
+    trust_expectations: object,
+    validation_context: object,
+) -> object:
+    return run_phase_12_bounded_authorization_validation_composition_v1(
+        authorization_request=authorization_request,
+        trust_expectations=trust_expectations,
+        validation_context=validation_context,
+        authorization_record_parser=self.authorization_record_parser,
+        semantic_authorization_verifier=self.semantic_authorization_verifier,
+        public_key_loader=self.public_key_loader,
+        revocation_state_source=self.revocation_state_source,
+        owner_approval_signature_verifier=self.owner_approval_signature_verifier,
+        canonical_replay_identity_derivation=self.canonical_replay_identity_derivation,
+    )
+```
+
+All three invocation inputs and six bound seams are forwarded unchanged under these exact nine keyword names; there is exactly one upstream invocation. The adapter owns no structural input validation, result validation/access, class check, reconstruction, reshaping, code translation, normalization, logging, or side effect. It returns the exact upstream result object unchanged, with no wrapping, copying, tuple conversion, dataclass reconstruction, or disclosure augmentation.
+
+Invalid builder seams raise empty `TypeError()`. Upstream `TypeError`, ordinary exceptions, and every `BaseException` propagate unchanged; structured unsuccessful and malformed-dependency failure results return unchanged. There is no catch clause, broad catch, exception inspection/text access, translation, retry, rollback, fallback, or compensating action.
+
+### Locked boundaries and trust
+
+`engine.phase_12_bounded_authorization_validation_composition_v1` remains immutable: no optional/default seams, public dependency bundle, overload, reduced entry point, global registry, ambient lookup, or adapter awareness. `engine.phase_12_authorization_repository_validation_composition_v1` remains immutable and retains its exact three-argument invocation above: no new parameters, private Protocol/result-validator/failure-code/test change, or adapter-specific branch. No shared contract or reverse-private import exists.
+
+The adapter may only check six callables during construction, bind them immutably, forward three inputs and six seams, make one upstream call, and return its result unchanged. Direct filesystem, Git, subprocess, environment/cwd, credentials, parser/semantic/key/revocation/signature/replay behavior, replay store, repository, marker, policy, coordinator, runtime, activation, service, Telegram, provider, logging, cache, mutable globals, serialization, retry, fallback, hidden defaults, and operational mutation are prohibited.
+
+Construction proves only that six supplied values were callable. Invocation proves only unchanged forwarding, one upstream call, and unchanged result return. It does not independently prove authorization/semantic/key/revocation/signature validity, repository identity, marker validity, replay acceptance/non-consumption, production policy approval, activation, runtime readiness, infrastructure/provider health, Telegram delivery, service availability, or operational-path provenance.
+
+A separately assessed future orchestration/runtime owner may construct the adapter; it discovers no dependency, does not invoke or wire downstream, and runtime-owner assessment remains blocked until this adapter is remotely locked. Production activation remains unauthorized.
+
+### RED contract, scope, accounting, and authorization boundary
+
+The RED contract is exactly 67 unique explicit top-level static `test_` functions, with allocation `4/4/6/4/4/4/4/4/3/3/3/3/3/2/2/3/2/3/3/3`: sole surface 4; builder signature 4; seam-validation order 6; empty TypeError 4; callable representation 4; returned signature 4; three-input forwarding 4; six-seam forwarding 4; one invocation 3; unchanged result 3; ordinary exception 3; BaseException 3; no catch/translation 3; upstream immutability 2; downstream immutability 2; no conversion 3; no reshaping 2; prohibited access 3; mutable globals/hidden defaults 3; trust 3. Tests are explicit, unique, non-parametrized, non-generated, deterministic, with no skips, xfails, import hooks, `sys.modules` mutation, substitute implementation, conditional import, real dependency, operational path/URL/credential/production value, timing, or probabilistic assertion.
+
+Before implementation, the isolated test file fails solely with `ModuleNotFoundError` for `engine.phase_12_bounded_authorization_validation_callable_adapter_v1`: pytest 2, tee 0, zero collected/executed, no secondary/syntax/fixture error, and zero warnings. After implementation, exactly 67 pass with zero failed/skipped/xfail/xpass/warnings and compilation passes.
+
+Scope is exactly this document, `tests/test_phase_12_bounded_authorization_validation_callable_adapter_v1.py`, and `engine/phase_12_bounded_authorization_validation_callable_adapter_v1.py`. Commit subjects are `docs: freeze phase 12 bounded authorization validation callable adapter design`, `test: define phase 12 bounded authorization validation callable adapter`, and `feat: add phase 12 bounded authorization validation callable adapter`; upstream and downstream remain unchanged.
+
+Direct callable compatibility is no; structural input/result compatibility is yes; downstream/upstream mutation, shared contract, conversion, and result reshaping are no; adapter and new component requirements are yes. Owner-policy and detailed-design correction counts are zero; committed contradictions, unresolved owner decisions, and unresolved technical decisions are zero. This documentation commit authorizes no test, implementation, adapter creation, dependency invocation, replay consumption, fetch, push, path/URL/policy population, wiring, activation, or production action. All production gates remain closed.
