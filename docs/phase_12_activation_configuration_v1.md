@@ -2425,3 +2425,102 @@ Before implementation, isolated collection fails only with `ModuleNotFoundError`
 Future scope is exactly this document, `tests/test_phase_12_canonical_replay_identity_derivation_v1.py`, and `engine/phase_12_canonical_replay_identity_derivation_v1.py`. Exact subjects are `docs: freeze phase 12 canonical replay identity derivation design`, `test: define phase 12 canonical replay identity derivation`, and `feat: add phase 12 canonical replay identity derivation`. No fixture repair occurs absent a proven committed contradiction.
 
 Owner-policy and detailed-design correction counts are zero; committed contradictions, unresolved owner decisions, and unresolved technical decisions are zero. This documentation commit authorizes no test, implementation, hashing execution, dependency invocation, replay consumption, path/URL/policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
+
+## Phase 12 bounded authorization validation composition v1 — corrected frozen detailed design
+
+### Capability, public surface, and object-shaped contract
+
+Bounded authorization validation composition v1 is the orchestration-only capability `engine.phase_12_bounded_authorization_validation_composition_v1`, implemented at `engine/phase_12_bounded_authorization_validation_composition_v1.py`, tested at `tests/test_phase_12_bounded_authorization_validation_composition_v1.py`, and documented here. Its sole public surface is:
+
+~~~python
+__all__ = (
+    "run_phase_12_bounded_authorization_validation_composition_v1",
+)
+
+def run_phase_12_bounded_authorization_validation_composition_v1(
+    *,
+    authorization_request: object,
+    trust_expectations: object,
+    validation_context: object,
+    authorization_record_parser: _Phase12AuthorizationRecordParserCallableV1,
+    semantic_authorization_verifier: _Phase12SemanticAuthorizationVerifierCallableV1,
+    public_key_loader: _Phase12PublicKeyLoaderCallableV1,
+    revocation_state_source: _Phase12RevocationStateSourceCallableV1,
+    owner_approval_signature_verifier: _Phase12OwnerApprovalSignatureVerifierCallableV1,
+    canonical_replay_identity_derivation: _Phase12CanonicalReplayIdentityDerivationCallableV1,
+) -> _Phase12BoundedAuthorizationValidationCompositionResultV1:
+~~~
+
+The exact parameter names, order, annotations, keyword-only boundary, no defaults, no variadics, and no positional calling are immutable. There is no additional public class, function, constant, Protocol, bundle, alias, helper, or result type.
+
+The exact caller-owned object-shaped inputs are `authorization_request`, `trust_expectations`, and `validation_context`. Attribute presence uses `from inspect import getattr_static`; normal reads occur only after presence succeeds for exact value checks. No property is executed during presence checks. Downstream private request classes, a shared contract module, adapters, conversion classes, and public bundle classes are prohibited.
+
+`authorization_request` checks, in exact order, are `document`, `canonical_payload_bytes`, `signature_bytes`, `activation_mode`, `owner_authorization_id`, `approval_checkpoint_id`, `approved_locked_commit`, `approved_at`, `expires_at`, and `accepted_locked_commit_expectation`. `canonical_payload_bytes` and `signature_bytes` are exact `bytes`; each other field is exact nonempty `str`. `trust_expectations` checks, each exact nonempty `str`, are `public_key_path`, `expected_public_key_fingerprint`, `expected_signing_key_identifier`, `revocation_state_path`, `expected_revocation_artifact_fingerprint`, `expected_revocation_schema_identifier`, `expected_revocation_checkpoint_identifier`, `expected_environment_identifier`, and `expected_deployment_identifier`. `validation_context` checks `configuration` then `now_utc`: configuration is present and non-`None`; `now_utc` is present and forwarded unchanged. There is no `isinstance`, normalization, ambient discovery, time lookup, or environment lookup.
+
+The six callable seams, in exact order, are `authorization_record_parser`, `semantic_authorization_verifier`, `public_key_loader`, `revocation_state_source`, `owner_approval_signature_verifier`, and `canonical_replay_identity_derivation`. Runtime validation is `callable(value)` only. Private, typing-only, non-exported Protocols are `_Phase12AuthorizationRecordParserCallableV1`, `_Phase12SemanticAuthorizationVerifierCallableV1`, `_Phase12PublicKeyLoaderCallableV1`, `_Phase12RevocationStateSourceCallableV1`, `_Phase12OwnerApprovalSignatureVerifierCallableV1`, and `_Phase12CanonicalReplayIdentityDerivationCallableV1`, each mirroring its committed keyword-only API. There is no signature inspection, runtime Protocol check, direct primitive callable import, retry, fallback, default, variadic, or alternate implementation.
+
+The only private result is `_Phase12BoundedAuthorizationValidationCompositionResultV1`, `@dataclass(frozen=True, slots=True, kw_only=True, repr=False)`, with exactly `is_validated: bool`, `failure_codes: tuple[str, ...]`, `repository_identity: str | None`, `deployment_identifier: str | None`, and `replay_identity: str | None`. Success is exactly `True`, `()`, and three exact strings; failure is exactly `False`, one composition-owned code, and three `None` values. No other fact, result, or disclosure exists.
+
+Caller precedence is authorization-request shape/values, trust-expectations shape/values, validation-context shape/values, then the six callables in listed order. Any caller violation is empty `TypeError()` and no dependency is called until every caller check passes.
+
+### Imports, stages, and corrected timestamps
+
+Permitted imports are exactly `from __future__ import annotations`, `from dataclasses import dataclass`, `from inspect import getattr_static`, `from typing import Protocol`, and `Phase12ActivationAuthorizationRecordDocumentErrorV1` from `engine.phase_12_activation_mode_authorization_record_parser_v1`. Direct primitive callable imports, hashlib, filesystem, Git, subprocess, environment, network, logging, replay, repository, marker, policy, coordinator, runtime, activation, service, Telegram, provider, adapter, retry, and fallback imports are prohibited.
+
+The exact parser call is `authorization_record_parser(document=authorization_request.document)`. Its complete required facts are `mode`, `owner_authorization_id`, `checkpoint_id`, `approved_locked_commit`, `accepted_locked_commit`, `approval_timestamp_utc`, and `expires_at_utc`; the first five are exact nonempty `str`, and the final two are exact UTC `datetime`. Missing/malformed shape is `AUTHORIZATION_RECORD_PARSE_RESULT_INVALID`. Only `Phase12ActivationAuthorizationRecordDocumentErrorV1` is caught and becomes `AUTHORIZATION_RECORD_PARSE_FAILED`; no exception text is exposed, while all other ordinary exceptions and every `BaseException` propagate unchanged.
+
+The corrected timestamp contract is immutable. Caller expectations are `authorization_request.approved_at` and `authorization_request.expires_at`, exact nonempty `str`. Parser facts are `parser_result.approval_timestamp_utc` and `parser_result.expires_at_utc`, exact UTC `datetime`. Signature verified approval facts are `verified_approval.approval_timestamp_utc` and `verified_approval.expiry_utc`, exact UTC `datetime`. Signature-result attributes named `approved_at` or `expires_at` must never be documented, required, or tested.
+
+The exact parser projection is:
+
+~~~python
+canonical_parser_approval_timestamp = (
+    parser_result.approval_timestamp_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+)
+canonical_parser_expiry_timestamp = (
+    parser_result.expires_at_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+)
+~~~
+
+Parser UTC shape is validated before this projection. There is no caller-string parsing, timezone conversion, fractional seconds, alternate format, or normalization. Semantic verifier parameters are exactly `approved_at` and `expires_at`, forwarded as `approved_at=canonical_parser_approval_timestamp` and `expires_at=canonical_parser_expiry_timestamp`; it also receives `validation_context.configuration`, parsed mode/owner/checkpoint/approved commit, `authorization_request.accepted_locked_commit_expectation`, and `validation_context.now_utc`. Semantic result is exact `bool`: non-bool is `SEMANTIC_AUTHORIZATION_RESULT_INVALID`, `False` is `SEMANTIC_AUTHORIZATION_FAILED`, malformed precedes rejection, and neither permits a later call.
+
+The key loader receives the exact locked public-key path, fingerprint, and signing-key identifier. Its complete result is `is_loaded`, `failure_codes`, `raw_public_key_bytes`, and `derived_signing_key_identifier`; malformed is `PUBLIC_KEY_LOADING_RESULT_INVALID`, valid unsuccessful is `PUBLIC_KEY_LOADING_FAILED`. The revocation source receives its four trust facts and the validated derived signing-key identifier. Its complete result is `is_loaded`, `failure_codes`, `schema_identifier`, `checkpoint_identifier`, `revoked_signing_key_identifiers`, and `artifact_fingerprint`; malformed is `REVOCATION_STATE_LOADING_RESULT_INVALID`, valid unsuccessful is `REVOCATION_STATE_LOADING_FAILED`.
+
+The signature verifier receives exact canonical payload/signature bytes, validated raw key bytes, expected signing-key identifier, validated revocation facts, expected environment/deployment/checkpoint, and `now_utc` through its committed keyword-only mapping. Its outer result is `is_valid`, `failure_codes`, and `verified_approval`. Required verified facts are `repository_identity`, `deployment_identifier`, `replay_control_value`, `owner_authorization_id`, `checkpoint_id`, `approved_locked_commit`, `accepted_locked_commit`, `approval_timestamp_utc`, `expiry_utc`, `activation_mode`, `environment_identifier`, and `signing_key_identifier`. It does not expose `approved_at` or `expires_at`. Missing/malformed result, including timestamps, is `OWNER_APPROVAL_SIGNATURE_VERIFICATION_RESULT_INVALID`; valid unsuccessful is `OWNER_APPROVAL_SIGNATURE_VERIFICATION_FAILED`.
+
+### Corrected equality, derivation, failures, and safety
+
+The exact seventeen-item equality order is: (1) caller activation mode = parser mode; (2) caller owner ID = parser owner ID; (3) caller checkpoint = parser checkpoint; (4) caller approved commit = parser approved commit; (5) caller `approved_at` = canonical parser approval timestamp; (6) caller `expires_at` = canonical parser expiry timestamp; (7) caller accepted-commit expectation = parser accepted commit; (8) parser mode = verified signature mode; (9) parser owner ID = verified signature owner ID; (10) parser checkpoint = verified signature checkpoint; (11) parser approved commit = verified signature approved commit; (12) parser accepted commit = verified signature accepted commit; (13) parser approval UTC datetime = verified `approval_timestamp_utc`; (14) parser expiry UTC datetime = verified `expiry_utc`; (15) validated loaded signing-key ID = verified signing-key ID; (16) expected environment = verified environment; (17) expected deployment = verified deployment. There is no direct caller-to-signature timestamp comparison, no unsupported comparison, and no normalization. Mismatches 1–16 are `AUTHORIZATION_FACT_MISMATCH`; item 17 is `DEPLOYMENT_CONSISTENCY_MISMATCH` before replay derivation. Accepted-commit checks prove authorization-fact consistency only, invoke no marker, and do not prove marker validity.
+
+Replay derivation is exactly one conditional call after every prior stage and comparison:
+
+~~~python
+canonical_replay_identity_derivation(
+    replay_control_value=verified_approval.replay_control_value,
+    deployment_identifier=verified_approval.deployment_identifier,
+    owner_authorization_id=verified_approval.owner_authorization_id,
+    checkpoint_id=verified_approval.checkpoint_id,
+    approved_locked_commit=verified_approval.approved_locked_commit,
+    environment_identifier=verified_approval.environment_identifier,
+)
+~~~
+
+No direct hashlib/local duplicate derivation, retry, fallback, or alternate algorithm exists. Result is exact `str`, length 64, characters `0-9a-f`; otherwise return `REPLAY_IDENTITY_RESULT_INVALID` without normalization.
+
+The exact private ordered thirteen-code set is `AUTHORIZATION_RECORD_PARSE_FAILED`, `AUTHORIZATION_RECORD_PARSE_RESULT_INVALID`, `SEMANTIC_AUTHORIZATION_FAILED`, `SEMANTIC_AUTHORIZATION_RESULT_INVALID`, `PUBLIC_KEY_LOADING_FAILED`, `PUBLIC_KEY_LOADING_RESULT_INVALID`, `REVOCATION_STATE_LOADING_FAILED`, `REVOCATION_STATE_LOADING_RESULT_INVALID`, `OWNER_APPROVAL_SIGNATURE_VERIFICATION_FAILED`, `OWNER_APPROVAL_SIGNATURE_VERIFICATION_RESULT_INVALID`, `AUTHORIZATION_FACT_MISMATCH`, `DEPLOYMENT_CONSISTENCY_MISMATCH`, and `REPLAY_IDENTITY_RESULT_INVALID`. Each failure contains exactly one private code and no raw dependency code.
+
+Total precedence is caller validation; parser sanitized exception; parser malformed; semantic malformed; semantic rejection; key malformed; key unsuccessful; revocation malformed; revocation unsuccessful; signature malformed; signature unsuccessful; first mismatch among equality items 1–16; deployment mismatch; replay result invalid; success. It is first-failure-only, malformed-before-unsuccessful, with zero later calls, aggregation, retry, rollback, or compensation. Shape inspection is static presence then normal reads with exact primitive/tuple/bytes/UTC-datetime checks, no truthiness, partial acceptance, repr, or stringification. Unknown ordinary exceptions and every `BaseException` propagate unchanged; there is no broad catch or exception-text disclosure.
+
+Allowed effects are caller/callable checks, six injected calls, shape reads, canonical timestamp projection, equality checks, replay grammar validation, and immutable result construction. Direct filesystem, Git, subprocess, environment/current-directory, credentials, network, logging, cache, persistence, replay mutation, marker/repository validation, policy, coordinator, runtime, activation, service, Telegram, provider, adapter, retry, fallback, direct hashing, and unauthorized mutation are prohibited. The final result exposes only its five fields, never documents, payloads, signatures, key/revocation material, replay control value, dependency results/codes, paths, fingerprints, configuration, timestamps, exception text, or replay serialization.
+
+Success proves only parser success, semantic acceptance, key/revocation expectation success, signature verification, the corrected seventeen-item consistency model, deployment consistency, replay identity derivation, and exact bounded result construction. It does not prove marker/repository validity, replay availability/acceptance/non-consumption, policy approval, activation, production authorization/readiness, path provenance, or infrastructure health.
+
+### RED contract, scope, and authorization boundary
+
+The RED contract is exactly 155 unique explicit top-level static tests with allocation `6/15/8/9/5/6/8/8/8/9/12/12/5/5/4/7/6/5/4/4/5/4`: surface 6; object-shaped contracts 15; seams 8; caller precedence 9; parser 5; parser failure/malformed 6; semantic 8; key 8; revocation 8; signature 9; forwarding 12; equality 12; deployment 5; derivation 5; replay validation 4; total precedence 7; short-circuit 6; result 5; disclosure 4; exception 4; prohibited access 5; trust 4. Fixtures/assertions use caller `approved_at`/`expires_at`, parser `approval_timestamp_utc`/`expires_at_utc`, and verified signature `approval_timestamp_utc`/`expiry_utc` only. Parametrization, generation, skip, xfail, `sys.modules` mutation, import hooks, implementation substitutes, operational values, real dependencies, network, subprocess, timing, and probabilistic assertions are prohibited.
+
+Before implementation, isolated collection fails solely for absent `engine.phase_12_bounded_authorization_validation_composition_v1`: pytest 2, tee 0, zero collected/executed, and no secondary/syntax/fixture/warning/skip/xfail result. After implementation, exactly 155 pass with zero skips, xfails, xpasses, or warnings, and compilation passes.
+
+Scope is exactly this document, `tests/test_phase_12_bounded_authorization_validation_composition_v1.py`, and `engine/phase_12_bounded_authorization_validation_composition_v1.py`. Commit subjects are `docs: freeze phase 12 bounded authorization validation composition design`, `test: define phase 12 bounded authorization validation composition`, and `feat: add phase 12 bounded authorization validation composition`; no fixture repair occurs absent a proven committed contradiction. This component is later injected as `authorization_validation` into `engine.phase_12_authorization_repository_validation_composition_v1`; that locked component is unchanged here, no adapter is created, and integration is separately assessed only after this slice is remotely locked.
+
+Owner-policy correction count is zero; detailed-design correction count is one; committed contradictions, unresolved owner decisions, and unresolved technical decisions are zero. This documentation commit authorizes no test, implementation, hashing, dependency invocation, replay consumption, path/URL/policy population, coordinator modification, runtime wiring, activation, or production action. All production gates remain closed.
