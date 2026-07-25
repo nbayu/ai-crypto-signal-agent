@@ -103,8 +103,12 @@ def test_c16_01_authorization_record_has_exact_separate_public_identity(): asser
 def test_c16_02_authorization_record_fields_do_not_overlap_trust_bundle_as_one_combined_contract(): assert len(fields(Phase12ActivationAuthorizationRecordV1)) == 7 and tuple(item.name for item in fields(Phase12ActivationAuthorizationRecordV1)) != _FIELDS
 def test_c16_03_private_trust_type_does_not_import_or_wrap_authorization_record(): assert "Phase12ActivationAuthorizationRecordV1" not in _source("engine/phase_12_authorization_trust_expectations_v1.py")
 def test_c17_01_documentation_records_single_canonical_public_type_selection(): assert "OWNER_SELECT_PHASE_12_PROMOTE_TRUST_EXPECTATIONS_TO_PUBLIC_EXACT_CONSUMER_TYPE" in _source("docs/phase_12_activation_configuration_v1.md")
-def test_c17_02_documentation_rejects_adapter_alias_and_dual_type(): assert "no adapter" in _source("docs/phase_12_activation_configuration_v1.md") and "no alias" in _source("docs/phase_12_activation_configuration_v1.md")
-def test_c17_03_documentation_states_migration_has_not_yet_occurred(): assert "This remains future work only" in _source("docs/phase_12_activation_configuration_v1.md")
+def test_c17_02_documentation_rejects_adapter_alias_and_dual_type():
+    source = _source("docs/phase_12_activation_configuration_v1.md")
+    assert all(text in source for text in ("Its sole export is `Phase12AuthorizationTrustExpectationsV1`; no other module re-exports that type.", "retired `_Phase12AuthorizationTrustExpectationsV1` and `build_phase_12_authorization_trust_expectations_v1`", "There is no compatibility alias, adapter, bridge, fallback, private/public dual acceptance, or duplicate canonical nine-field type.", "does not export the canonical type."))
+def test_c17_03_documentation_states_migration_has_not_yet_occurred():
+    source = _source("docs/phase_12_activation_configuration_v1.md")
+    assert all(text in source for text in ("OWNER_DECISION_STILL_REQUIRED_AFTER_DESIGN", "implementation was unauthorized before the later atomic migration", "characterization-before-RED sequence", "The historical RED imported the then-absent", "Atomic implementation commit `dede9669118e2041016c168ba2a70b052772fecf`", "Focused Phase 12 regression and canonical full regression have not yet run.", "locally committed and not remotely locked", "Coordinator authority remains CLOSED, canonical configuration remains CLOSED"))
 def test_c18_01_clock_context_coordinator_and_runtime_components_import_no_future_canonical_module():
     sources = {path.name: path.read_text() for path in (_ROOT / "engine").glob("*.py")}
     assert all("class Phase12AuthorizationTrustExpectationsV1" not in source for name, source in sources.items() if any(token in name for token in ("clock", "context", "coordinator", "runtime")))
