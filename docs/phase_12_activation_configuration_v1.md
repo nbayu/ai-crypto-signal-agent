@@ -2807,9 +2807,9 @@ This capability invokes the caller-owned bound callable exactly once and returns
 
 Owner selection: `OWNER_SELECT_PHASE_12_TRUST_EXPECTATION_BOUNDARY_MIGRATION_DESIGN_ONLY`. This is a documentation-only architectural study. It selects neither an adapter nor a public-type promotion and authorizes no implementation, test, consumer change, exact-type relaxation, reference access, runtime composition, or production activity.
 
-### Locked architecture and separate authorization record
+### Historical locked architecture and separate authorization record
 
-The current trust-expectation type is private:
+At design-study time, the trust-expectation type was private:
 
 ~~~python
 _Phase12AuthorizationTrustExpectationsV1(
@@ -2826,17 +2826,17 @@ _Phase12AuthorizationTrustExpectationsV1(
 )
 ~~~
 
-It remains frozen, slotted, keyword-only, repr-suppressed, private, and identity-preserving, with no defaults or variadics. Its exact field order is the order above. `public_key_path` and `revocation_state_path` are opaque reference values; the other seven fields are public domain expectations. The existing builder `build_phase_12_authorization_trust_expectations_v1` constructs exactly one private instance and forwards all supplied values unchanged. It performs no validation, normalization, parsing, comparison, path/reference access, or dependency invocation. Normal Python signature binding owns missing, positional, and unexpected-call errors; no ordinary `Exception` or `BaseException` is caught or translated.
+It was frozen, slotted, keyword-only, repr-suppressed, private, and identity-preserving, with no defaults or variadics. Its exact field order is the order above. `public_key_path` and `revocation_state_path` are opaque reference values; the other seven fields are public domain expectations. The existing builder `build_phase_12_authorization_trust_expectations_v1` constructs exactly one private instance and forwards all supplied values unchanged. It performs no validation, normalization, parsing, comparison, path/reference access, or dependency invocation. Normal Python signature binding owns missing, positional, and unexpected-call errors; no ordinary `Exception` or `BaseException` is caught or translated.
 
 `Phase12ActivationAuthorizationRecordV1` remains a distinct public, validated authorization-record type with fields `mode`, `owner_authorization_id`, `checkpoint_id`, `approved_locked_commit`, `approval_timestamp_utc`, `expires_at_utc`, and `accepted_locked_commit`. It is not a trust-expectation schema. Neither migration path may merge, wrap, replace, weaken, or change that record or its consumers.
 
-The current exact consumer rule is:
+The historical exact consumer rule was:
 
 ~~~python
 type(trust_expectations) is _Phase12AuthorizationTrustExpectationsV1
 ~~~
 
-It is enforced by `engine/phase_12_authorization_repository_validation_composition_v1.py`; its structural request-builder tests assert the exact private type, field order, identity forwarding, and downstream acceptance. The bounded authorization-validation composition depends on the nine attribute names and validates them later as exact nonempty `str` values. The authorization-validation orchestration composes the existing boundary without becoming a public trust-contract owner. The locked documentation also prohibits public bundle classes, adapters, conversion classes, shared contracts, aliases, promotion, duplication, and export of the private type.
+It is enforced by `engine/phase_12_authorization_repository_validation_composition_v1.py`; its structural request-builder tests asserted the exact private type, field order, identity forwarding, and downstream acceptance. The bounded authorization-validation composition depended on the nine attribute names and validates them later as exact nonempty `str` values. The authorization-validation orchestration composed the existing boundary without becoming a public trust-contract owner. The locked documentation also prohibits public bundle classes, adapters, conversion classes, shared contracts, aliases, promotion, duplication, and export of the private type.
 
 ### Path A — public schema plus sole private-boundary adapter
 
@@ -2862,30 +2862,60 @@ Committed evidence does not prove that preserving current consumers is safer tha
 
 If the owner later selects Path A, the future phases are: documentation design freeze; public-schema RED and implementation; adapter RED and implementation; only then any proven locked-assertion correction; focused regression; canonical full regression; provenance correction if necessary; pre-push audit; and remote lock. If the owner later selects Path B, the future phases are: documentation migration freeze; migration-characterization RED; canonical public type introduction; consumer migration; private-type retirement; only then any proven locked-assertion correction; focused and canonical full regressions; provenance correction if necessary; pre-push audit; and remote lock. Neither ordering authorizes history rewrite, reference ownership, source ownership, accepted-commit ownership, result exposure, runtime composition, or production action.
 
-### Owner-selected canonical public promotion contract
+### Owner-selected canonical public promotion contract — completed provenance
 
-Owner selection: `OWNER_SELECT_PHASE_12_PROMOTE_TRUST_EXPECTATIONS_TO_PUBLIC_EXACT_CONSUMER_TYPE`. Promotion is selected over the adapter path. The rationale is single canonical ownership: a public/private pair with identical nine fields would create duplicate field-order and annotation drift, while committed evidence identifies no external compatibility requirement that justifies retaining a private alias or bridge. This remains future work only; no type, builder, import, consumer, test, or implementation has changed in this step.
+#### Historical decision and implementation boundary
 
-The future canonical identity is `Phase12AuthorizationTrustExpectationsV1` in the dedicated inward-only module `engine.phase_12_authorization_trust_expectations_v1` (`engine/phase_12_authorization_trust_expectations_v1.py`). A dedicated module is selected because `engine.phase_12_authorization_repository_validation_composition_v1` is a composition and private-request-builder owner; exposing the public contract there would couple domain construction to composition internals. The canonical module imports only `dataclasses.dataclass`, exports exactly:
+`OWNER_SELECT_PHASE_12_PROMOTE_TRUST_EXPECTATIONS_TO_PUBLIC_EXACT_CONSUMER_TYPE` selected canonical promotion over the adapter path because a public/private pair with identical nine fields would create field-order and annotation drift without a proven external compatibility need. The preceding study records the historical private boundary, the initial public-schema blocker, the adapter-versus-promotion comparison, the owner selection, the characterization-before-RED sequence, and the fact that implementation was unauthorized before the later atomic migration.
 
-~~~python
-__all__ = (
-    "Phase12AuthorizationTrustExpectationsV1",
-)
-~~~
+The historical RED imported the then-absent `Phase12AuthorizationTrustExpectationsV1` from the then-absent `engine.phase_12_authorization_trust_expectations_v1`; it failed naturally at collection with one `ModuleNotFoundError`, pytest exit 2, tee exit 0, and zero collected or executed tests. That RED preceded the completed atomic implementation and is retained as provenance rather than a description of the current repository state.
 
-Direct keyword-only dataclass construction is the sole public construction surface. The future type is exactly `@dataclass(frozen=True, slots=True, kw_only=True)` with the existing nine ordered `str` fields, no defaults, variadics, `__post_init__`, helper, property, alternate constructor, mapping conversion, serialization behavior, validation, coercion, normalization, parsing, comparison, reference/path access, or operational behavior. Natural dataclass equality and repr are accepted. Caller-assigned values retain ordinary assignment identity. The two reference fields remain opaque, and protected-reference ownership remains deferred.
+#### Current canonical trust-expectation contract
 
-The migration is atomic within its canonical implementation-and-consumer-migration commit. `engine.phase_12_authorization_repository_validation_composition_v1` will import the public type, retire `_Phase12AuthorizationTrustExpectationsV1`, retire `build_phase_12_authorization_trust_expectations_v1` as redundant, remove that builder from `__all__`, migrate its Protocol and function annotations, and replace its exact check with `type(trust_expectations) is Phase12AuthorizationTrustExpectationsV1`. No `isinstance`, Protocol, duck-typed, mapping, subclass, union, private/public dual-type, adapter, conversion layer, fallback import, module `__getattr__`, `sys.modules` manipulation, compatibility container, or alias is permitted. No file is deleted: retirement is symbol removal from the current composition module. No committed point may contain two independently defined canonical nine-field types.
+The current canonical module is `engine.phase_12_authorization_trust_expectations_v1`. Its sole export is `Phase12AuthorizationTrustExpectationsV1`; no other module re-exports that type. It is a direct-construction-only `@dataclass(frozen=True, slots=True, kw_only=True)` with no defaults, custom methods, builder, validation, coercion, normalization, parsing, reference access, or operational dependencies.
 
-The exact known migration references are: the current defining composition module; `tests/test_phase_12_authorization_repository_structural_request_builders_v1.py`, which imports the builder and asserts the private type through its builder matrix; and `tests/test_phase_12_authorization_repository_validation_composition_v1.py`, which directly imports the private type. The defining module also contains the private Protocol annotation, function annotation, constructor call, and exact-type check. The documentation statements at the current locked architecture and bounded-composition sections that require privacy, no promotion, no aliases, no adapters, no public bundle types, no shared contract, or no conversion require a deliberately scoped future update. `engine.phase_12_bounded_authorization_validation_composition_v1.py` and `engine.phase_12_authorization_validation_repository_orchestration_composition_v1.py` depend on the nine attributes but do not own the private type; they are protected unless a future characterization proves a directly affected assertion.
+The exact ordered `str` fields are:
 
-The future dependency graph is one-way: composition and its tests import the dedicated canonical contract; the canonical contract imports no composition, request-builder, repository, validator, coordinator, clock, runtime, service, provider, Telegram, network, activation, deployment, or production module. This creates no circular import. `Phase12ActivationAuthorizationRecordV1` remains separate, validated, and entirely outside migration scope.
+1. `public_key_path`
+2. `expected_public_key_fingerprint`
+3. `expected_signing_key_identifier`
+4. `revocation_state_path`
+5. `expected_revocation_artifact_fingerprint`
+6. `expected_revocation_schema_identifier`
+7. `expected_revocation_checkpoint_identifier`
+8. `expected_environment_identifier`
+9. `expected_deployment_identifier`
 
-Existing structural-builder tests characterize the current exact field order, keyword-only builder surface, private construction, identity preservation, immutability, normal call-shape errors, no validation, and downstream acceptance. A dedicated future characterization file, `tests/test_phase_12_authorization_trust_expectation_promotion_characterization_v1.py`, is required before RED to enumerate the private-type consumer inventory, no-alias/no-adapter lock, exact type check, and single-canonical-type retirement conditions. The next RED then imports absent `Phase12AuthorizationTrustExpectationsV1` from absent `engine.phase_12_authorization_trust_expectations_v1`: one `ModuleNotFoundError`, pytest exit 2, tee exit 0, zero collected/executed, one error, and zero failures, skips, xfails, xpasses, or warnings.
+`public_key_path` and `revocation_state_path` are opaque caller-owned reference values. The other seven fields are public domain-specific expectation facts. The type does not claim ownership, existence, validity, authorization, eligibility, or safety of either underlying reference.
 
-The future file inventory is: ADD `engine/phase_12_authorization_trust_expectations_v1.py`, `tests/test_phase_12_authorization_trust_expectation_promotion_characterization_v1.py`, and `tests/test_phase_12_authorization_trust_expectations_v1.py`; MODIFY `engine/phase_12_authorization_repository_validation_composition_v1.py`, `tests/test_phase_12_authorization_repository_structural_request_builders_v1.py`, `tests/test_phase_12_authorization_repository_validation_composition_v1.py`, and this documentation; DELETE no file; PROTECTED_UNCHANGED the authorization record, configuration, coordinator, callable clock binding/invocation, validation-context builder, bounded composition, orchestration, parser, verifier, key, marker, replay, revocation, repository, comparator, runtime, service, provider, and Telegram modules unless later evidence proves a narrowly affected assertion.
+#### Completed single-owner migration
 
-Future commit classes are linear: (1) this owner-decision documentation freeze; (2) `test: characterize phase 12 authorization trust expectation promotion`; (3) `test: define phase 12 public canonical trust expectations`; (4) `feat: promote phase 12 authorization trust expectations to public canonical type`, containing the atomic canonical introduction, consumer migration, and private type/builder retirement; (5) only a proven narrow locked-test correction; (6) provenance documentation correction if needed; (7) focused and canonical full regressions with evidence cleanup; (8) final pre-push audit; and (9) separately authorized push and remote lock. No push occurs before characterization, RED, atomic migration, all required regressions, and any provenance correction pass.
+The atomic implementation commit retired `_Phase12AuthorizationTrustExpectationsV1` and `build_phase_12_authorization_trust_expectations_v1`. There is no compatibility alias, adapter, bridge, fallback, private/public dual acceptance, or duplicate canonical nine-field type.
 
-The next authorized step is to define and commit the dedicated migration-characterization tests. The future migration creates one public structural type, preserves exact nine-field and exact-type semantics, eliminates duplicate private ownership, adds no adapter, and changes no authorization-record or CLOSED authority. It does not authorize reference access, source acquisition, accepted-commit ownership, result exposure, runtime composition, service, provider, Telegram, network, activation, deployment, or production action.
+`engine.phase_12_authorization_repository_validation_composition_v1` imports the canonical type directly; its trust annotations use that type and its exact guard is `type(trust_expectations) is Phase12AuthorizationTrustExpectationsV1`. Canonical values are constructed directly by callers and migrated structural fixtures. No `isinstance`, trust Protocol acceptance, union, mapping, subclass, duck-typing, or fallback acceptance was added.
+
+The composition module exports exactly five remaining builder operations followed by `run_phase_12_authorization_repository_validation_composition_v1`. It no longer exports the retired trust-expectation builder and does not export the canonical type. `Phase12ActivationAuthorizationRecordV1` remains a separate, unchanged validated authorization-record type; none of its fields or validation ownership was merged into the canonical trust-expectation type.
+
+#### Narrow assertion-correction provenance
+
+The atomic migration required four narrow false-negative assertion corrections, none of which relaxed implementation behavior:
+
+1. Canonical C16-02 now inspects the exact trust-expectation acceptance boundary instead of globally rejecting unrelated `Protocol` declarations.
+2. Canonical C19-02 now inspects exact canonical class structure and dependencies instead of treating the required lexical word `Authorization` as an authorization guarantee.
+3. Characterization C04-03 now requires structural `item.type is str` annotation identity rather than a string-representation comparison.
+4. Structural `test_c02_02` now asserts the complete six-name composition export contract, including the unchanged public run operation.
+
+#### Dedicated implementation evidence and current status
+
+Atomic implementation commit `dede9669118e2041016c168ba2a70b052772fecf`, parent `8778d0baf746c0461be920edd7b88cc24609ae82`, has subject `feat: promote phase 12 authorization trust expectations to canonical public type` and changed exactly:
+
+- `engine/phase_12_authorization_trust_expectations_v1.py`
+- `engine/phase_12_authorization_repository_validation_composition_v1.py`
+- `tests/test_phase_12_authorization_trust_expectations_v1.py`
+- `tests/test_phase_12_authorization_trust_expectation_promotion_characterization_v1.py`
+- `tests/test_phase_12_authorization_repository_structural_request_builders_v1.py`
+- `tests/test_phase_12_authorization_repository_validation_composition_v1.py`
+
+Dedicated verification passed: canonical suite 60; transitioned characterization suite 54; structural suite 75; validation-composition suite 113. Virtualenv compilation of the changed Python files passed with empty stdout and stderr. Successful evidence was hashed and removed: canonical `54f8a17483dcd6d7d22569acd9f1fb873b90ce812305d70d23098cfe9d8d3597`; characterization `b9abacd9294d19506370f085230594c6a26dbd6de9fc989b6aa993464477f197`; structural `bf4e7622b6362f49d0ae78e283113abebd8088d52674ced519508681d9b98ba7`; validation composition `be694efc579ef785e65efea403171303e996d7c846e779322d7e74c1a854af4c`.
+
+Focused Phase 12 regression and canonical full regression have not yet run. No fetch or push has occurred; the migration is locally committed and not remotely locked. Coordinator authority remains CLOSED, canonical configuration remains CLOSED, and the service remains disabled and non-running. This documentation correction authorizes no reference access, source acquisition, accepted-commit ownership, result exposure, runtime composition, service, provider, Telegram, network, activation, deployment, or production action; all production gates remain closed.
