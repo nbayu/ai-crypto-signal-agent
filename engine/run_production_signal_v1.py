@@ -17,10 +17,12 @@ def main():
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
 
     try:
+        pub_dir = os.environ.get("PRODUCTION_SIGNAL_DIR")
         run_out = run_master_engine_v4(
             enable_publication=True,
             delivery_adapter=adapter,
             destination_id=destination_id,
+            publication_root=pub_dir,
         )
     except Exception as exc:
         return 7

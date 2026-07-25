@@ -64,3 +64,21 @@ def test_slots_full_returns_4(mock_run, valid_env):
     mock_run.side_effect = fake_run
     with patch.dict(os.environ, valid_env, clear=True):
         assert main() == 4
+
+@patch("engine.run_production_signal_v1.run_master_engine_v4")
+def test_delivery_failed_returns_5(mock_run, valid_env):
+    def fake_run(*args, **kwargs):
+        return {"production_signal_out": {"status": "OK", "publication": {"delivery_state": "DELIVERY_FAILED"}}}
+    mock_run.side_effect = fake_run
+    with patch.dict(os.environ, valid_env, clear=True):
+        assert main() == 5
+
+@patch("engine.run_production_signal_v1.run_master_engine_v4")
+def test_malformed_receipt_returns_6(mock_run, valid_env):
+    def fake_run(*args, **kwargs):
+        adapter = kwargs["delivery_adapter"]
+        adapter.malformed_receipt = True
+        return {"production_signal_out": {"status": "OK", "publication": {"delivery_state": "DELIVERY_FAILED"}}}
+    mock_run.side_effect = fake_run
+    with patch.dict(os.environ, valid_env, clear=True):
+        assert main() == 6

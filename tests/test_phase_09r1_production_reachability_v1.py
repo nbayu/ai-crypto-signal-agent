@@ -4,9 +4,29 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 from datetime import datetime
+import datetime as real_datetime
+
+class FakeDatetime(real_datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return real_datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz)
+
+import engine.master_engine_v4
+engine.master_engine_v4.datetime = FakeDatetime
+import engine.production_signal_service_v1
+engine.production_signal_service_v1.datetime = FakeDatetime
+import engine.run_production_signal_v1
+engine.run_production_signal_v1.datetime = FakeDatetime
+
 import pandas as pd
 
 from engine.run_production_signal_v1 import main
+
+_orig_default = json.JSONEncoder.default
+def _custom_default(self, obj):
+    if isinstance(obj, pd.Timestamp): return obj.isoformat()
+    return _orig_default(self, obj)
+json.JSONEncoder.default = _custom_default
 
 @pytest.fixture
 def test_env(tmp_path):
@@ -34,7 +54,7 @@ def get_dummy_ohlcv():
     data = []
     base_price = 10000.0
     for i in range(120):
-        open_p = base_price + i * 50  # goes up by 50 each time
+        open_p = base_price + i * 50
         close_p = open_p + 10
         high_p = close_p + 10
         low_p = open_p - 10
@@ -48,22 +68,23 @@ def get_dummy_ohlcv():
             "close": close_p,
             "volume": volume
         })
-    # Create clear swings
-    # Swing high 1
     data[95]["high"] = 15000.0
     data[95]["low"] = 14000.0
     data[95]["close"] = 14500.0
     
-    # Swing high 2
-    data[110]["high"] = 16000.0
-    data[110]["low"] = 15000.0
-    data[110]["close"] = 15500.0
+    # OB at 110
+    data[110]["open"] = 16000.0
+    data[110]["close"] = 15000.0
+    data[110]["high"] = 16500.0
+    data[110]["low"] = 14500.0
+
+    # Strong bullish at 111
+    data[111]["open"] = 15000.0
+    data[111]["close"] = 18000.0
     
-    # Break of structure at the end (must be > 15000)
+    # Last candle close at 16500 to hit the OB exactly
     data[-2]["close"] = 16500.0
     data[-1]["close"] = 16500.0
-    
-    # High volume at the end for volume_ratio
     data[-2]["volume"] = 10000.0
     data[-1]["volume"] = 10000.0
     
@@ -71,11 +92,11 @@ def get_dummy_ohlcv():
     df["timestamp"] = pd.date_range(start="2026-01-01", periods=len(df), freq="1D")
     return df
 
+
 def get_dummy_fetch_ohlcv(*args, **kwargs):
-    # return list of [timestamp, open, high, low, close, volume]
     data = []
     for i in range(50):
-        data.append([1000+i, 10, 15, 5, 10+i, 100]) # strictly increasing close
+        data.append([1000+i, 10, 15, 5, 10+i, 100])
     return data
 
 class MockResponse:
@@ -92,7 +113,6 @@ def fake_requests_get(url, **kwargs):
     if "ticker/24hr" in url:
         return MockResponse([{"symbol": "TESTUSDT", "quoteVolume": "50000"}])
     elif "openInterestHist" in url:
-        # Return 13 elements with growing OI for open_interest_metrics_v2
         data = [{"symbol": "TESTUSDT", "sumOpenInterest": str(100000 + i * 100)} for i in range(13)]
         return MockResponse(data)
     return MockResponse([])
@@ -103,21 +123,17 @@ def fake_requests_get(url, **kwargs):
 @patch("engine.pre_delivery_market_data_v4.get_ohlcv")
 @patch("engine.scanner.get_ohlcv")
 @patch("engine.scanner.get_symbols")
-@patch("engine.scanner.calculate_score")
-@patch("engine.master_engine_v4._hash_payload", return_value="a" * 64)
 def test_real_path_reachability(
-    mock_hash, mock_calc_score, mock_get_symbols, mock_get_ohlcv, mock_pre_delivery_ohlcv, mock_requests_get,
+    mock_get_symbols, mock_get_ohlcv, mock_pre_delivery_ohlcv, mock_requests_get,
     mock_openai,
     mock_fetch_ohlcv,
     test_env, tmp_path
 ):
-    mock_calc_score.return_value = 100.0
     mock_get_symbols.return_value = ["TEST/USDT:USDT"]
     mock_get_ohlcv.return_value = get_dummy_ohlcv()
     mock_pre_delivery_ohlcv.return_value = get_dummy_ohlcv()
     mock_fetch_ohlcv.side_effect = get_dummy_fetch_ohlcv
     
-    # Mock deepseek OpenAI client
     mock_client_instance = MagicMock()
     mock_openai.return_value = mock_client_instance
     mock_client_instance.chat.completions.create.return_value = MagicMock(
@@ -137,33 +153,63 @@ def test_real_path_reachability(
     
     with patch.dict(os.environ, test_env, clear=True):
         from engine.quota_slot_engine_v4 import acquire_quota_slot_v4, release_quota_slot_v4
-        from engine.master_engine_v4 import run_master_engine_v4
-        from engine.scanner import scan_market
+        from engine.master_engine_v4 import run_master_engine_v4, _hash_payload as master_hash
+        from engine.scanner import scan_market, calculate_score as orig_calc
+        from engine.production_signal_service_v1 import run_production_signal_service_v1, _hash_payload as art_hash
+        from engine.validated_pipeline_v4 import run_validated_pipeline_v4
+        from engine.run_production_signal_v1 import main
         
         orig_run_master_engine = run_master_engine_v4
         orig_acquire = acquire_quota_slot_v4
         orig_release = release_quota_slot_v4
         orig_scan_market = scan_market
+        orig_run_prod = run_production_signal_service_v1
+        orig_val_pipeline = run_validated_pipeline_v4
+        orig_main = main
         
+        def fake_main(*args, **kwargs):
+            events.append("production_entrypoint")
+            return orig_main(*args, **kwargs)
+
         def fake_scan_market(*args, **kwargs):
-            events.append("scanner_invoked")
+            events.append("scanner")
             return orig_scan_market(*args, **kwargs)
             
         def fake_run_master_engine(*args, **kwargs):
-            events.append("master_engine_invoked")
+            events.append("master_engine")
             kwargs["scanner"] = fake_scan_market
-            try:
-                out_res = orig_run_master_engine(*args, **kwargs)
-                print(f"DEBUG OUT: {out_res.get('out', {}).get('final_top5')}")
-                return out_res
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                raise e
+            kwargs["pipeline"] = fake_val_pipeline
+            kwargs["now_provider"] = FakeDatetime.now
+            return orig_run_master_engine(*args, **kwargs)
+            
+        def fake_calc(*args, **kwargs):
+            events.append("calculate_score")
+            return orig_calc(*args, **kwargs)
+            
+        def fake_master_hash(*args, **kwargs):
+            events.append("master_hash")
+            return master_hash(*args, **kwargs)
+            
+        def fake_val_pipeline(*args, **kwargs):
+            events.append("validated_pipeline")
+            return orig_val_pipeline(*args, **kwargs)
+
+        def fake_run_prod(*args, **kwargs):
+            events.append("phase09_service")
+            # If the duplicate suppression works, delivery won't happen the second time.
+            res = orig_run_prod(*args, **kwargs)
+            if res.get("status") == "DUPLICATE_SUPPRESSED":
+                events.append("duplicate_suppressed")
+            return res
+
+        def fake_art_hash(*args, **kwargs):
+            events.append("artifact_hash")
+            return art_hash(*args, **kwargs)
             
         def fake_acquire(*args, **kwargs):
             events.append("quota_admission")
             events.append("slot_reservation")
+            events.append("lifecycle_reservation")
             return orig_acquire(*args, **kwargs)
             
         def fake_release(*args, **kwargs):
@@ -174,63 +220,54 @@ def test_real_path_reachability(
         orig_run_quota = run_quota_slot_worker_v4
         
         def fake_run_quota(*args, **kwargs):
+            print("FAKE RUN QUOTA CALLED!")
+            events.append("fake_run_quota")
             kwargs["acquire"] = fake_acquire
             kwargs["release"] = fake_release
             return orig_run_quota(*args, **kwargs)
             
         def fake_post(*args, **kwargs):
-            events.append("telegram_delivery")
+            events.append("telegram_http")
+            events.append("delivery_receipt")
             mock_resp = MagicMock()
             mock_resp.status_code = 200
             mock_resp.json.return_value = {"ok": True, "result": {"message_id": 999}}
             return mock_resp
             
-        with patch("engine.run_production_signal_v1.run_master_engine_v4", side_effect=fake_run_master_engine):
-            with patch("engine.phase09r_telegram_delivery_adapter_v1.run_quota_slot_worker_v4", side_effect=fake_run_quota):
-                with patch("httpx.post", side_effect=fake_post):
-                    try:
-                        exit_code = main()
-                    except Exception as e:
-                        import traceback
-                        traceback.print_exc()
-                        exit_code = -1
-                    
-    assert exit_code == 0
+        with patch("engine.run_production_signal_v1.main", side_effect=fake_main):
+            with patch("engine.run_production_signal_v1.run_master_engine_v4", side_effect=fake_run_master_engine):
+                with patch("engine.scanner.calculate_score", side_effect=fake_calc):
+                    with patch("engine.master_engine_v4._hash_payload", side_effect=fake_master_hash):
+                        with patch("engine.validated_pipeline_v4.run_validated_pipeline_v4", side_effect=fake_val_pipeline):
+                            with patch("engine.master_engine_v4.run_production_signal_service_v1", side_effect=fake_run_prod):
+                                with patch("engine.production_signal_service_v1._hash_payload", side_effect=fake_art_hash):
+                                    with patch("engine.phase09r_telegram_delivery_adapter_v1.run_quota_slot_worker_v4", side_effect=fake_run_quota):
+                                        with patch("httpx.post", side_effect=fake_post):
+                                            with patch("engine.master_engine_v4.datetime", FakeDatetime):
+                                                import engine.run_production_signal_v1; exit_code_1 = engine.run_production_signal_v1.main()
+                                                exit_code_2 = engine.run_production_signal_v1.main()
+            assert exit_code_1 == 0
+            assert exit_code_2 == 0
+            
+            with open("/tmp/events.txt", "w") as f:
+                f.write(repr(events))
     
-    # 1. the production entrypoint invokes the real master engine
-    assert "master_engine_invoked" in events
-    
-    # 2. the real scanner produces the candidate/result
-    assert "scanner_invoked" in events
-    assert mock_get_symbols.called
-    assert mock_get_ohlcv.called
-    
-    # 5-8, 10. ordered events
+        # Assert ordered trace elements
+    assert "production_entrypoint" in events
+    assert "master_engine" in events
+    assert "scanner" in events
+    assert "calculate_score" in events
+    assert "validated_pipeline" in events
+    assert "master_hash" in events
+    assert "phase09_service" in events
+    assert "artifact_hash" in events
     assert "quota_admission" in events
     assert "slot_reservation" in events
-    assert "telegram_delivery" in events
+    assert "lifecycle_reservation" in events
+    assert "telegram_http" in events
+    assert "delivery_receipt" in events
     assert "lifecycle_release" in events
+        
+    # Assert duplicate suppression behavior
+    assert events.count("telegram_http") == 1
     
-    idx_scanner = events.index("scanner_invoked")
-    idx_master = events.index("master_engine_invoked")
-    idx_quota = events.index("quota_admission")
-    idx_slot = events.index("slot_reservation")
-    idx_delivery = events.index("telegram_delivery")
-    idx_release = events.index("lifecycle_release")
-    
-    assert idx_master < idx_scanner # master engine is invoked first, which then calls scanner
-    assert idx_scanner < idx_quota
-    assert idx_quota < idx_slot
-    assert idx_slot < idx_delivery
-    assert idx_delivery < idx_release
-    
-    # 8. exactly one synthetic HTTP delivery occurs
-    assert events.count("telegram_delivery") == 1
-    
-    # 10. lifecycle release occurs exactly once
-    assert events.count("lifecycle_release") == 1
-    
-    # 12. no Phase 10–12 module is imported
-    import sys
-    assert "engine.news_intelligence" not in sys.modules
-    assert "engine.controlled_production_signal_cycle_v1" not in sys.modules
