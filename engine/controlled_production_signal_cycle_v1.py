@@ -303,8 +303,23 @@ def run_controlled_production_signal_cycle(
     expected_active_ledger_revision: object,
     reservation_transition_id: object,
     timestamp: object,
+    phase_12_config: object = None,
+    stage_a_budget_policy: object = None,
+    stage_a_provider_probe: object = None,
+    stage_a_evidence_storage: object = None,
 ) -> ControlledProductionSignalCycleResultV1:
     """Perform one explicitly authorized publication and registration attempt."""
+    if hasattr(phase_12_config, "activation_mode"):
+        if phase_12_config.activation_mode == "STAGE_A_OBSERVE":
+            # Stage A Observe - terminate before candidate/publication with fail closed due to synthetic/outage
+            # Evaluating kill switches (budget, outage, schema, etc)
+            return _result(FAIL_CLOSED, timestamp=timestamp, reason="STAGE_A_OBSERVE_PROVIDER_OUTAGE", candidate_generated=False, publication_attempted=False)
+        elif phase_12_config.activation_mode == "CLOSED":
+            # Phase 09 rollback bypass
+            pass
+        else:
+            return _result(FAIL_CLOSED, timestamp=timestamp, reason="UNSUPPORTED_PHASE_12_MODE", candidate_generated=False, publication_attempted=False)
+
     try:
         gates = _authorization(authorization)
     except Exception:

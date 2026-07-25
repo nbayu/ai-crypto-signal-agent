@@ -33,12 +33,14 @@ _GATES = {
     "TELEGRAM_CONNECTIVITY_VALIDATION": (True, True, True, False, False),
     "TELEGRAM_START_VALIDATION": (True, True, True, False, True),
     "CONTROLLED_WORKLOAD": (True, True, True, True, True),
+    "STAGE_A_OBSERVE": (True, False, False, False, False),
 }
 _LIFETIMES = {
     "CREDENTIAL_VALIDATION": timedelta(minutes=15),
     "TELEGRAM_CONNECTIVITY_VALIDATION": timedelta(minutes=15),
     "TELEGRAM_START_VALIDATION": timedelta(minutes=10),
     "CONTROLLED_WORKLOAD": timedelta(minutes=5),
+    "STAGE_A_OBSERVE": timedelta(hours=24),
 }
 _CODES = frozenset(
     (
