@@ -15,7 +15,7 @@ def main():
         return 2
 
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
-    
+
     try:
         run_out = run_master_engine_v4(
             enable_publication=True,
@@ -35,11 +35,11 @@ def main():
     prod_out = run_out.get("production_signal_out")
     if not prod_out:
         return 7
-        
+
     status = prod_out.get("status")
     if status == "DELIVERY_NOT_CONFIGURED":
         return 2
-        
+
     publication = prod_out.get("publication")
     if publication:
         delivery_state = publication.get("delivery_state")
@@ -47,7 +47,7 @@ def main():
             return 5
         if delivery_state == "DELIVERY_SUCCEEDED":
             return 0
-            
+
     # Maybe it was a NO_TRADE outcome?
     if prod_out.get("evaluation") is not None:
         return 0

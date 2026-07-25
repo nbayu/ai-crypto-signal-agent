@@ -27,7 +27,7 @@ class Phase09RTelegramDeliveryAdapterV1:
         def do_delivery(*, state_path):
             text = json.dumps(payload, separators=(',', ':'))
             url = f"https://api.telegram.org/bot{self.config.bot_token}/sendMessage"
-            
+
             try:
                 resp = httpx.post(
                     url,

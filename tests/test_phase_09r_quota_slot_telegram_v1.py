@@ -24,7 +24,7 @@ def test_telegram_network_faked_successful(config):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": True, "result": {"message_id": 12345}}
         mock_post.return_value = mock_resp
-        
+
         result = adapter({"a": 1}, "TELEGRAM", "dest1")
         assert result["external_delivery_id"] == "12345"
         mock_post.assert_called_once()
@@ -37,7 +37,7 @@ def test_telegram_network_faked_malformed(config):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": True, "result": {}} # missing message_id
         mock_post.return_value = mock_resp
-        
+
         with pytest.raises(RuntimeError, match="Malformed receipt"):
             adapter({"a": 1}, "TELEGRAM", "dest1")
         assert adapter.malformed_receipt is True
@@ -48,7 +48,7 @@ def test_telegram_network_faked_failure(config):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": False}
         mock_post.return_value = mock_resp
-        
+
         with pytest.raises(RuntimeError, match="Telegram delivery failed"):
             adapter({"a": 1}, "TELEGRAM", "dest1")
 
@@ -63,15 +63,15 @@ def test_quota_denial_makes_zero_telegram_calls(config):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": True, "result": {"message_id": 123}}
         mock_post.return_value = mock_resp
-        
+
         # First call succeeds and consumes the quota
         adapter({"a": 1}, "TELEGRAM", "dest1")
         assert mock_post.call_count == 1
-        
+
         # Second call fails quota
         with pytest.raises(QuotaSlotRejected):
             adapter({"a": 1}, "TELEGRAM", "dest1")
-        
+
         # Call count is still 1
         assert mock_post.call_count == 1
         assert adapter.rejection_reason == "QUOTA_EXHAUSTED"
