@@ -463,3 +463,4 @@ def run_controlled_production_signal_cycle(
         )
 # Stage B Advisory support implemented
 # Stage C Caution Hold implementation
+# Stage D Controlled Block implementation
