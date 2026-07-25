@@ -4,10 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from inspect import getattr_static
 from typing import Protocol
+from engine.phase_12_authorization_trust_expectations_v1 import Phase12AuthorizationTrustExpectationsV1
 
 __all__ = (
     "build_phase_12_authorization_request_v1",
-    "build_phase_12_authorization_trust_expectations_v1",
     "build_phase_12_validation_context_v1",
     "build_phase_12_accepted_marker_request_v1",
     "build_phase_12_repository_verification_request_v1",
@@ -43,21 +43,6 @@ class _Phase12AuthorizationRequestV1:
     def __repr__(self) -> str:
         return "_Phase12AuthorizationRequestV1(field_count=10)"
 
-
-@dataclass(frozen=True, slots=True, kw_only=True, repr=False)
-class _Phase12AuthorizationTrustExpectationsV1:
-    public_key_path: str
-    expected_public_key_fingerprint: str
-    expected_signing_key_identifier: str
-    revocation_state_path: str
-    expected_revocation_artifact_fingerprint: str
-    expected_revocation_schema_identifier: str
-    expected_revocation_checkpoint_identifier: str
-    expected_environment_identifier: str
-    expected_deployment_identifier: str
-
-    def __repr__(self) -> str:
-        return "_Phase12AuthorizationTrustExpectationsV1(field_count=9)"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True, repr=False)
@@ -125,30 +110,6 @@ def build_phase_12_authorization_request_v1(
     )
 
 
-def build_phase_12_authorization_trust_expectations_v1(
-    *,
-    public_key_path: str,
-    expected_public_key_fingerprint: str,
-    expected_signing_key_identifier: str,
-    revocation_state_path: str,
-    expected_revocation_artifact_fingerprint: str,
-    expected_revocation_schema_identifier: str,
-    expected_revocation_checkpoint_identifier: str,
-    expected_environment_identifier: str,
-    expected_deployment_identifier: str,
-) -> object:
-    return _Phase12AuthorizationTrustExpectationsV1(
-        public_key_path=public_key_path,
-        expected_public_key_fingerprint=expected_public_key_fingerprint,
-        expected_signing_key_identifier=expected_signing_key_identifier,
-        revocation_state_path=revocation_state_path,
-        expected_revocation_artifact_fingerprint=expected_revocation_artifact_fingerprint,
-        expected_revocation_schema_identifier=expected_revocation_schema_identifier,
-        expected_revocation_checkpoint_identifier=expected_revocation_checkpoint_identifier,
-        expected_environment_identifier=expected_environment_identifier,
-        expected_deployment_identifier=expected_deployment_identifier,
-    )
-
 
 def build_phase_12_validation_context_v1(
     *,
@@ -196,7 +157,7 @@ def build_phase_12_replay_request_v1(
     )
 
 class _Phase12AuthorizationValidationCallableV1(Protocol):
-    def __call__(self, *, authorization_request: _Phase12AuthorizationRequestV1, trust_expectations: _Phase12AuthorizationTrustExpectationsV1, validation_context: _Phase12ValidationContextV1) -> object: ...
+    def __call__(self, *, authorization_request: _Phase12AuthorizationRequestV1, trust_expectations: Phase12AuthorizationTrustExpectationsV1, validation_context: _Phase12ValidationContextV1) -> object: ...
 
 
 class _Phase12AcceptedMarkerCompositionCallableV1(Protocol):
@@ -324,7 +285,7 @@ def _replay_result(value: object, replay_identity: str, schema_identifier: str, 
 def run_phase_12_authorization_repository_validation_composition_v1(
     *,
     authorization_request: _Phase12AuthorizationRequestV1,
-    trust_expectations: _Phase12AuthorizationTrustExpectationsV1,
+    trust_expectations: Phase12AuthorizationTrustExpectationsV1,
     accepted_marker_request: _Phase12AcceptedMarkerRequestV1,
     repository_verification_request: _Phase12RepositoryVerificationRequestV1,
     replay_request: _Phase12ReplayRequestV1,
@@ -337,7 +298,7 @@ def run_phase_12_authorization_repository_validation_composition_v1(
     replay_guard: _Phase12ReplayGuardCallableV1,
 ) -> _Phase12AuthorizationRepositoryValidationCompositionResultV1:
     if type(authorization_request) is not _Phase12AuthorizationRequestV1: raise TypeError()
-    if type(trust_expectations) is not _Phase12AuthorizationTrustExpectationsV1: raise TypeError()
+    if type(trust_expectations) is not Phase12AuthorizationTrustExpectationsV1: raise TypeError()
     if type(accepted_marker_request) is not _Phase12AcceptedMarkerRequestV1: raise TypeError()
     if type(repository_verification_request) is not _Phase12RepositoryVerificationRequestV1: raise TypeError()
     if type(replay_request) is not _Phase12ReplayRequestV1: raise TypeError()

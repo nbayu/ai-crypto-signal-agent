@@ -5,9 +5,9 @@ from dataclasses import FrozenInstanceError, fields
 import inspect
 
 import engine.phase_12_authorization_repository_validation_composition_v1 as target
+from engine.phase_12_authorization_trust_expectations_v1 import Phase12AuthorizationTrustExpectationsV1
 from engine.phase_12_authorization_repository_validation_composition_v1 import (
     build_phase_12_authorization_request_v1,
-    build_phase_12_authorization_trust_expectations_v1,
     build_phase_12_validation_context_v1,
     build_phase_12_accepted_marker_request_v1,
     build_phase_12_repository_verification_request_v1,
@@ -17,7 +17,6 @@ from engine.phase_12_authorization_repository_validation_composition_v1 import (
 
 _NAMES = (
     "build_phase_12_authorization_request_v1",
-    "build_phase_12_authorization_trust_expectations_v1",
     "build_phase_12_validation_context_v1",
     "build_phase_12_accepted_marker_request_v1",
     "build_phase_12_repository_verification_request_v1",
@@ -26,7 +25,7 @@ _NAMES = (
 )
 _BUILDERS = (
     ("authorization", build_phase_12_authorization_request_v1, "_Phase12AuthorizationRequestV1", ("document", "canonical_payload_bytes", "signature_bytes", "activation_mode", "owner_authorization_id", "approval_checkpoint_id", "approved_locked_commit", "approved_at", "expires_at", "accepted_locked_commit_expectation")),
-    ("trust", build_phase_12_authorization_trust_expectations_v1, "_Phase12AuthorizationTrustExpectationsV1", ("public_key_path", "expected_public_key_fingerprint", "expected_signing_key_identifier", "revocation_state_path", "expected_revocation_artifact_fingerprint", "expected_revocation_schema_identifier", "expected_revocation_checkpoint_identifier", "expected_environment_identifier", "expected_deployment_identifier")),
+    ("trust", Phase12AuthorizationTrustExpectationsV1, Phase12AuthorizationTrustExpectationsV1, ("public_key_path", "expected_public_key_fingerprint", "expected_signing_key_identifier", "revocation_state_path", "expected_revocation_artifact_fingerprint", "expected_revocation_schema_identifier", "expected_revocation_checkpoint_identifier", "expected_environment_identifier", "expected_deployment_identifier")),
     ("context", build_phase_12_validation_context_v1, "_Phase12ValidationContextV1", ("configuration", "now_utc")),
     ("marker", build_phase_12_accepted_marker_request_v1, "_Phase12AcceptedMarkerRequestV1", ("path", "expected_metadata_policy")),
     ("repository", build_phase_12_repository_verification_request_v1, "_Phase12RepositoryVerificationRequestV1", ("source_path", "repository_path")),
@@ -57,23 +56,22 @@ def _assert_signature(name: str) -> None:
     assert all(parameter.kind is inspect.Parameter.KEYWORD_ONLY for parameter in parameters)
     assert all(parameter.default is inspect.Parameter.empty for parameter in parameters)
     assert all(parameter.kind not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD} for parameter in parameters)
-    assert str(signature.return_annotation).strip("'") == "object"
+    assert name == "trust" or str(signature.return_annotation).strip("'") == "object"
 
 def _assert_type_and_fields(name: str) -> None:
     value, supplied = _build(name)
-    assert type(value) is getattr(target, _entry(name)[2])
+    assert type(value) is (_entry(name)[2] if name == "trust" else getattr(target, _entry(name)[2]))
     assert tuple(field.name for field in fields(value)) == _entry(name)[3]
     assert all(getattr(value, field) is supplied[field] for field in supplied)
 
 def _assert_direct(name: str) -> None:
     source = _source(name)
-    assert source.count("return ") == 1
-    assert f"return {_entry(name)[2]}(" in source
+    assert name == "trust" or (source.count("return ") == 1 and f"return {_entry(name)[2]}(" in source)
     assert "if " not in source and "try:" not in source and "except" not in source
 
 def _safe_requests():
     authorization = build_phase_12_authorization_request_v1(document="d", canonical_payload_bytes=b"p", signature_bytes=b"s", activation_mode="m", owner_authorization_id="o", approval_checkpoint_id="c", approved_locked_commit="a", approved_at="t", expires_at="e", accepted_locked_commit_expectation="a")
-    trust = build_phase_12_authorization_trust_expectations_v1(public_key_path="p", expected_public_key_fingerprint="f", expected_signing_key_identifier="k", revocation_state_path="r", expected_revocation_artifact_fingerprint="rf", expected_revocation_schema_identifier="rs", expected_revocation_checkpoint_identifier="rc", expected_environment_identifier="env", expected_deployment_identifier="dep")
+    trust = Phase12AuthorizationTrustExpectationsV1(public_key_path="p", expected_public_key_fingerprint="f", expected_signing_key_identifier="k", revocation_state_path="r", expected_revocation_artifact_fingerprint="rf", expected_revocation_schema_identifier="rs", expected_revocation_checkpoint_identifier="rc", expected_environment_identifier="env", expected_deployment_identifier="dep")
     context = build_phase_12_validation_context_v1(configuration=object(), now_utc=object())
     marker = build_phase_12_accepted_marker_request_v1(path="m", expected_metadata_policy=object())
     repository = build_phase_12_repository_verification_request_v1(source_path="s", repository_path="r")
@@ -104,10 +102,12 @@ def test_c02_01() -> None:
     assert target.__all__ == _NAMES
 
 def test_c02_02() -> None:
-    assert tuple(target.__all__[:6]) == tuple(entry[1].__name__ for entry in _BUILDERS)
+    remaining_builders = tuple(entry[1].__name__ for entry in _BUILDERS if entry[0] != "trust")
+    expected = remaining_builders + (run_phase_12_authorization_repository_validation_composition_v1.__name__,)
+    assert target.__all__ == expected and len(expected) == 6 and all(name not in target.__all__ for name in ("build_phase_12_authorization_trust_expectations_v1", "_Phase12AuthorizationTrustExpectationsV1", "Phase12AuthorizationTrustExpectationsV1", "adapter", "alias", "bridge", "compat"))
 
 def test_c02_03() -> None:
-    assert len(target.__all__) == 7 and target.__all__[-1] == run_phase_12_authorization_repository_validation_composition_v1.__name__
+    assert len(target.__all__) == 6 and target.__all__[-1] == run_phase_12_authorization_repository_validation_composition_v1.__name__
 
 def test_c03_01() -> None:
     assert tuple(_signature("authorization").parameters) == _entry("authorization")[3]
@@ -202,7 +202,7 @@ def test_c12_01() -> None:
 
 def test_c12_02() -> None:
     authorization, trust, context, marker, repository, replay = _safe_requests()
-    assert type(authorization) is getattr(target, "_Phase12AuthorizationRequestV1") and type(trust) is getattr(target, "_Phase12AuthorizationTrustExpectationsV1") and type(context) is getattr(target, "_Phase12ValidationContextV1")
+    assert type(authorization) is getattr(target, "_Phase12AuthorizationRequestV1") and type(trust) is Phase12AuthorizationTrustExpectationsV1 and type(context) is getattr(target, "_Phase12ValidationContextV1")
 
 def test_c12_03() -> None:
     authorization, trust, context, marker, repository, replay = _safe_requests()
@@ -223,7 +223,7 @@ def test_c14_01() -> None:
     else: assert False
 
 def test_c14_02() -> None:
-    try: build_phase_12_authorization_trust_expectations_v1()
+    try: Phase12AuthorizationTrustExpectationsV1()
     except TypeError as error: assert type(error) is TypeError
     else: assert False
 
@@ -297,13 +297,13 @@ def test_c20_03() -> None:
     assert all(token not in _source("replay") for token in ("network", "clock", "service", "telegram"))
 
 def test_c21_01() -> None:
-    assert all("Protocol" not in _source(name) for name in ("authorization", "trust", "context"))
+    assert all("Protocol" not in _source(name) for name in ("authorization", "context"))
 
 def test_c21_02() -> None:
     assert all("class " not in _source(name) for name in ("marker", "repository", "replay"))
 
 def test_c21_03() -> None:
-    assert all("bundle" not in _source(name).lower() for name in ("authorization", "trust", "context", "marker", "repository", "replay"))
+    assert all("bundle" not in _source(name).lower() for name in ("authorization", "context", "marker", "repository", "replay"))
 
 def test_c22_01() -> None:
     _assert_direct("authorization")
@@ -341,7 +341,7 @@ def test_c24_03() -> None:
     assert not hasattr(value, "is_recorded")
 
 def test_c25_01() -> None:
-    assert all(_entry(name)[1].__annotations__.get("return") in {object, "object"} for name in ("authorization", "trust", "context", "marker", "repository", "replay"))
+    assert all(_entry(name)[1].__annotations__.get("return") in {object, "object"} for name in ("authorization", "context", "marker", "repository", "replay"))
 
 def test_c25_02() -> None:
     _assert_direct("marker")

@@ -254,8 +254,10 @@ def test_c16_01_bounded_composition_requires_exact_public_canonical_type():
 
 
 def test_c16_02_exact_type_check_uses_no_isinstance_protocol_union_or_mapping():
-    source = _source(_COMPOSITION)
-    assert all(token not in source for token in ("isinstance(trust_expectations", "Protocol", "| None", "Mapping"))
+    operation = next(node for node in _tree(_COMPOSITION).body if isinstance(node, ast.FunctionDef) and node.name == "run_phase_12_authorization_repository_validation_composition_v1")
+    parameter = next(item for item in operation.args.kwonlyargs if item.arg == "trust_expectations")
+    guard = next(node.test for node in operation.body if isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Call) and isinstance(node.test.left.func, ast.Name) and node.test.left.func.id == "type" and len(node.test.left.args) == 1 and isinstance(node.test.left.args[0], ast.Name) and node.test.left.args[0].id == "trust_expectations")
+    assert isinstance(parameter.annotation, ast.Name) and parameter.annotation.id == "Phase12AuthorizationTrustExpectationsV1" and isinstance(guard.ops[0], ast.IsNot) and isinstance(guard.comparators[0], ast.Name) and guard.comparators[0].id == "Phase12AuthorizationTrustExpectationsV1"
 
 
 def test_c16_03_relevant_consumers_import_the_canonical_public_type_directly():
@@ -296,7 +298,11 @@ def test_c19_01_public_type_claims_only_immutable_structural_storage():
 
 
 def test_c19_02_public_type_claims_no_reference_validity_authorization_or_eligibility():
-    assert all(token not in _source().lower() for token in ("valid", "authoriz", "eligib"))
+    tree = _tree()
+    public_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "Phase12AuthorizationTrustExpectationsV1")
+    imports = [node for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+    fields = [node for node in public_class.body if isinstance(node, ast.AnnAssign)]
+    assert len(fields) == 9 and all(isinstance(node.target, ast.Name) and node.target.id in _FIELDS and isinstance(node.annotation, ast.Name) and node.annotation.id == "str" for node in fields) and all(isinstance(node, ast.AnnAssign) for node in public_class.body) and len(imports) == 1 and isinstance(imports[0], ast.ImportFrom) and imports[0].module == "dataclasses" and [item.name for item in imports[0].names] == ["dataclass"]
 
 
 def test_c19_03_public_type_claims_no_runtime_activation_deployment_or_production_readiness():

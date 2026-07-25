@@ -8,7 +8,6 @@ import pytest
 from engine.phase_12_authorization_repository_validation_composition_v1 import (
     _Phase12AcceptedMarkerRequestV1,
     _Phase12AuthorizationRequestV1,
-    _Phase12AuthorizationTrustExpectationsV1,
     _Phase12ReplayRequestV1,
     _Phase12RepositoryVerificationRequestV1,
     _Phase12ValidationContextV1,
