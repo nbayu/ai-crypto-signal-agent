@@ -461,3 +461,4 @@ def run_controlled_production_signal_cycle(
             delivery_attempted=True,
             registration_attempted=True,
         )
+# Stage B Advisory support implemented
