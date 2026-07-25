@@ -30,14 +30,7 @@ def _hash_payload(v) -> str:
     import json
     return hashlib.sha256(json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 
-def fake_delivery_adapter(payload, channel, destination_id):
-    from datetime import datetime, timezone
-    return {
-        "channel": channel,
-        "destination_id": destination_id,
-        "external_delivery_id": "test-delivery-123",
-        "delivered_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    }
+
 
 def save_validated_snapshot_v4(out, *, directory=None, now=None):
     if directory is None:
@@ -74,6 +67,10 @@ def run_master_engine_v4(
     closed_candle_provider=get_closed_ohlcv_for_pre_delivery,
     production_evidence_saver=save_production_evidence,
     now_provider=datetime.now,
+    enable_publication=False,
+    delivery_adapter=None,
+    destination_id=None,
+    publication_root=None,
 ):
     results = scanner()
 
@@ -119,80 +116,89 @@ def run_master_engine_v4(
         ),
     )
 
-    try:
-        source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-    except Exception:
-        source_commit = "0" * 40
+    production_signal_out = None
+    if enable_publication:
+        try:
+            source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        except Exception:
+            source_commit = "0" * 40
 
-    top5 = out.get("final_top5", [])
-    if not top5:
-        outcome_kind = "NO_TRADE"
-        eligible_setups = []
-    else:
-        outcome_kind = "PUBLISHED_SIGNAL"
-        setup = top5[0]
-        entry_zone_min = setup.get("entry_zone", {}).get("min")
-        if entry_zone_min is None and "golden_zone" in setup and "entry_zone" in setup["golden_zone"]:
-            entry_zone_min = setup["golden_zone"]["entry_zone"].get("price_low")
+        top5 = out.get("final_top5", [])
+        if not top5:
+            outcome_kind = "NO_TRADE"
+            eligible_setups = []
+        else:
+            outcome_kind = "PUBLISHED_SIGNAL"
+            setup = top5[0]
+            entry_zone_min = setup.get("entry_zone", {}).get("min")
+            if entry_zone_min is None and "golden_zone" in setup and "entry_zone" in setup["golden_zone"]:
+                entry_zone_min = setup["golden_zone"]["entry_zone"].get("price_low")
+
+            entry_zone_max = setup.get("entry_zone", {}).get("max")
+            if entry_zone_max is None and "golden_zone" in setup and "entry_zone" in setup["golden_zone"]:
+                entry_zone_max = setup["golden_zone"]["entry_zone"].get("price_high")
+
+            stop_loss = setup.get("stop_loss")
+            if stop_loss is None and "golden_zone" in setup and "stop_loss" in setup["golden_zone"]:
+                stop_loss = setup["golden_zone"]["stop_loss"].get("price")
+
+            take_profit = setup.get("take_profit")
+            if take_profit is None and "golden_zone" in setup and "take_profit" in setup["golden_zone"]:
+                take_profit_price = setup["golden_zone"]["take_profit"].get("price")
+                take_profit = {"tp1": take_profit_price, "tp2": take_profit_price}
+
+            valid_until = setup.get("valid_until", "2026-12-31T23:59:59Z")
+
+            eligible_setups = [{
+                "symbol": setup["symbol"],
+                "side": setup.get("side", "LONG"),
+                "entry_zone": {"min": float(entry_zone_min), "max": float(entry_zone_max)},
+                "stop_loss": float(stop_loss),
+                "take_profit": {"tp1": float(take_profit["tp1"]), "tp2": float(take_profit.get("tp2", take_profit["tp1"]))},
+                "valid_until": valid_until,
+                "strategy_version": "v4",
+                "source_payload_hash": _hash_payload(setup)
+            }]
+
+        source_envelope = {
+            "schema_version": 1,
+            "schema_name": "production-signal-input",
+            "source_commit": source_commit,
+            "source_evaluation_id": f"eval-{now.timestamp()}",
+            "mode": "SWING",
+            "evaluated_at": now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(datetime, "timezone") else now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "production_evidence_ref": {
+                "manifest_hash": _hash_file(evidence_path),
+                "manifest_path": str(evidence_path)
+            },
+            "outcome_kind": outcome_kind,
+            "eligible_setups": eligible_setups,
+            "component_versions": {"master_engine": "v4"}
+        }
         
-        entry_zone_max = setup.get("entry_zone", {}).get("max")
-        if entry_zone_max is None and "golden_zone" in setup and "entry_zone" in setup["golden_zone"]:
-            entry_zone_max = setup["golden_zone"]["entry_zone"].get("price_high")
+        # Fix timezone format if naive
+        if "Z" not in source_envelope["evaluated_at"]:
+            import datetime as dt
+            source_envelope["evaluated_at"] = now.replace(tzinfo=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        stop_loss = setup.get("stop_loss")
-        if stop_loss is None and "golden_zone" in setup and "stop_loss" in setup["golden_zone"]:
-            stop_loss = setup["golden_zone"]["stop_loss"].get("price")
-        
-        take_profit = setup.get("take_profit")
-        if take_profit is None and "golden_zone" in setup and "take_profit" in setup["golden_zone"]:
-            take_profit_price = setup["golden_zone"]["take_profit"].get("price")
-            take_profit = {"tp1": take_profit_price, "tp2": take_profit_price}
-        
-        valid_until = setup.get("valid_until", "2026-12-31T23:59:59Z")
-        
-        eligible_setups = [{
-            "symbol": setup["symbol"],
-            "side": setup.get("side", "LONG"),
-            "entry_zone": {"min": float(entry_zone_min), "max": float(entry_zone_max)},
-            "stop_loss": float(stop_loss),
-            "take_profit": {"tp1": float(take_profit["tp1"]), "tp2": float(take_profit.get("tp2", take_profit["tp1"]))},
-            "valid_until": valid_until,
-            "strategy_version": "v4",
-            "source_payload_hash": _hash_payload(setup)
-        }]
 
-    source_envelope = {
-        "schema_version": 1,
-        "schema_name": "production-signal-input",
-        "source_commit": source_commit,
-        "source_evaluation_id": f"eval-{now.timestamp()}",
-        "mode": "SWING",
-        "evaluated_at": now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if hasattr(datetime, "timezone") else now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "production_evidence_ref": {
-            "manifest_hash": _hash_file(evidence_path),
-            "manifest_path": str(evidence_path)
-        },
-        "outcome_kind": outcome_kind,
-        "eligible_setups": eligible_setups,
-        "component_versions": {"master_engine": "v4"}
-    }
-    
-    # Fix timezone format if naive
-    if "Z" not in source_envelope["evaluated_at"]:
-        import datetime as dt
-        source_envelope["evaluated_at"] = now.replace(tzinfo=dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    production_signal_out = run_production_signal_service_v1(
-        source_envelope=source_envelope,
-        publication_root=Path("data/production_signals"),
-        channel="TELEGRAM",
-        destination_id="test-dest",
-        published_at=source_envelope["evaluated_at"],
-        delivery_adapter=fake_delivery_adapter,
-        component_versions={"master_engine": "v4"}
-    )
+        if delivery_adapter is None or destination_id is None:
+            production_signal_out = {"status": "DELIVERY_NOT_CONFIGURED", "receipts": []}
+        else:
+            if publication_root is None:
+                publication_root = Path("data/production_signals")
+            production_signal_out = run_production_signal_service_v1(
+                source_envelope=source_envelope,
+                publication_root=publication_root,
+                channel="TELEGRAM",
+                destination_id=destination_id,
+                published_at=source_envelope["evaluated_at"],
+                delivery_adapter=delivery_adapter,
+                component_versions={"master_engine": "v4"}
+            )
 
-    return {
+    ret = {
         "results": results,
         "out": out,
         "snapshot_path": snapshot_path,
@@ -200,5 +206,7 @@ def run_master_engine_v4(
         "watchlist_path": watchlist_path,
         "delivery_out": delivery_out,
         "evidence_path": evidence_path,
-        "production_signal_out": production_signal_out,
     }
+    if enable_publication:
+        ret["production_signal_out"] = production_signal_out
+    return ret
