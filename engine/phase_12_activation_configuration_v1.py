@@ -35,6 +35,7 @@ _GATES = {
     "CONTROLLED_WORKLOAD": (True, True, True, True, True),
     "STAGE_A_OBSERVE": (True, False, False, False, False),
     "STAGE_B_ADVISORY": (True, False, False, False, False),
+    "STAGE_C_CAUTION_HOLD": (True, False, False, False, False),
 }
 _LIFETIMES = {
     "CREDENTIAL_VALIDATION": timedelta(minutes=15),
@@ -43,6 +44,7 @@ _LIFETIMES = {
     "CONTROLLED_WORKLOAD": timedelta(minutes=5),
     "STAGE_A_OBSERVE": timedelta(hours=24),
     "STAGE_B_ADVISORY": timedelta(hours=24),
+    "STAGE_C_CAUTION_HOLD": timedelta(hours=24),
 }
 _CODES = frozenset(
     (
