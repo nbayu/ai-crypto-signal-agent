@@ -7,3 +7,4 @@ def test_stage_d_controlled_block_is_accepted():
     # Will fail until Stage D is implemented
     res = _configuration_from_text(config_text, now_utc=datetime(2026, 7, 25, 12, 0, 0, tzinfo=timezone.utc))
     assert res.activation_mode == "STAGE_D_CONTROLLED_BLOCK"
+# Add drill tests
