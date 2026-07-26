@@ -32,6 +32,20 @@ from engine.production_signal_contract_v1 import (
     canonical_json_bytes,
     validate_production_signal_input,
 )
+from engine.phase09r_observability_v1 import (
+    BOUNDARY_NO,
+    BOUNDARY_YES,
+    DELIVERY_COMPLETION_BUILD_FAILED,
+    PUBLICATION_COMPLETION_PERSIST_FAILED,
+    PUBLICATION_IDENTITY_BUILD_FAILED,
+    PUBLICATION_INTENT_PERSIST_FAILED,
+    PRODUCTION_SIGNAL_SERVICE_FAILED,
+    PUBLICATION_READBACK_FAILED,
+    SERVICE_INVOCATION_INVALID,
+    SOURCE_CONTRACT_REJECTED,
+    Phase09RExit7Failure,
+    classified_failure,
+)
 
 
 _UTC_PATTERN = re.compile(
@@ -63,22 +77,42 @@ def run_production_signal_service_v1(
 ) -> dict[str, Any]:
     """Run one deterministic production-signal publication operation."""
 
-    source, versions, root = _validate_invocation(
-        source_envelope=source_envelope,
-        publication_root=publication_root,
-        channel=channel,
-        destination_id=destination_id,
-        published_at=published_at,
-        delivery_adapter=delivery_adapter,
-        component_versions=component_versions,
-    )
+    try:
+        source, versions, root = _validate_invocation(
+            source_envelope=source_envelope,
+            publication_root=publication_root,
+            channel=channel,
+            destination_id=destination_id,
+            published_at=published_at,
+            delivery_adapter=delivery_adapter,
+            component_versions=component_versions,
+        )
+    except Phase09RExit7Failure:
+        raise
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="SERVICE_INVOCATION_VALIDATION",
+            failure_code=SERVICE_INVOCATION_INVALID,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_NO,
+        ) from None
 
     if source["outcome_kind"] == OUTCOME_NO_TRADE:
-        return _publish_no_trade(
-            source=source,
-            publication_root=root,
-            recorded_at=published_at,
-        )
+        try:
+            return _publish_no_trade(
+                source=source,
+                publication_root=root,
+                recorded_at=published_at,
+            )
+        except Phase09RExit7Failure:
+            raise
+        except Exception as exc:
+            raise classified_failure(
+                failure_stage="PRODUCTION_SIGNAL_SERVICE_INVOCATION",
+                failure_code=PRODUCTION_SIGNAL_SERVICE_FAILED,
+                exc=exc,
+                telegram_boundary_reached=BOUNDARY_NO,
+            ) from None
 
     return _publish_signal(
         source=source,
@@ -123,15 +157,16 @@ def _validate_invocation(
         source = validate_production_signal_input(
             copy.deepcopy(source_envelope)
         )
-    except (ProductionSignalContractError, TypeError, ValueError) as exc:
-        raise ProductionSignalServiceError("invalid source contract") from exc
-
-    try:
         source_versions = _validate_versions(source["component_versions"])
-    except ProductionSignalServiceError as exc:
-        raise ProductionSignalServiceError("invalid source contract") from exc
-    if versions != source_versions:
-        raise ProductionSignalServiceError("component version mismatch")
+        if versions != source_versions:
+            raise ProductionSignalServiceError("component version mismatch")
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="SOURCE_CONTRACT_VALIDATION",
+            failure_code=SOURCE_CONTRACT_REJECTED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_NO,
+        ) from None
 
     return copy.deepcopy(source), copy.deepcopy(versions), root
 
@@ -227,21 +262,30 @@ def _publish_signal(
             publication_payload_hash=publication_payload_hash,
             source_payload_hash=source_payload_hash,
         )
-    except (ProductionSignalContractError, TypeError, ValueError) as exc:
-        raise ProductionSignalServiceError(
-            "publication contract failure"
-        ) from exc
+        detached_payload = copy.deepcopy(publication_payload)
+        if intent["component_versions"] != component_versions:
+            raise ProductionSignalServiceError("component version mismatch")
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_IDENTITY_BUILD",
+            failure_code=PUBLICATION_IDENTITY_BUILD_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_NO,
+        ) from None
 
-    if intent["component_versions"] != component_versions:
-        raise ProductionSignalServiceError("component version mismatch")
-
-    existing = _read_existing(
+    existing = _observed_read_existing(
         publication_root=publication_root,
         signal_id=signal_id,
         delivery_id=delivery_id,
+        telegram_boundary_reached=BOUNDARY_NO,
     )
     if existing is not None:
-        return _existing_result(existing, intent, publication_root)
+        return _observed_existing_result(
+            existing,
+            intent,
+            publication_root,
+            telegram_boundary_reached=BOUNDARY_NO,
+        )
 
     try:
         artifact_path = publish_publication_intent(
@@ -249,18 +293,33 @@ def _publish_signal(
             payload=copy.deepcopy(intent),
         )
     except ProductionSignalArtifactError as exc:
-        concurrent = _read_existing(
+        concurrent = _observed_read_existing(
             publication_root=publication_root,
             signal_id=signal_id,
             delivery_id=delivery_id,
+            telegram_boundary_reached=BOUNDARY_NO,
         )
         if concurrent is not None:
-            return _existing_result(concurrent, intent, publication_root)
-        raise ProductionSignalServiceError(
-            "publication artifact failure"
-        ) from exc
+            return _observed_existing_result(
+                concurrent,
+                intent,
+                publication_root,
+                telegram_boundary_reached=BOUNDARY_NO,
+            )
+        raise classified_failure(
+            failure_stage="PUBLICATION_INTENT_PERSIST",
+            failure_code=PUBLICATION_INTENT_PERSIST_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_NO,
+        ) from None
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_INTENT_PERSIST",
+            failure_code=PUBLICATION_INTENT_PERSIST_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_NO,
+        ) from None
 
-    detached_payload = copy.deepcopy(publication_payload)
     try:
         receipt = delivery_adapter(
             detached_payload,
@@ -268,35 +327,149 @@ def _publish_signal(
             destination_id=destination_id,
         )
     except Exception:
-        completed = _build_completion(
+        completed = _observed_build_completion(
             intent=intent,
             delivery_receipt=None,
             failure=copy.deepcopy(_SANITIZED_FAILURE),
         )
     else:
-        validated_receipt = _validate_receipt(
-            receipt,
-            channel=channel,
-            destination_id=destination_id,
-            published_at=published_at,
-        )
-        completed = _build_completion(
-            intent=intent,
-            delivery_receipt=validated_receipt,
-            failure=None,
-        )
+        try:
+            validated_receipt = _validate_receipt(
+                receipt,
+                channel=channel,
+                destination_id=destination_id,
+                published_at=published_at,
+            )
+            completed = _build_completion(
+                intent=intent,
+                delivery_receipt=validated_receipt,
+                failure=None,
+            )
+        except Phase09RExit7Failure:
+            raise
+        except Exception as exc:
+            raise classified_failure(
+                failure_stage="DELIVERY_COMPLETION_BUILD",
+                failure_code=DELIVERY_COMPLETION_BUILD_FAILED,
+                exc=exc,
+                telegram_boundary_reached=BOUNDARY_YES,
+            ) from None
 
     try:
         artifact_path = publish_completed_publication(
             publication_root=publication_root,
             payload=copy.deepcopy(completed),
         )
-    except ProductionSignalArtifactError as exc:
-        raise ProductionSignalServiceError(
-            "completion artifact failure"
-        ) from exc
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_COMPLETION_PERSIST",
+            failure_code=PUBLICATION_COMPLETION_PERSIST_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_YES,
+        ) from None
 
-    return _completed_result(completed, artifact_path)
+    installed = _observed_read_existing(
+        publication_root=publication_root,
+        signal_id=signal_id,
+        delivery_id=delivery_id,
+        telegram_boundary_reached=BOUNDARY_YES,
+    )
+    if installed is None:
+        raise classified_failure(
+            failure_stage="PUBLICATION_READBACK",
+            failure_code=PUBLICATION_READBACK_FAILED,
+            exc=FileNotFoundError(),
+            telegram_boundary_reached=BOUNDARY_YES,
+        ) from None
+    return _observed_completed_result(installed, artifact_path)
+
+
+def _observed_read_existing(
+    *,
+    publication_root: Path,
+    signal_id: str,
+    delivery_id: str,
+    telegram_boundary_reached: str,
+) -> dict[str, Any] | None:
+    try:
+        return _read_existing(
+            publication_root=publication_root,
+            signal_id=signal_id,
+            delivery_id=delivery_id,
+        )
+    except Phase09RExit7Failure:
+        raise
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_READBACK",
+            failure_code=PUBLICATION_READBACK_FAILED,
+            exc=exc,
+            telegram_boundary_reached=telegram_boundary_reached,
+        ) from None
+
+
+def _observed_existing_result(
+    publication: Mapping[str, Any],
+    expected_intent: Mapping[str, Any],
+    publication_root: Path,
+    *,
+    telegram_boundary_reached: str,
+) -> dict[str, Any]:
+    try:
+        return _existing_result(
+            publication,
+            expected_intent,
+            publication_root,
+        )
+    except Phase09RExit7Failure:
+        raise
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_READBACK",
+            failure_code=PUBLICATION_READBACK_FAILED,
+            exc=exc,
+            telegram_boundary_reached=telegram_boundary_reached,
+        ) from None
+
+
+def _observed_build_completion(
+    *,
+    intent: Mapping[str, Any],
+    delivery_receipt: Mapping[str, Any] | None,
+    failure: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    try:
+        return _build_completion(
+            intent=intent,
+            delivery_receipt=delivery_receipt,
+            failure=failure,
+        )
+    except Phase09RExit7Failure:
+        raise
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="DELIVERY_COMPLETION_BUILD",
+            failure_code=DELIVERY_COMPLETION_BUILD_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_YES,
+        ) from None
+
+
+def _observed_completed_result(
+    publication: Mapping[str, Any],
+    artifact_path: Path,
+) -> dict[str, Any]:
+    try:
+        return _completed_result(publication, artifact_path)
+    except Phase09RExit7Failure:
+        raise
+    except Exception as exc:
+        raise classified_failure(
+            failure_stage="PUBLICATION_READBACK",
+            failure_code=PUBLICATION_READBACK_FAILED,
+            exc=exc,
+            telegram_boundary_reached=BOUNDARY_YES,
+        ) from None
 
 
 def _read_existing(
