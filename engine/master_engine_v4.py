@@ -1,6 +1,10 @@
 import json
+import math
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+
+from pandas import Timestamp
 
 from engine.scanner import scan_market
 from engine.validated_pipeline_v4 import run_validated_pipeline_v4
@@ -38,6 +42,41 @@ def _hash_file(path: Path) -> str:
 def _hash_payload(v) -> str:
     import json
     return hashlib.sha256(json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _normalize_eligible_setup(value):
+    if value is None or type(value) in (bool, int, str):
+        return value
+
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise TypeError("eligible setup contains a non-finite float")
+        return value
+
+    if type(value) is Timestamp:
+        return value.isoformat()
+
+    if isinstance(value, Mapping):
+        normalized = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError("eligible setup mapping keys must be strings")
+            normalized[key] = _normalize_eligible_setup(item)
+        return normalized
+
+    if type(value) is list:
+        return [
+            _normalize_eligible_setup(item)
+            for item in value
+        ]
+
+    if type(value) is tuple:
+        return tuple(
+            _normalize_eligible_setup(item)
+            for item in value
+        )
+
+    raise TypeError("eligible setup contains an unsupported value type")
 
 
 
@@ -157,17 +196,33 @@ def run_master_engine_v4(
                     take_profit_price = setup["golden_zone"]["take_profit"].get("price")
                     take_profit = {"tp1": take_profit_price, "tp2": take_profit_price}
 
-                valid_until = setup.get("valid_until", "2026-12-31T23:59:59Z")
+                normalized_entry_zone_min = float(entry_zone_min)
+                normalized_entry_zone_max = float(entry_zone_max)
+                normalized_stop_loss = float(stop_loss)
+                normalized_take_profit_tp1 = float(take_profit["tp1"])
+                normalized_take_profit_tp2 = float(
+                    take_profit.get("tp2", take_profit["tp1"])
+                )
+                normalized_setup = _normalize_eligible_setup(setup)
 
                 eligible_setups = [{
-                    "symbol": setup["symbol"],
-                    "side": setup.get("side", "LONG"),
-                    "entry_zone": {"min": float(entry_zone_min), "max": float(entry_zone_max)},
-                    "stop_loss": float(stop_loss),
-                    "take_profit": {"tp1": float(take_profit["tp1"]), "tp2": float(take_profit.get("tp2", take_profit["tp1"]))},
-                    "valid_until": valid_until,
+                    "symbol": normalized_setup["symbol"],
+                    "side": normalized_setup.get("side", "LONG"),
+                    "entry_zone": {
+                        "min": normalized_entry_zone_min,
+                        "max": normalized_entry_zone_max,
+                    },
+                    "stop_loss": normalized_stop_loss,
+                    "take_profit": {
+                        "tp1": normalized_take_profit_tp1,
+                        "tp2": normalized_take_profit_tp2,
+                    },
+                    "valid_until": normalized_setup.get(
+                        "valid_until",
+                        "2026-12-31T23:59:59Z",
+                    ),
                     "strategy_version": "v4",
-                    "source_payload_hash": _hash_payload(setup)
+                    "source_payload_hash": _hash_payload(normalized_setup)
                 }]
         except Exception as exc:
             raise classified_failure(
