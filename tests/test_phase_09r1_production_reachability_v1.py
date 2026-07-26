@@ -127,8 +127,25 @@ def test_real_path_reachability(
     mock_get_symbols, mock_get_ohlcv, mock_pre_delivery_ohlcv, mock_requests_get,
     mock_openai,
     mock_fetch_ohlcv,
-    test_env, tmp_path
+    test_env, tmp_path, monkeypatch
 ):
+    repository_root = Path(__file__).resolve().parents[1]
+    repository_runtime_roots = (
+        repository_root / "data" / "v4_outcomes",
+        repository_root / "data" / "validated_snapshots_v4",
+    )
+
+    def repository_runtime_files():
+        return {
+            path.relative_to(repository_root): path.read_bytes()
+            for root in repository_runtime_roots
+            for path in root.rglob("*")
+            if path.is_file()
+        }
+
+    repository_runtime_files_before = repository_runtime_files()
+    monkeypatch.chdir(tmp_path)
+
     mock_get_symbols.return_value = ["TEST/USDT:USDT"]
     mock_get_ohlcv.return_value = get_dummy_ohlcv()
     mock_pre_delivery_ohlcv.return_value = get_dummy_ohlcv()
@@ -270,4 +287,16 @@ def test_real_path_reachability(
         
     # Assert duplicate suppression behavior
     assert events.count("telegram_http") == 1
+    assert list(
+        (tmp_path / "data" / "v4_outcomes").glob(
+            "outcome_entry_v4_*.json"
+        )
+    )
+    assert (
+        tmp_path
+        / "data"
+        / "validated_snapshots_v4"
+        / "validated_v4_20260101_120000.json"
+    ).is_file()
+    assert repository_runtime_files() == repository_runtime_files_before
     
