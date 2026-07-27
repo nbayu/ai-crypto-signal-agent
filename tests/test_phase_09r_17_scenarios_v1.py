@@ -1,5 +1,9 @@
 import os
 import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -157,7 +161,22 @@ def test_16_credentials_do_not_appear_in_logs_exceptions_or_result_objects(mock_
     # exception is swallowed, not logged to stdout with credentials
 
 def test_17_no_phase_10_12_module_is_imported():
-    import sys
-    # Ensure no engine.phase12 or engine.stage_a etc are in sys.modules
-    bad_modules = [m for m in sys.modules if "phase10" in m or "phase11" in m or "phase12" in m or "stage_a" in m or "stage_b" in m]
-    assert len(bad_modules) == 0
+    probe = """
+import sys
+import engine.run_production_signal_v1
+bad = sorted(
+    name for name in sys.modules
+    if name.startswith(("engine.phase_10", "engine.phase_11", "engine.phase_12"))
+    or name == "engine.controlled_production_signal_cycle_v1"
+)
+if bad:
+    raise SystemExit("unexpected downstream imports: " + ",".join(bad))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr

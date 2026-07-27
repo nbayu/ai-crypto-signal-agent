@@ -122,6 +122,13 @@ def test_characterize_phase08_master_engine_path(tmp_path):
             oi_provider=lambda s: {"oi_change_pct": 5.0, "data_status": "OK"}
         )
 
+    import sys
+    downstream_modules = {
+        "engine.news_intelligence",
+        "engine.controlled_production_signal_cycle_v1",
+    }
+    downstream_before = downstream_modules.intersection(sys.modules)
+
     run_out = run_master_engine_v4(
         scanner=fake_scanner,
         pipeline=fake_pipeline,
@@ -156,9 +163,10 @@ def test_characterize_phase08_master_engine_path(tmp_path):
     import sys
     assert "engine.production_signal_service_v1" in sys.modules
 
-    # 11. no Phase 10-12 module is imported
-    assert "engine.news_intelligence" not in sys.modules
-    assert "engine.controlled_production_signal_cycle_v1" not in sys.modules
+    # 11. this Phase 08 call imports no Phase 10-12 module.  Compare the
+    # import delta so this remains deterministic in the full pytest process.
+    downstream_after = downstream_modules.intersection(sys.modules)
+    assert downstream_after == downstream_before
 
     # 6 & 7. Quota and Slot behavior is captured (Absent in production path)
     with pytest.raises(KeyError):
