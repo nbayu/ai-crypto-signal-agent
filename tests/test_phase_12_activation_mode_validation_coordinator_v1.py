@@ -18,7 +18,7 @@ from engine.phase_12_activation_mode_validation_coordinator_v1 import (
 
 
 _NOW = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
-_COMMIT = "415c77c4b9a021bbc211797d7b41e74c55c18538"
+_COMMIT = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 _CLOSED_JSON = '{"launcher_result":"BLOCKED"}'
 _AUTH_FAILURE_JSON = '{"executable_result":"ACTIVATION_MODE_AUTHORIZATION_FAILURE"}'
 _UNEXPECTED_JSON = '{"executable_result":"UNEXPECTED_FAILURE"}'

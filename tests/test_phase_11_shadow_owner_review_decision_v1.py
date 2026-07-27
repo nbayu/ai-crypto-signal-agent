@@ -45,7 +45,7 @@ from engine.phase_11_shadow_owner_review_decision_v1 import (
 )
 
 
-BASELINE = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+BASELINE = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 EVALUATED_AT = datetime(2026, 7, 17, 0, 14, tzinfo=UTC)
 REVIEWED_AT = datetime(2026, 7, 17, 0, 15, tzinfo=UTC)
 

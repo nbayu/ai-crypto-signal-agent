@@ -33,7 +33,7 @@ from engine.phase_11_shadow_pilot_successor_executable_input_boundary_reconcilia
 
 
 BASELINE = "408f1c66c0092e48d4aa02e8ef6459c174f7c52f"
-PHASE09 = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+PHASE09 = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 REQUEST_REFERENCE = "PHASE_11_PILOT_EXECUTABLE_INPUT_CONTENT_INTEGRITY_ACCEPTANCE_REQUEST_001"
 RESULT_REFERENCE = "PHASE_11_PILOT_EXECUTABLE_INPUT_CONTENT_INTEGRITY_RESULT_BOUNDARY_001"
 EVIDENCE_REFERENCE = "PHASE_11_PILOT_EXECUTABLE_INPUT_CONTENT_INTEGRITY_ACCEPTANCE_BOUNDARY_001"
@@ -250,8 +250,8 @@ def test_absent_result_and_concrete_evidence_are_exactly_blocked_and_linked():
     assert not any(getattr(result, name) for name in result.__dataclass_fields__ if name not in {"schema_version", "result_boundary_id", "result_boundary_reference", "request_reference", "request_identity", "result_state", "result_present", "result_reference", "result_identity"})
     evidence = _evidence()
     assert evidence.locked_repository_baseline == BASELINE
-    assert evidence.content_readiness_decision_identity == "dee8284ca5fdadf414b04c0e689fc10c777759e18bf7954f7efce1f851652822"
-    assert evidence.executable_input_creation_boundary_identity == "f82aef927d6d0e4c0e021e597bd8fcba8ed9426e5c56ad551947ea1052f1c097"
+    assert evidence.content_readiness_decision_identity == "437352460a8410929abd80a5548ff0ee2bf54bc81b6f2af50682efdebca2309b"
+    assert evidence.executable_input_creation_boundary_identity == "e6ea7eaf9dd0e79aaba718ef4412c418097236d20b1c435784fb64cfd3efd9a1"
     assert evidence.acceptance_boundary_defined is True
     assert evidence.blocker_codes == BLOCKERS and evidence.reason_codes == REASONS
     assert evidence.launch_readiness is ShadowPhase11PilotLaunchReadinessV1.NOT_READY_FOR_LAUNCH

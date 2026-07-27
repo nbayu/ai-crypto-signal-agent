@@ -102,7 +102,7 @@ from engine.phase_11_shadow_route_cost_evidence_v1 import (
 )
 
 
-BASELINE = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+BASELINE = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 START = datetime(2026, 7, 17, 0, 0, tzinfo=UTC)
 END = datetime(2026, 7, 17, 0, 10, tzinfo=UTC)
 ROUTE_AT = datetime(2026, 7, 17, 0, 11, tzinfo=UTC)

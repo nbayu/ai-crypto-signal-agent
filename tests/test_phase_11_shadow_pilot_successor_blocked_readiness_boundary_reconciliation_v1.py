@@ -43,7 +43,7 @@ from engine.phase_11_shadow_pilot_successor_blocked_readiness_boundary_reconcili
 
 
 BASELINE = "df062d6192acd4f750c4f9757f2694fbde93e72a"
-PHASE09 = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+PHASE09 = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 EVIDENCE_REFERENCE = "PHASE_11_PILOT_SUCCESSOR_BLOCKED_READINESS_BOUNDARY_RECONCILIATION_001"
 BLOCKERS = tuple(sorted((
     "CREDENTIAL_CONFIGURATION_NOT_VERIFIED",
@@ -161,7 +161,7 @@ def test_closed_reconciliation_and_predecessor_states_are_exact_and_evidence_is_
 def test_predecessor_is_exactly_linked_preserved_unmutated_untransitioned_and_non_authoritative():
     evidence = _evidence()
     assert evidence.predecessor_reconciliation_reference == "PHASE_11_PILOT_BLOCKED_READINESS_RECONCILIATION_001"
-    assert evidence.predecessor_reconciliation_identity == "4cc8db3264a57480af050d286d9fd1acd5935841f94f4034d7a3cece661a9b4c"
+    assert evidence.predecessor_reconciliation_identity == "92e9773c94cf8263202976e9c6d6f9c62a7e66b8de59ada63992056a4e9a2bd0"
     assert evidence.predecessor_status is ShadowPhase11SuccessorBoundaryPredecessorStatusV1.PREDECESSOR_RECONCILIATION_PRESERVED
     assert not any(getattr(evidence, field) for field in (
         "predecessor_reconciliation_mutated",
@@ -174,11 +174,11 @@ def test_pricing_and_credential_boundaries_are_exactly_recognized_without_execut
     evidence = _evidence()
     assert (evidence.pricing_revalidation_boundary_reference, evidence.pricing_revalidation_boundary_identity) == (
         "PHASE_11_PILOT_PRICING_REVALIDATION_BOUNDARY_001",
-        "33d25cac84df17608b41008b4c91160dd57354e059f1ae6f6a711db2a3beed59",
+        "fc34f6f222825f29669ce4f575314eabeb887135ef54bc3613836f4d46ccb0fc",
     )
     assert (evidence.credential_verification_boundary_reference, evidence.credential_verification_boundary_identity) == (
         "PHASE_11_PILOT_CREDENTIAL_CONFIGURATION_VERIFICATION_BOUNDARY_001",
-        "f4b9ef09b6e17875a484d833525ccc3410049fc885f20c149f4df7445515fc91",
+        "91991bb1f7947eb43acca9983c53a686667f1ab58be21bd769224fec174a679c",
     )
     assert evidence.pricing_revalidation_descriptor_defined is True
     assert evidence.credential_verification_descriptor_defined is True
@@ -205,11 +205,11 @@ def test_current_readiness_lineage_is_exactly_linked_and_remains_non_executable_
     evidence = _evidence()
     assert (evidence.pricing_freshness_policy_reference, evidence.pricing_freshness_policy_identity) == (
         "PHASE_11_PILOT_PRICING_FRESHNESS_POLICY_001",
-        "17fda374a9709e644ae2d0d84cd0b9a291dbef743cfe8a96e2ab913e83e6055e",
+        "2e63c1ee2b4912d9361a1b4793fbb1f866bdada4bbfd89a1691074d92757d603",
     )
-    assert evidence.input_run_manifest_readiness_identity == "9dffc3370346370284fe5a630a32e78be6def065428060ce70eea8cddf0fd228"
-    assert evidence.current_runtime_integrity_identity == "72342b2390f32463f6d5104f47d3dc29ff5067349daec61a4fe5565de725b51e"
-    assert evidence.reservation_bound_identity == "424a3a332c31a3143ee3a4b6ab8b37b7ec440ea0fcf3c6a01566e451bb11cb70"
+    assert evidence.input_run_manifest_readiness_identity == "30ea2ab4f8c3aef604358f3688cf88b348cad6cc98ec887ce98502acabc4e944"
+    assert evidence.current_runtime_integrity_identity == "45d1446eb173d399f748b3b11e616d51391947762d3b36848cbd4f3d5b3228ab"
+    assert evidence.reservation_bound_identity == "76b1b136246a260139dba0020009afa8d21b19c6b4bbf12913bdd9d47c00ddf4"
     assert evidence.candidate_input_metadata_defined is True and evidence.proposed_manifest_defined is True
     assert evidence.launch_readiness is ShadowPhase11PilotLaunchReadinessV1.NOT_READY_FOR_LAUNCH
     assert evidence.production_effect == "NONE" and evidence.zero_production_proof == "PROVEN_NONE"

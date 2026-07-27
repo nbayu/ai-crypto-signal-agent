@@ -92,7 +92,7 @@ from engine.phase_11_shadow_comparative_evaluator_v1 import (
 )
 
 
-LOCKED_PHASE09_COMMIT = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+LOCKED_PHASE09_COMMIT = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 UTC_NOW = datetime(2026, 7, 17, 0, 7, tzinfo=UTC)
 
 

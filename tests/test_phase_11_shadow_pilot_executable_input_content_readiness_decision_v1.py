@@ -44,7 +44,7 @@ from engine.phase_11_shadow_pilot_successor_executable_input_boundary_reconcilia
 
 
 BASELINE = "cc1127f57ebfc0a880fc22d57ded60fcbd59cc9f"
-PHASE09 = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+PHASE09 = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 EVIDENCE_REFERENCE = "PHASE_11_PILOT_EXECUTABLE_INPUT_CONTENT_READINESS_DECISION_001"
 CHECKS = (
     ShadowPhase11ExecutableInputContentPrerequisiteCheckKindV1.CANDIDATE_METADATA_COMPLETE,
@@ -179,15 +179,15 @@ def test_closed_state_and_prerequisite_vocabulary_are_exact_and_evidence_is_immu
 def test_concrete_decision_links_exact_upstream_identity_and_is_conservatively_blocked():
     evidence = _evidence()
     assert evidence.locked_repository_baseline == BASELINE
-    assert evidence.current_successor_reconciliation_identity == "709c842c8f56135220ff9e68f68bc0693e48ae2047d25f72d9929295f8f90215"
-    assert evidence.executable_input_creation_boundary_identity == "f82aef927d6d0e4c0e021e597bd8fcba8ed9426e5c56ad551947ea1052f1c097"
-    assert evidence.input_run_manifest_readiness_identity == "9dffc3370346370284fe5a630a32e78be6def065428060ce70eea8cddf0fd228"
+    assert evidence.current_successor_reconciliation_identity == "b95dca79c2c140cd618d2239e7c1152268e063e9db23a67671782c4a7d66990a"
+    assert evidence.executable_input_creation_boundary_identity == "e6ea7eaf9dd0e79aaba718ef4412c418097236d20b1c435784fb64cfd3efd9a1"
+    assert evidence.input_run_manifest_readiness_identity == "30ea2ab4f8c3aef604358f3688cf88b348cad6cc98ec887ce98502acabc4e944"
     assert evidence.candidate_input_set_identity == "1be1ead19357168a8dbae5b1018b6a2f484fd2a01723e63d4e4b06b790624f0c"
     assert evidence.proposed_manifest_identity == "d96e281f574beff0e767ab94bf4d7a04d3d180291e4ad16a0069fcd277ac060a"
-    assert evidence.pricing_revalidation_boundary_identity == "33d25cac84df17608b41008b4c91160dd57354e059f1ae6f6a711db2a3beed59"
-    assert evidence.credential_verification_boundary_identity == "f4b9ef09b6e17875a484d833525ccc3410049fc885f20c149f4df7445515fc91"
-    assert evidence.current_runtime_integrity_identity == "72342b2390f32463f6d5104f47d3dc29ff5067349daec61a4fe5565de725b51e"
-    assert evidence.reservation_bound_identity == "424a3a332c31a3143ee3a4b6ab8b37b7ec440ea0fcf3c6a01566e451bb11cb70"
+    assert evidence.pricing_revalidation_boundary_identity == "fc34f6f222825f29669ce4f575314eabeb887135ef54bc3613836f4d46ccb0fc"
+    assert evidence.credential_verification_boundary_identity == "91991bb1f7947eb43acca9983c53a686667f1ab58be21bd769224fec174a679c"
+    assert evidence.current_runtime_integrity_identity == "45d1446eb173d399f748b3b11e616d51391947762d3b36848cbd4f3d5b3228ab"
+    assert evidence.reservation_bound_identity == "76b1b136246a260139dba0020009afa8d21b19c6b4bbf12913bdd9d47c00ddf4"
     assert evidence.readiness_assessment_defined is True
     assert evidence.candidate_metadata_complete is True
     assert evidence.route_role_and_bounds_fixed is True

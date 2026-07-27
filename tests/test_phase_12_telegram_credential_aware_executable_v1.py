@@ -314,7 +314,7 @@ def test_activation_integration_source_has_fixed_path_default_reader_and_no_conf
     assert not any(value in source for value in ("socket", "requests", "httpx", "subprocess", "logging"))
 
 
-_ACCEPTED_LOCKED_COMMIT = "415c77c4b9a021bbc211797d7b41e74c55c18538"
+_ACCEPTED_LOCKED_COMMIT = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 
 
 class _Coordinator:

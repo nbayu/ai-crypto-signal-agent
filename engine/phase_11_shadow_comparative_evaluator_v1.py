@@ -35,7 +35,7 @@ from engine.phase_11_shadow_input_contracts_v1 import (
 
 
 UTC = timezone.utc
-LOCKED_PHASE09_BASELINE = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+LOCKED_PHASE09_BASELINE = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _REASON = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")

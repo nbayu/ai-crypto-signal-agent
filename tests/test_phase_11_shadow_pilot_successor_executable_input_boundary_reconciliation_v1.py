@@ -43,7 +43,7 @@ from engine.phase_11_shadow_pilot_successor_executable_input_boundary_reconcilia
 
 
 BASELINE = "55c9fda8c6decc974528f86b3306ff7a9dfa8200"
-PHASE09 = "a84375fa85c2f318944adfe57aaabac6e43c219c"
+PHASE09 = "e50041f7296bd9e042f749b6a98393b3df9747a1"
 EVIDENCE_REFERENCE = (
     "PHASE_11_PILOT_SUCCESSOR_EXECUTABLE_INPUT_BOUNDARY_RECONCILIATION_001"
 )
@@ -201,14 +201,14 @@ def test_predecessor_and_executable_input_boundary_are_exactly_linked_and_preser
         evidence.predecessor_successor_reconciliation_identity,
     ) == (
         "PHASE_11_PILOT_SUCCESSOR_BLOCKED_READINESS_BOUNDARY_RECONCILIATION_001",
-        "e5873183a2d289283d9fc2849cb28e86aaf1a69bbd8ac5e9f7709877c9496446",
+        "e64fa932cc399903d947d68828854c63b7a955eb1b6ce83c7cfef648f73a96be",
     )
     assert (
         evidence.executable_input_creation_boundary_reference,
         evidence.executable_input_creation_boundary_identity,
     ) == (
         "PHASE_11_PILOT_EXECUTABLE_INPUT_CREATION_BOUNDARY_001",
-        "f82aef927d6d0e4c0e021e597bd8fcba8ed9426e5c56ad551947ea1052f1c097",
+        "e6ea7eaf9dd0e79aaba718ef4412c418097236d20b1c435784fb64cfd3efd9a1",
     )
     assert evidence.executable_input_creation_descriptor_defined is True
     assert not any(getattr(evidence, field) for field in (
@@ -237,7 +237,7 @@ def test_pricing_credential_and_other_current_state_linkage_remain_blocked():
     assert evidence.candidate_input_metadata_defined is True
     assert evidence.proposed_manifest_defined is True
     assert evidence.input_run_manifest_readiness_identity == (
-        "9dffc3370346370284fe5a630a32e78be6def065428060ce70eea8cddf0fd228"
+        "30ea2ab4f8c3aef604358f3688cf88b348cad6cc98ec887ce98502acabc4e944"
     )
     assert evidence.candidate_input_set_identity == (
         "1be1ead19357168a8dbae5b1018b6a2f484fd2a01723e63d4e4b06b790624f0c"
