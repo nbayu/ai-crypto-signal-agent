@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    printf '%s\n' "usage: $0 --backup-root PATH [--destdir PATH]" >&2
+    exit 64
+}
+
+backup_root=""
+destdir=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --backup-root)
+            [[ "$#" -ge 2 ]] || usage
+            backup_root="$2"
+            shift 2
+            ;;
+        --destdir)
+            [[ "$#" -ge 2 ]] || usage
+            destdir="$2"
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+[[ "$backup_root" = /* && -d "$backup_root" && ! -L "$backup_root" ]] || exit 65
+[[ -f "$backup_root/host-rollback-state.txt" && ! -L "$backup_root/host-rollback-state.txt" ]] || exit 65
+
+rooted() {
+    printf '%s%s\n' "$destdir" "$1"
+}
+
+restore_path() {
+    local key="$1"
+    local destination="$2"
+    local backup_name="$3"
+    local expected_state
+    expected_state="$(awk -F= -v key="$key" '$1 == key { print $2 }' "$backup_root/host-rollback-state.txt")"
+    case "$expected_state" in
+        PRESENT)
+            [[ -f "$backup_root/$backup_name" && ! -L "$backup_root/$backup_name" ]] || exit 66
+            if [[ ! -d "$(dirname -- "$destination")" || -L "$(dirname -- "$destination")" ]]; then
+                install -d -o root -g root -m 0755 "$(dirname -- "$destination")"
+            fi
+            local temporary
+            temporary="$(mktemp "$(dirname -- "$destination")/.f4-rollback.XXXXXXXX")"
+            install -o root -g root -m "$(stat -c '%a' "$backup_root/$backup_name")" \
+                "$backup_root/$backup_name" "$temporary"
+            mv -fT -- "$temporary" "$destination"
+            ;;
+        ABSENT)
+            if [[ -e "$destination" || -L "$destination" ]]; then
+                unlink -- "$destination"
+            fi
+            ;;
+        *)
+            exit 66
+            ;;
+    esac
+}
+
+restore_path SERVICE_STATE "$(rooted /etc/systemd/system/ai-crypto-signal-agent.service)" ai-crypto-signal-agent.service.before
+restore_path TIMER_STATE "$(rooted /etc/systemd/system/ai-crypto-signal-agent.timer)" ai-crypto-signal-agent.timer.before
+restore_path HEALTH_STATE "$(rooted /usr/local/sbin/ai-crypto-signal-agent-health)" ai-crypto-signal-agent-health.before
+restore_path RETENTION_STATE "$(rooted /etc/tmpfiles.d/ai-crypto-signal-agent.conf)" ai-crypto-signal-agent.conf.before
+restore_path MARKER_STATE "$(rooted /var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker)" accepted-locked-commit.marker.before
+restore_path RELEASE_REF_STATE "$(rooted /var/lib/ai-crypto-signal-agent/installed-release.path)" installed-release.path.before
+
+printf '%s\n' "F4_ROLLBACK=COMPLETE"
+printf '%s\n' "SERVICE_OPERATION_EXECUTED=NO"
+printf '%s\n' "TIMER_ENABLEMENT_OPERATION_EXECUTED=NO"

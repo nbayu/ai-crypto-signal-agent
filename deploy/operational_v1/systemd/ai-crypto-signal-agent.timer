@@ -1,0 +1,11 @@
+[Unit]
+Description=AI Crypto Signal Agent F4 30-minute inactive cadence
+
+[Timer]
+Unit=ai-crypto-signal-agent.service
+OnUnitInactiveSec=30min
+AccuracySec=1min
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -11,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 UNIT = ROOT / "deploy/systemd/ai-crypto-signal-agent.service.in"
 POLICY = ROOT / "docs/PHASE_09R1_MANUAL_ONE_SHOT_OPERATION.md"
 RUNTIME_ROOT = "/var/lib/ai-crypto-signal-agent/phase09r1"
+AUTHORIZED_F4_TIMER = Path(
+    "deploy/operational_v1/systemd/ai-crypto-signal-agent.timer"
+)
+F4_INSTALLER = Path(
+    "deploy/operational_v1/bin/ai-crypto-signal-agent-install"
+)
 
 
 def _unit_text():
@@ -30,10 +36,100 @@ def _directives(text, name):
     ]
 
 
+def _assert_phase09r1_and_f4_timer_scope(root):
+    deploy_root = root / "deploy"
+    historical_phase09r1_timers = sorted(
+        (deploy_root / "systemd").rglob("*.timer")
+    )
+    assert historical_phase09r1_timers == []
+
+    timer_files = sorted(deploy_root.rglob("*.timer"))
+    authorized_timer = root / AUTHORIZED_F4_TIMER
+    assert timer_files == [authorized_timer]
+
+    timer_text = authorized_timer.read_text(encoding="utf-8")
+    assert _directives(timer_text, "Unit") == [
+        "ai-crypto-signal-agent.service"
+    ]
+    assert _directives(timer_text, "OnUnitInactiveSec") == ["30min"]
+    assert _directives(timer_text, "AccuracySec") == ["1min"]
+    assert _directives(timer_text, "Persistent") == ["false"]
+    for forbidden_schedule in (
+        "OnBootSec",
+        "OnStartupSec",
+        "OnActiveSec",
+        "OnUnitActiveSec",
+        "OnCalendar",
+    ):
+        assert _directives(timer_text, forbidden_schedule) == []
+
+    installer_text = (root / F4_INSTALLER).read_text(encoding="utf-8")
+    assert re.search(
+        r"\bsystemctl\s+(?:enable|start|restart|try-restart|reenable|preset)\b",
+        installer_text,
+    ) is None
+
+
 def test_contract_file_scope_and_no_timer():
     assert UNIT.is_file()
     assert POLICY.is_file()
-    assert not list((ROOT / "deploy").rglob("*.timer"))
+    _assert_phase09r1_and_f4_timer_scope(ROOT)
+
+
+@pytest.mark.parametrize(
+    "negative_case",
+    (
+        "second_timer",
+        "nonauthorized_path",
+        "persistent_catchup",
+        "boot_catchup",
+        "wrong_target",
+        "installer_enablement",
+    ),
+)
+def test_f4_timer_scope_negative_controls(tmp_path, negative_case):
+    fixture_root = tmp_path / "repository"
+    shutil.copytree(ROOT / "deploy", fixture_root / "deploy")
+    timer = fixture_root / AUTHORIZED_F4_TIMER
+    installer = fixture_root / F4_INSTALLER
+
+    if negative_case == "second_timer":
+        second = fixture_root / "deploy/unauthorized-second.timer"
+        second.write_text(timer.read_text(encoding="utf-8"), encoding="utf-8")
+    elif negative_case == "nonauthorized_path":
+        other = fixture_root / "deploy/systemd/f4.timer"
+        timer.rename(other)
+    elif negative_case == "persistent_catchup":
+        timer.write_text(
+            timer.read_text(encoding="utf-8").replace(
+                "Persistent=false", "Persistent=true"
+            ),
+            encoding="utf-8",
+        )
+    elif negative_case == "boot_catchup":
+        timer.write_text(
+            timer.read_text(encoding="utf-8") + "OnBootSec=1min\n",
+            encoding="utf-8",
+        )
+    elif negative_case == "wrong_target":
+        timer.write_text(
+            timer.read_text(encoding="utf-8").replace(
+                "Unit=ai-crypto-signal-agent.service",
+                "Unit=another.service",
+            ),
+            encoding="utf-8",
+        )
+    elif negative_case == "installer_enablement":
+        installer.write_text(
+            installer.read_text(encoding="utf-8")
+            + "\nsystemctl enable ai-crypto-signal-agent.timer\n",
+            encoding="utf-8",
+        )
+    else:  # pragma: no cover - parametrization is closed above.
+        raise AssertionError("unknown negative control")
+
+    with pytest.raises(AssertionError):
+        _assert_phase09r1_and_f4_timer_scope(fixture_root)
 
 
 def test_unit_identity_and_exact_entrypoint():

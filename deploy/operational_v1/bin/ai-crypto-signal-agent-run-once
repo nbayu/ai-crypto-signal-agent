@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TRUSTED_CP09_COMMIT="e50041f7296bd9e042f749b6a98393b3df9747a1"
+readonly LOCK_PATH="/run/ai-crypto-signal-agent/operational.lock"
+readonly KILL_SWITCH_PATH="/var/lib/ai-crypto-signal-agent/kill-switch.active"
+readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"
+
+fail_closed() {
+    printf 'F4_LAUNCH_BLOCKED=%s\n' "$1" >&2
+    exit 78
+}
+
+script_path="$(realpath -- "$0")"
+release_root="$(realpath -- "$(dirname -- "$script_path")/../../..")"
+release_name="$(basename -- "$release_root")"
+
+[[ "$release_name" =~ ^[0-9a-f]{40}$ ]] || fail_closed "RELEASE_PATH_IDENTITY"
+[[ -f "$release_root/.f4-release-manifest" && ! -L "$release_root/.f4-release-manifest" ]] ||
+    fail_closed "RELEASE_MANIFEST_FILE"
+[[ -f "$release_root/.f4-sha256-manifest" && ! -L "$release_root/.f4-sha256-manifest" ]] ||
+    fail_closed "RELEASE_SHA256_MANIFEST_FILE"
+
+source_commit="$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.f4-release-manifest")"
+source_tree="$(sed -n 's/^SOURCE_TREE=//p' "$release_root/.f4-release-manifest")"
+release_trust="$(sed -n 's/^TRUSTED_CP09_COMMIT=//p' "$release_root/.f4-release-manifest")"
+[[ "$source_commit" == "$release_name" ]] || fail_closed "RELEASE_COMMIT_IDENTITY"
+[[ "$source_tree" =~ ^[0-9a-f]{40}$ ]] || fail_closed "RELEASE_TREE_IDENTITY"
+[[ "$release_trust" == "$TRUSTED_CP09_COMMIT" ]] || fail_closed "RELEASE_TRUST_IDENTITY"
+
+(
+    cd -- "$release_root"
+    sha256sum --quiet -c .f4-sha256-manifest
+) || fail_closed "RELEASE_BYTE_IDENTITY"
+
+[[ -f "$release_root/TRUSTED_CP09_COMMIT" && ! -L "$release_root/TRUSTED_CP09_COMMIT" ]] ||
+    fail_closed "REPOSITORY_BINDING_FILE"
+[[ "$(wc -c < "$release_root/TRUSTED_CP09_COMMIT")" -eq 41 ]] ||
+    fail_closed "REPOSITORY_BINDING_SIZE"
+[[ "$(sha256sum "$release_root/TRUSTED_CP09_COMMIT" | awk '{print $1}')" == "64fe567ee269739146c30a9111113a07b1fd91d83d46e9e8dbd7fa967f1cbb6f" ]] ||
+    fail_closed "REPOSITORY_BINDING_BYTES"
+
+credential_dir="${CREDENTIALS_DIRECTORY:-}"
+marker_path="${credential_dir}/accepted_locked_commit"
+[[ -n "$credential_dir" && -f "$marker_path" && ! -L "$marker_path" ]] ||
+    fail_closed "RUNTIME_MARKER_FILE"
+[[ "$(wc -c < "$marker_path")" -eq 41 ]] || fail_closed "RUNTIME_MARKER_SIZE"
+[[ "$(sha256sum "$marker_path" | awk '{print $1}')" == "64fe567ee269739146c30a9111113a07b1fd91d83d46e9e8dbd7fa967f1cbb6f" ]] ||
+    fail_closed "RUNTIME_MARKER_BYTES"
+
+if [[ -e "$KILL_SWITCH_PATH" || -L "$KILL_SWITCH_PATH" ]]; then
+    [[ -f "$KILL_SWITCH_PATH" && ! -L "$KILL_SWITCH_PATH" && -r "$KILL_SWITCH_PATH" ]] ||
+        fail_closed "KILL_SWITCH_STATE"
+    printf '%s\n' "F4_LAUNCH_BLOCKED=KILL_SWITCH_ACTIVE" >&2
+    exit 75
+fi
+
+[[ -d "$(dirname -- "$LOCK_PATH")" ]] || fail_closed "LOCK_DIRECTORY"
+exec 9>"$LOCK_PATH"
+flock -n 9 || {
+    printf '%s\n' "F4_LAUNCH_BLOCKED=OVERLAP_LOCK_HELD" >&2
+    exit 75
+}
+
+export PYTHONPATH="$release_root"
+exec /usr/bin/timeout --signal=TERM --kill-after=30s 20m "$PYTHON_BIN" -m engine.run_production_signal_v1

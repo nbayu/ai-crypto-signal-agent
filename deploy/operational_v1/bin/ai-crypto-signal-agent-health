@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TRUSTED_CP09_COMMIT="e50041f7296bd9e042f749b6a98393b3df9747a1"
+readonly TRUSTED_SHA256="64fe567ee269739146c30a9111113a07b1fd91d83d46e9e8dbd7fa967f1cbb6f"
+readonly RELEASE_REF="/var/lib/ai-crypto-signal-agent/installed-release.path"
+readonly RUNTIME_MARKER="/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker"
+readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/kill-switch.active"
+readonly LOCK_PATH="/run/ai-crypto-signal-agent/operational.lock"
+readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent.service"
+readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent.timer"
+readonly TELEGRAM_ENV="/etc/ai-crypto-signal-agent/phase09r1.env"
+readonly PROVIDER_ENV="/etc/ai-crypto-signal-agent/deepseek.env"
+
+failure_count=0
+
+pass_or_fail() {
+    local key="$1"
+    local result="$2"
+    if [[ "$result" == "YES" || "$result" == "PASS" ]]; then
+        printf '%s=%s\n' "$key" "$result"
+    else
+        printf '%s=%s\n' "$key" "$result"
+        failure_count=$((failure_count + 1))
+    fi
+}
+
+verify_exact_marker() {
+    local path="$1"
+    [[ -f "$path" && ! -L "$path" ]] &&
+        [[ "$(wc -c < "$path")" -eq 41 ]] &&
+        [[ "$(sha256sum "$path" | awk '{print $1}')" == "$TRUSTED_SHA256" ]]
+}
+
+verify_env_metadata() {
+    local path="$1"
+    shift
+    [[ -f "$path" && ! -L "$path" ]] || return 1
+    [[ "$(stat -c '%U:%G:%a' "$path")" == "root:root:600" ]] || return 1
+    local key
+    for key in "$@"; do
+        [[ "$(awk -F= -v key="$key" '$1 == key { count += 1; if (length($0) > length(key) + 1) nonempty += 1 } END { print count ":" nonempty }' "$path")" == "1:1" ]] ||
+            return 1
+    done
+    ! LC_ALL=C grep -q $'\r' "$path"
+}
+
+release_root=""
+if [[ -f "$RELEASE_REF" && ! -L "$RELEASE_REF" && "$(wc -l < "$RELEASE_REF")" -eq 1 ]]; then
+    release_root="$(sed -n '1p' "$RELEASE_REF")"
+fi
+
+release_match=NO
+remote_head_match=NO
+binding_match=NO
+marker_match=NO
+service_match=NO
+timer_match=NO
+if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" &&
+      "$(basename -- "$release_root")" =~ ^[0-9a-f]{40}$ &&
+      -f "$release_root/.f4-release-manifest" ]]; then
+    manifest_commit="$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.f4-release-manifest")"
+    if [[ "$manifest_commit" == "$(basename -- "$release_root")" ]]; then
+        release_match=YES
+        remote_head_match=YES
+    fi
+    if verify_exact_marker "$release_root/TRUSTED_CP09_COMMIT"; then
+        binding_match=YES
+    fi
+    if [[ -f "$SERVICE_UNIT" && ! -L "$SERVICE_UNIT" &&
+          -f "$release_root/.f4-rendered/ai-crypto-signal-agent.service" &&
+          "$(sha256sum "$SERVICE_UNIT" | awk '{print $1}')" == "$(sha256sum "$release_root/.f4-rendered/ai-crypto-signal-agent.service" | awk '{print $1}')" ]]; then
+        service_match=YES
+    fi
+    if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" &&
+          "$(sha256sum "$TIMER_UNIT" | awk '{print $1}')" == "$(sha256sum "$release_root/deploy/operational_v1/systemd/ai-crypto-signal-agent.timer" | awk '{print $1}')" ]]; then
+        timer_match=YES
+    fi
+fi
+verify_exact_marker "$RUNTIME_MARKER" && marker_match=YES
+
+service_inactive=NO
+timer_inactive=NO
+timer_disabled=NO
+[[ "$(systemctl is-active ai-crypto-signal-agent.service 2>/dev/null || true)" == "inactive" ]] &&
+    service_inactive=YES
+[[ "$(systemctl is-active ai-crypto-signal-agent.timer 2>/dev/null || true)" == "inactive" ]] &&
+    timer_inactive=YES
+timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.timer 2>/dev/null || true)"
+[[ "$timer_enabled_state" == "disabled" ]] && timer_disabled=YES
+
+credential_ready=NO
+if verify_env_metadata "$TELEGRAM_ENV" TELEGRAM_BOT_TOKEN TELEGRAM_DESTINATION_ID &&
+   verify_env_metadata "$PROVIDER_ENV" DEEPSEEK_API_KEY; then
+    credential_ready=YES
+fi
+
+kill_ready=NO
+kill_active=NO
+if [[ ! -e "$KILL_SWITCH" && ! -L "$KILL_SWITCH" ]]; then
+    kill_ready=YES
+elif [[ -f "$KILL_SWITCH" && ! -L "$KILL_SWITCH" ]]; then
+    kill_ready=YES
+    kill_active=YES
+fi
+
+lock_residual=YES
+if [[ -d "$(dirname -- "$LOCK_PATH")" ]]; then
+    exec 8>"$LOCK_PATH"
+    if flock -n 8; then
+        lock_residual=NO
+    fi
+fi
+
+disk_ready=NO
+available_kib="$(df -Pk /var/lib/ai-crypto-signal-agent | awk 'NR == 2 { print $4 }')"
+[[ "$available_kib" =~ ^[0-9]+$ && "$available_kib" -ge 1048576 ]] && disk_ready=YES
+
+pass_or_fail F4_REMOTE_HEAD_MATCH "$remote_head_match"
+pass_or_fail IMMUTABLE_RELEASE_MATCH "$release_match"
+pass_or_fail TRUSTED_CP09_BINDING_MATCH "$binding_match"
+pass_or_fail RUNTIME_MARKER_MATCH "$marker_match"
+pass_or_fail SERVICE_UNIT_MATCH "$service_match"
+pass_or_fail TIMER_UNIT_MATCH "$timer_match"
+pass_or_fail SERVICE_INACTIVE "$service_inactive"
+pass_or_fail TIMER_DISABLED "$timer_disabled"
+pass_or_fail TIMER_INACTIVE "$timer_inactive"
+pass_or_fail CREDENTIAL_READINESS "$([[ "$credential_ready" == YES ]] && printf PASS || printf FAIL)"
+pass_or_fail KILL_SWITCH_READY "$kill_ready"
+printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_active"
+[[ "$kill_active" == "NO" ]] || failure_count=$((failure_count + 1))
+printf 'OVERLAP_LOCK_RESIDUAL=%s\n' "$lock_residual"
+[[ "$lock_residual" == "NO" ]] || failure_count=$((failure_count + 1))
+pass_or_fail RUNTIME_DISK_READINESS "$([[ "$disk_ready" == YES ]] && printf PASS || printf FAIL)"
+printf '%s\n' "SECRET_VALUE_EXPOSURE_COUNT=0"
+
+if [[ "$failure_count" -eq 0 ]]; then
+    printf '%s\n' "HEALTH_STATUS=READY_NOT_ENABLED"
+    exit 0
+fi
+printf '%s\n' "HEALTH_STATUS=NOT_READY"
+printf 'HEALTH_FAILURE_COUNT=%d\n' "$failure_count"
+exit 1

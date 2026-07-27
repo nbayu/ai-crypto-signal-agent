@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    printf '%s\n' "usage: $0 --release-root PATH [--destdir PATH]" >&2
+    exit 64
+}
+
+release_root=""
+destdir=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --release-root)
+            [[ "$#" -ge 2 ]] || usage
+            release_root="$2"
+            shift 2
+            ;;
+        --destdir)
+            [[ "$#" -ge 2 ]] || usage
+            destdir="$2"
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+[[ "$release_root" = /* && -d "$release_root" && ! -L "$release_root" ]] || exit 65
+release_root="$(realpath -- "$release_root")"
+release_commit="$(basename -- "$release_root")"
+[[ "$release_commit" =~ ^[0-9a-f]{40}$ ]] || exit 65
+package_root="$release_root/deploy/operational_v1"
+[[ -x "$package_root/bin/ai-crypto-signal-agent-run-once" ]] || exit 65
+[[ -f "$release_root/.f4-release-manifest" && -f "$release_root/.f4-sha256-manifest" ]] || exit 65
+[[ "$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.f4-release-manifest")" == "$release_commit" ]] || exit 65
+
+rooted() {
+    printf '%s%s\n' "$destdir" "$1"
+}
+
+atomic_install() {
+    local source="$1"
+    local destination="$2"
+    local mode="$3"
+    local destination_dir
+    destination_dir="$(dirname -- "$destination")"
+    if [[ ! -d "$destination_dir" || -L "$destination_dir" ]]; then
+        install -d -o root -g root -m 0755 "$destination_dir"
+    fi
+    local temporary
+    temporary="$(mktemp "$destination_dir/.f4-install.XXXXXXXX")"
+    install -o root -g root -m "$mode" "$source" "$temporary"
+    mv -fT -- "$temporary" "$destination"
+}
+
+service_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.service)"
+timer_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.timer)"
+health_path="$(rooted /usr/local/sbin/ai-crypto-signal-agent-health)"
+retention_path="$(rooted /etc/tmpfiles.d/ai-crypto-signal-agent.conf)"
+marker_path="$(rooted /var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker)"
+release_ref_path="$(rooted /var/lib/ai-crypto-signal-agent/installed-release.path)"
+
+install -d -o root -g root -m 0755 "$(dirname -- "$service_path")"
+rendered_service="$(mktemp "$(dirname -- "$service_path")/.f4-service.XXXXXXXX")"
+sed -e "s|@@RELEASE_ROOT@@|$release_root|g" \
+    -e "s|@@F4_COMMIT@@|$release_commit|g" \
+    "$package_root/systemd/ai-crypto-signal-agent.service.in" > "$rendered_service"
+chmod 0644 "$rendered_service"
+chown root:root "$rendered_service"
+mv -fT -- "$rendered_service" "$service_path"
+
+atomic_install "$package_root/systemd/ai-crypto-signal-agent.timer" "$timer_path" 0644
+atomic_install "$package_root/bin/ai-crypto-signal-agent-health" "$health_path" 0755
+atomic_install "$package_root/tmpfiles.d/ai-crypto-signal-agent.conf" "$retention_path" 0644
+
+install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
+    "$(rooted /var/lib/ai-crypto-signal-agent)"
+install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
+    "$(rooted /var/lib/ai-crypto-signal-agent/operational-artifacts)"
+marker_source="$release_root/TRUSTED_CP09_COMMIT"
+atomic_install "$marker_source" "$marker_path" 0400
+
+release_ref_source="$(mktemp)"
+printf '%s\n' "$release_root" > "$release_ref_source"
+atomic_install "$release_ref_source" "$release_ref_path" 0400
+unlink -- "$release_ref_source"
+
+if [[ -z "$destdir" ]]; then
+    install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 /run/ai-crypto-signal-agent
+fi
+
+printf 'F4_INSTALLATION=COMPLETE\n'
+printf 'F4_RELEASE_COMMIT=%s\n' "$release_commit"
+printf 'SYSTEMD_OPERATION_EXECUTED=NO\n'
