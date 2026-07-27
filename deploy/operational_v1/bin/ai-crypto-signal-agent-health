@@ -13,16 +13,29 @@ readonly TELEGRAM_ENV="/etc/ai-crypto-signal-agent/phase09r1.env"
 readonly PROVIDER_ENV="/etc/ai-crypto-signal-agent/deepseek.env"
 
 failure_count=0
+declare -a failure_reasons=()
 
-pass_or_fail() {
+record_check() {
     local key="$1"
     local result="$2"
+    local reason="$3"
+    printf '%s=%s\n' "$key" "$result"
     if [[ "$result" == "YES" || "$result" == "PASS" ]]; then
-        printf '%s=%s\n' "$key" "$result"
-    else
-        printf '%s=%s\n' "$key" "$result"
-        failure_count=$((failure_count + 1))
+        return
     fi
+    failure_reasons+=("$reason")
+    failure_count=$((failure_count + 1))
+}
+
+record_failure() {
+    failure_reasons+=("$1")
+    failure_count=$((failure_count + 1))
+}
+
+unit_directive() {
+    local path="$1"
+    local key="$2"
+    sed -n "s/^${key}=//p" "$path"
 }
 
 verify_exact_marker() {
@@ -80,14 +93,46 @@ fi
 verify_exact_marker "$RUNTIME_MARKER" && marker_match=YES
 
 service_inactive=NO
-timer_inactive=NO
-timer_disabled=NO
-[[ "$(systemctl is-active ai-crypto-signal-agent.service 2>/dev/null || true)" == "inactive" ]] &&
-    service_inactive=YES
-[[ "$(systemctl is-active ai-crypto-signal-agent.timer 2>/dev/null || true)" == "inactive" ]] &&
-    timer_inactive=YES
+service_enabled_valid=NO
+service_active_state="$(systemctl is-active ai-crypto-signal-agent.service 2>/dev/null || true)"
+service_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.service 2>/dev/null || true)"
+[[ "$service_active_state" == "inactive" ]] && service_inactive=YES
+[[ "$service_enabled_state" == "static" || "$service_enabled_state" == "disabled" ]] &&
+    service_enabled_valid=YES
+
+timer_active_state="$(systemctl is-active ai-crypto-signal-agent.timer 2>/dev/null || true)"
 timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.timer 2>/dev/null || true)"
-[[ "$timer_enabled_state" == "disabled" ]] && timer_disabled=YES
+timer_substate="$(systemctl show ai-crypto-signal-agent.timer -p SubState --value 2>/dev/null || true)"
+timer_next_elapse="$(systemctl show ai-crypto-signal-agent.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+
+timer_persistent_valid=NO
+timer_model_valid=NO
+timer_interval_valid=NO
+timer_target_valid=NO
+timer_count_valid=NO
+automatic_retry_disabled=NO
+trading_execution_disabled=NO
+if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" ]]; then
+    [[ "$(unit_directive "$TIMER_UNIT" Persistent)" == "false" ]] &&
+        timer_persistent_valid=YES
+    [[ "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" == "30min" ]] && {
+        timer_model_valid=YES
+        timer_interval_valid=YES
+    }
+    [[ "$(unit_directive "$TIMER_UNIT" Unit)" == "ai-crypto-signal-agent.service" ]] &&
+        timer_target_valid=YES
+fi
+if [[ -n "$release_root" && -d "$release_root/deploy" ]]; then
+    [[ "$(find "$release_root/deploy" -type f -name '*.timer' -print | wc -l)" -eq 1 ]] &&
+        timer_count_valid=YES
+    package_manifest="$release_root/deploy/operational_v1/deployment-package-manifest.txt"
+    if [[ -f "$package_manifest" && ! -L "$package_manifest" ]]; then
+        [[ "$(sed -n 's/^AUTOMATIC_RETRY=//p' "$package_manifest")" == "disabled" ]] &&
+            automatic_retry_disabled=YES
+        [[ "$(sed -n 's/^TRADING_EXECUTION=//p' "$package_manifest")" == "disabled" ]] &&
+            trading_execution_disabled=YES
+    fi
+fi
 
 credential_ready=NO
 if verify_env_metadata "$TELEGRAM_ENV" TELEGRAM_BOT_TOKEN TELEGRAM_DESTINATION_ID &&
@@ -113,31 +158,80 @@ if [[ -d "$(dirname -- "$LOCK_PATH")" ]]; then
 fi
 
 disk_ready=NO
-available_kib="$(df -Pk /var/lib/ai-crypto-signal-agent | awk 'NR == 2 { print $4 }')"
+available_kib="$(df -Pk "$(dirname -- "$RUNTIME_MARKER")" | awk 'NR == 2 { print $4 }')"
 [[ "$available_kib" =~ ^[0-9]+$ && "$available_kib" -ge 1048576 ]] && disk_ready=YES
 
-pass_or_fail F4_REMOTE_HEAD_MATCH "$remote_head_match"
-pass_or_fail IMMUTABLE_RELEASE_MATCH "$release_match"
-pass_or_fail TRUSTED_CP09_BINDING_MATCH "$binding_match"
-pass_or_fail RUNTIME_MARKER_MATCH "$marker_match"
-pass_or_fail SERVICE_UNIT_MATCH "$service_match"
-pass_or_fail TIMER_UNIT_MATCH "$timer_match"
-pass_or_fail SERVICE_INACTIVE "$service_inactive"
-pass_or_fail TIMER_DISABLED "$timer_disabled"
-pass_or_fail TIMER_INACTIVE "$timer_inactive"
-pass_or_fail CREDENTIAL_READINESS "$([[ "$credential_ready" == YES ]] && printf PASS || printf FAIL)"
-pass_or_fail KILL_SWITCH_READY "$kill_ready"
+record_check F4_REMOTE_HEAD_MATCH "$remote_head_match" RELEASE_IDENTITY_MISMATCH
+record_check IMMUTABLE_RELEASE_MATCH "$release_match" RELEASE_IDENTITY_MISMATCH
+record_check TRUSTED_CP09_BINDING_MATCH "$binding_match" TRUSTED_CP09_BINDING_MISMATCH
+record_check RUNTIME_MARKER_MATCH "$marker_match" RUNTIME_MARKER_MISMATCH
+record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
+record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
+record_check SERVICE_INACTIVE "$service_inactive" SERVICE_NOT_INACTIVE
+record_check SERVICE_ENABLED_VALID "$service_enabled_valid" SERVICE_ENABLEMENT_STATE_MISMATCH
+record_check CREDENTIAL_READINESS "$([[ "$credential_ready" == YES ]] && printf PASS || printf FAIL)" CREDENTIAL_READINESS_FAILED
+record_check KILL_SWITCH_READY "$kill_ready" KILL_SWITCH_STATE_INVALID
 printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_active"
-[[ "$kill_active" == "NO" ]] || failure_count=$((failure_count + 1))
+[[ "$kill_active" == "NO" ]] || record_failure KILL_SWITCH_ACTIVE
 printf 'OVERLAP_LOCK_RESIDUAL=%s\n' "$lock_residual"
-[[ "$lock_residual" == "NO" ]] || failure_count=$((failure_count + 1))
-pass_or_fail RUNTIME_DISK_READINESS "$([[ "$disk_ready" == YES ]] && printf PASS || printf FAIL)"
+[[ "$lock_residual" == "NO" ]] || record_failure OVERLAP_LOCK_RESIDUAL
+record_check RUNTIME_DISK_READINESS "$([[ "$disk_ready" == YES ]] && printf PASS || printf FAIL)" RUNTIME_DISK_READINESS_FAILED
+record_check TIMER_PERSISTENT_CONTRACT "$timer_persistent_valid" TIMER_PERSISTENT_CONTRACT_MISMATCH
+record_check TIMER_MODEL_CONTRACT "$timer_model_valid" TIMER_CADENCE_MISMATCH
+record_check TIMER_INTERVAL_CONTRACT "$timer_interval_valid" TIMER_CADENCE_MISMATCH
+record_check TIMER_TARGET_CONTRACT "$timer_target_valid" TIMER_TARGET_MISMATCH
+record_check TIMER_FILE_COUNT_CONTRACT "$timer_count_valid" TIMER_FILE_COUNT_MISMATCH
+printf 'AUTOMATIC_RETRY_ENABLED=%s\n' "$([[ "$automatic_retry_disabled" == YES ]] && printf NO || printf YES)"
+[[ "$automatic_retry_disabled" == YES ]] || record_failure AUTOMATIC_RETRY_CONTRACT_MISMATCH
+printf 'TRADING_EXECUTION_ENABLED=%s\n' "$([[ "$trading_execution_disabled" == YES ]] && printf NO || printf YES)"
+[[ "$trading_execution_disabled" == YES ]] || record_failure TRADING_EXECUTION_CONTRACT_MISMATCH
 printf '%s\n' "SECRET_VALUE_EXPOSURE_COUNT=0"
 
-if [[ "$failure_count" -eq 0 ]]; then
-    printf '%s\n' "HEALTH_STATUS=READY_NOT_ENABLED"
+health_state=NOT_READY
+if [[ "$service_inactive" == YES && "$service_enabled_valid" == YES ]]; then
+    if [[ "$timer_enabled_state" == "disabled" &&
+          "$timer_active_state" == "inactive" &&
+          -z "$timer_next_elapse" ]]; then
+        health_state=READY_NOT_ENABLED
+    elif [[ "$timer_enabled_state" == "enabled" &&
+            "$timer_active_state" == "active" &&
+            "$timer_substate" == "waiting" &&
+            -n "$timer_next_elapse" ]]; then
+        health_state=READY_AND_AUTOMATION_ENABLED
+    else
+        [[ "$timer_enabled_state" != "enabled" || "$timer_active_state" == "active" ]] ||
+            record_failure TIMER_ENABLED_BUT_NOT_ACTIVE
+        [[ "$timer_active_state" != "active" || "$timer_enabled_state" == "enabled" ]] ||
+            record_failure TIMER_ACTIVE_BUT_NOT_ENABLED
+        [[ "$timer_enabled_state" != "enabled" || -n "$timer_next_elapse" ]] ||
+            record_failure TIMER_ENABLED_WITHOUT_NEXT_ELAPSE
+        [[ "$timer_enabled_state" != "enabled" || "$timer_substate" == "waiting" ]] ||
+            record_failure TIMER_UNEXPECTED_SUBSTATE
+        [[ "$timer_enabled_state" != "disabled" || "$timer_active_state" == "inactive" ]] ||
+            record_failure TIMER_ACTIVE_BUT_NOT_ENABLED
+        [[ "$timer_enabled_state" != "disabled" || -z "$timer_next_elapse" ]] ||
+            record_failure TIMER_DISABLED_WITH_NEXT_ELAPSE
+        [[ "$timer_enabled_state" == "enabled" || "$timer_enabled_state" == "disabled" ]] ||
+            record_failure TIMER_STATE_UNKNOWN
+        [[ "$timer_active_state" == "active" || "$timer_active_state" == "inactive" ]] ||
+            record_failure TIMER_STATE_UNKNOWN
+    fi
+fi
+
+printf 'SERVICE_ACTIVE=%s\n' "$service_active_state"
+printf 'SERVICE_ENABLED=%s\n' "$service_enabled_state"
+printf 'TIMER_ACTIVE=%s\n' "$timer_active_state"
+printf 'TIMER_ENABLED=%s\n' "$timer_enabled_state"
+printf 'TIMER_SUBSTATE=%s\n' "$timer_substate"
+printf 'TIMER_NEXT_ELAPSE_SCHEDULED=%s\n' "$([[ -n "$timer_next_elapse" ]] && printf YES || printf NO)"
+
+if [[ "$failure_count" -eq 0 && "$health_state" != "NOT_READY" ]]; then
+    printf 'HEALTH_STATUS=%s\n' "$health_state"
     exit 0
 fi
+for reason in "${failure_reasons[@]}"; do
+    printf 'HEALTH_REASON=%s\n' "$reason"
+done
 printf '%s\n' "HEALTH_STATUS=NOT_READY"
 printf 'HEALTH_FAILURE_COUNT=%d\n' "$failure_count"
 exit 1

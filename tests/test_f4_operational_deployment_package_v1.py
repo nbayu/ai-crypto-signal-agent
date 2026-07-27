@@ -122,7 +122,11 @@ def test_health_output_does_not_emit_environment_values() -> None:
     assert "cat \"$TELEGRAM_ENV\"" not in text
     assert "cat \"$PROVIDER_ENV\"" not in text
     assert "SECRET_VALUE_EXPOSURE_COUNT=0" in text
-    assert "HEALTH_STATUS=READY_NOT_ENABLED" in text
+    assert "HEALTH_STATUS=%s" in text
+    assert "READY_NOT_ENABLED" in text
+    assert "READY_AND_AUTOMATION_ENABLED" in text
+    assert "HEALTH_STATUS=NOT_READY" in text
+    assert re.search(r"\bsystemctl\s+(start|restart|enable|disable|preset)\b", text) is None
 
 
 def test_trusted_binding_bytes() -> None:
@@ -166,6 +170,182 @@ def _refresh_release_hashes(release: Path) -> None:
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             lines.append(f"{digest}  {path.relative_to(release).as_posix()}\n")
     manifest.write_text("".join(lines), encoding="ascii")
+
+
+def _make_health_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str, Path]]:
+    release = _make_release(tmp_path)
+    runtime = tmp_path / "runtime"
+    units = tmp_path / "systemd"
+    credentials = tmp_path / "credentials"
+    fake_bin = tmp_path / "bin"
+    for path in (runtime, units, credentials, fake_bin, release / ".f4-rendered"):
+        path.mkdir(parents=True, exist_ok=True)
+
+    release_ref = runtime / "installed-release.path"
+    marker = runtime / "accepted-locked-commit.marker"
+    kill_switch = runtime / "kill-switch.active"
+    lock_path = runtime / "operational.lock"
+    service = units / "ai-crypto-signal-agent.service"
+    timer = units / "ai-crypto-signal-agent.timer"
+    telegram_env = credentials / "phase09r1.env"
+    provider_env = credentials / "deepseek.env"
+
+    release_ref.write_text(f"{release}\n", encoding="ascii")
+    marker.write_bytes((TRUSTED + "\n").encode("ascii"))
+    service_bytes = (
+        SYSTEMD / "ai-crypto-signal-agent.service.in"
+    ).read_text(encoding="utf-8").replace("@@RELEASE_ROOT@@", str(release)).replace(
+        "@@F4_COMMIT@@", release.name
+    ).encode("utf-8")
+    service.write_bytes(service_bytes)
+    (release / ".f4-rendered/ai-crypto-signal-agent.service").write_bytes(service_bytes)
+    timer.write_bytes((SYSTEMD / "ai-crypto-signal-agent.timer").read_bytes())
+    telegram_env.write_text(
+        "TELEGRAM_BOT_TOKEN=synthetic-token\nTELEGRAM_DESTINATION_ID=synthetic-destination\n",
+        encoding="ascii",
+    )
+    provider_env.write_text("DEEPSEEK_API_KEY=synthetic-provider-key\n", encoding="ascii")
+    telegram_env.chmod(0o600)
+    provider_env.chmod(0o600)
+
+    fake_systemctl = fake_bin / "systemctl"
+    fake_systemctl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "$1:$2" in
+  is-active:ai-crypto-signal-agent.service) printf '%s\\n' "$MOCK_SERVICE_ACTIVE" ;;
+  is-enabled:ai-crypto-signal-agent.service) printf '%s\\n' "$MOCK_SERVICE_ENABLED" ;;
+  is-active:ai-crypto-signal-agent.timer) printf '%s\\n' "$MOCK_TIMER_ACTIVE" ;;
+  is-enabled:ai-crypto-signal-agent.timer) printf '%s\\n' "$MOCK_TIMER_ENABLED" ;;
+  show:ai-crypto-signal-agent.timer)
+    if [[ "$*" == *SubState* ]]; then
+      printf '%s\\n' "$MOCK_TIMER_SUBSTATE"
+    elif [[ "$*" == *NextElapseUSecRealtime* ]]; then
+      printf '%s\\n' "$MOCK_TIMER_NEXT"
+    else
+      exit 64
+    fi
+    ;;
+  *) exit 64 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_systemctl.chmod(0o755)
+
+    health = tmp_path / "ai-crypto-signal-agent-health"
+    health_text = _text(BIN / "ai-crypto-signal-agent-health")
+    replacements = {
+        "/var/lib/ai-crypto-signal-agent/installed-release.path": str(release_ref),
+        "/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker": str(marker),
+        "/var/lib/ai-crypto-signal-agent/kill-switch.active": str(kill_switch),
+        "/run/ai-crypto-signal-agent/operational.lock": str(lock_path),
+        "/etc/systemd/system/ai-crypto-signal-agent.service": str(service),
+        "/etc/systemd/system/ai-crypto-signal-agent.timer": str(timer),
+        "/etc/ai-crypto-signal-agent/phase09r1.env": str(telegram_env),
+        "/etc/ai-crypto-signal-agent/deepseek.env": str(provider_env),
+    }
+    for original, replacement in replacements.items():
+        health_text = health_text.replace(original, replacement)
+    health.write_text(health_text, encoding="utf-8")
+    health.chmod(0o755)
+
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "MOCK_SERVICE_ACTIVE": "inactive",
+        "MOCK_SERVICE_ENABLED": "static",
+        "MOCK_TIMER_ACTIVE": "inactive",
+        "MOCK_TIMER_ENABLED": "disabled",
+        "MOCK_TIMER_SUBSTATE": "dead",
+        "MOCK_TIMER_NEXT": "",
+    }
+    paths = {
+        "release": release,
+        "manifest": release / ".f4-release-manifest",
+        "marker": marker,
+        "kill_switch": kill_switch,
+        "lock": lock_path,
+        "timer": timer,
+        "release_timer": release / "deploy/operational_v1/systemd/ai-crypto-signal-agent.timer",
+        "telegram_env": telegram_env,
+    }
+    return health, environment, paths
+
+
+def _run_health_case(tmp_path: Path, state: dict[str, str], mutation: str | None = None) -> subprocess.CompletedProcess[str]:
+    health, environment, paths = _make_health_fixture(tmp_path)
+    environment.update(state)
+    held_lock = None
+    if mutation == "persistent":
+        for path in (paths["timer"], paths["release_timer"]):
+            path.write_text(path.read_text().replace("Persistent=false", "Persistent=true"))
+    elif mutation == "cadence":
+        for path in (paths["timer"], paths["release_timer"]):
+            path.write_text(path.read_text().replace("OnUnitInactiveSec=30min", "OnUnitInactiveSec=5min"))
+    elif mutation == "release":
+        paths["manifest"].write_text(
+            paths["manifest"].read_text().replace(f"SOURCE_COMMIT={paths['release'].name}", f"SOURCE_COMMIT={'c' * 40}")
+        )
+    elif mutation == "marker":
+        paths["marker"].write_bytes(("0" * 40 + "\n").encode("ascii"))
+    elif mutation == "credential":
+        paths["telegram_env"].write_text("TELEGRAM_BOT_TOKEN=\nTELEGRAM_DESTINATION_ID=synthetic\n")
+    elif mutation == "kill":
+        paths["kill_switch"].write_text("active\n")
+    elif mutation == "lock":
+        held_lock = paths["lock"].open("w", encoding="ascii")
+        fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        return subprocess.run(
+            [str(health)],
+            check=False,
+            env=environment,
+            text=True,
+            capture_output=True,
+        )
+    finally:
+        if held_lock is not None:
+            held_lock.close()
+
+
+def test_health_state_machine_accepts_two_exact_states_and_rejects_partial_states(tmp_path: Path) -> None:
+    enabled = {
+        "MOCK_TIMER_ACTIVE": "active",
+        "MOCK_TIMER_ENABLED": "enabled",
+        "MOCK_TIMER_SUBSTATE": "waiting",
+        "MOCK_TIMER_NEXT": "Sun 2026-07-27 17:00:00 UTC",
+    }
+    positive_cases = (
+        ("disabled", {}, "READY_NOT_ENABLED"),
+        ("enabled", enabled, "READY_AND_AUTOMATION_ENABLED"),
+    )
+    for name, state, expected in positive_cases:
+        result = _run_health_case(tmp_path / name, state)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"HEALTH_STATUS={expected}" in result.stdout
+
+    negative_cases = (
+        ("enabled_inactive", {**enabled, "MOCK_TIMER_ACTIVE": "inactive"}, None, "TIMER_ENABLED_BUT_NOT_ACTIVE"),
+        ("active_disabled", {**enabled, "MOCK_TIMER_ENABLED": "disabled"}, None, "TIMER_ACTIVE_BUT_NOT_ENABLED"),
+        ("missing_next", {**enabled, "MOCK_TIMER_NEXT": ""}, None, "TIMER_ENABLED_WITHOUT_NEXT_ELAPSE"),
+        ("unexpected_substate", {**enabled, "MOCK_TIMER_SUBSTATE": "failed"}, None, "TIMER_UNEXPECTED_SUBSTATE"),
+        ("persistent", enabled, "persistent", "TIMER_PERSISTENT_CONTRACT_MISMATCH"),
+        ("cadence", enabled, "cadence", "TIMER_CADENCE_MISMATCH"),
+        ("service_active", {"MOCK_SERVICE_ACTIVE": "active"}, None, "SERVICE_NOT_INACTIVE"),
+        ("release_mismatch", {}, "release", "RELEASE_IDENTITY_MISMATCH"),
+        ("marker_mismatch", {}, "marker", "RUNTIME_MARKER_MISMATCH"),
+        ("credential_failure", {}, "credential", "CREDENTIAL_READINESS_FAILED"),
+        ("kill_switch", {}, "kill", "KILL_SWITCH_ACTIVE"),
+        ("overlap_lock", {}, "lock", "OVERLAP_LOCK_RESIDUAL"),
+        ("unknown_timer", {"MOCK_TIMER_ACTIVE": "unknown", "MOCK_TIMER_ENABLED": "unknown"}, None, "TIMER_STATE_UNKNOWN"),
+    )
+    assert len(negative_cases) == 13
+    for name, state, mutation, expected_reason in negative_cases:
+        result = _run_health_case(tmp_path / name, state, mutation)
+        assert result.returncode != 0, name
+        assert "HEALTH_STATUS=NOT_READY" in result.stdout, name
+        assert f"HEALTH_REASON={expected_reason}" in result.stdout, result.stdout
 
 
 def _make_inert_wrapper_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:

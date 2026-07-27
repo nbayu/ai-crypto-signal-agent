@@ -4,8 +4,20 @@ Run `/usr/local/sbin/ai-crypto-signal-agent-health` as root for the
 credential-metadata, immutable-release, unit, trusted-marker, kill-switch,
 overlap-lock, and disk-readiness assessment.
 
-The F4-ready result is `HEALTH_STATUS=READY_NOT_ENABLED`. It requires the
-service and timer to be inactive and the timer to be disabled.
+The health command recognizes exactly two healthy terminal states:
+
+- `HEALTH_STATUS=READY_NOT_ENABLED` requires the service to be inactive,
+  the timer to be disabled and inactive, and no next timer elapse.
+- `HEALTH_STATUS=READY_AND_AUTOMATION_ENABLED` requires the service to be
+  inactive and the timer to be enabled, active, waiting, and scheduled for
+  its next `OnUnitInactiveSec=30min` elapse with `Persistent=false`.
+
+Both states require the same immutable-release, trusted-marker, unit,
+credential, kill-switch, overlap-lock, disk, no-retry, and no-trading
+checks. Every partial, inconsistent, or unknown state reports
+`HEALTH_STATUS=NOT_READY` with sanitized reason codes. F4 installation must
+leave and verify `READY_NOT_ENABLED`; later owner-authorized automation may
+use `READY_AND_AUTOMATION_ENABLED`.
 
 For sanitized unit metadata, use:
 
