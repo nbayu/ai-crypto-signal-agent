@@ -48,7 +48,11 @@ UNKNOWN_PRODUCTION_SIGNAL_OUTCOME: Final = (
 MASTER_ENGINE_UNCLASSIFIED: Final = "MASTER_ENGINE_UNCLASSIFIED"
 
 
-class Phase09RExit7Failure(RuntimeError):
+class ProductionSignalServiceError(RuntimeError):
+    """Base fail-closed error preserved for service API compatibility."""
+
+
+class Phase09RExit7Failure(ProductionSignalServiceError):
     """Carry only sanitized exit-7 classification fields."""
 
     __slots__ = (

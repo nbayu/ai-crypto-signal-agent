@@ -44,6 +44,7 @@ from engine.phase09r_observability_v1 import (
     SERVICE_INVOCATION_INVALID,
     SOURCE_CONTRACT_REJECTED,
     Phase09RExit7Failure,
+    ProductionSignalServiceError,
     classified_failure,
 )
 
@@ -59,10 +60,6 @@ _SANITIZED_FAILURE = {
     "component": "delivery_adapter",
     "message": "delivery adapter failed",
 }
-
-
-class ProductionSignalServiceError(RuntimeError):
-    """Raised when production-signal orchestration fails closed."""
 
 
 def run_production_signal_service_v1(
