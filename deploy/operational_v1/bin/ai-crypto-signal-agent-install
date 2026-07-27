@@ -86,10 +86,6 @@ printf '%s\n' "$release_root" > "$release_ref_source"
 atomic_install "$release_ref_source" "$release_ref_path" 0400
 unlink -- "$release_ref_source"
 
-if [[ -z "$destdir" ]]; then
-    install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 /run/ai-crypto-signal-agent
-fi
-
 printf 'F4_INSTALLATION=COMPLETE\n'
 printf 'F4_RELEASE_COMMIT=%s\n' "$release_commit"
 printf 'SYSTEMD_OPERATION_EXECUTED=NO\n'

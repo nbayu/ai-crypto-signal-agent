@@ -6,6 +6,8 @@ readonly LOCK_PATH="/run/ai-crypto-signal-agent/operational.lock"
 readonly KILL_SWITCH_PATH="/var/lib/ai-crypto-signal-agent/kill-switch.active"
 readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"
 
+umask 0077
+
 fail_closed() {
     printf 'F4_LAUNCH_BLOCKED=%s\n' "$1" >&2
     exit 78
@@ -55,8 +57,24 @@ if [[ -e "$KILL_SWITCH_PATH" || -L "$KILL_SWITCH_PATH" ]]; then
     exit 75
 fi
 
-[[ -d "$(dirname -- "$LOCK_PATH")" ]] || fail_closed "LOCK_DIRECTORY"
-exec 9>"$LOCK_PATH"
+lock_directory="$(dirname -- "$LOCK_PATH")"
+[[ -d "$lock_directory" && ! -L "$lock_directory" ]] ||
+    fail_closed "LOCK_DIRECTORY"
+[[ "$(stat -Lc '%u:%g:%a' "$lock_directory")" == "$(id -u):$(id -g):750" ]] ||
+    fail_closed "LOCK_DIRECTORY_IDENTITY"
+if [[ -e "$LOCK_PATH" || -L "$LOCK_PATH" ]]; then
+    [[ -f "$LOCK_PATH" && ! -L "$LOCK_PATH" ]] ||
+        fail_closed "LOCK_FILE_STATE"
+    [[ "$(stat -Lc '%u:%g:%a' "$LOCK_PATH")" == "$(id -u):$(id -g):600" ]] ||
+        fail_closed "LOCK_FILE_IDENTITY"
+fi
+if ! { exec 9>"$LOCK_PATH"; } 2>/dev/null; then
+    fail_closed "LOCK_PERMISSION"
+fi
+[[ -f "$LOCK_PATH" && ! -L "$LOCK_PATH" ]] ||
+    fail_closed "LOCK_FILE_STATE"
+[[ "$(stat -Lc '%u:%g:%a' "$LOCK_PATH")" == "$(id -u):$(id -g):600" ]] ||
+    fail_closed "LOCK_FILE_IDENTITY"
 flock -n 9 || {
     printf '%s\n' "F4_LAUNCH_BLOCKED=OVERLAP_LOCK_HELD" >&2
     exit 75

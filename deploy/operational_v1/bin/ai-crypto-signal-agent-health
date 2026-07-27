@@ -11,6 +11,8 @@ readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent.service"
 readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent.timer"
 readonly TELEGRAM_ENV="/etc/ai-crypto-signal-agent/phase09r1.env"
 readonly PROVIDER_ENV="/etc/ai-crypto-signal-agent/deepseek.env"
+readonly SERVICE_USER="ai-crypto-signal-agent"
+readonly SERVICE_GROUP="ai-crypto-signal-agent"
 
 failure_count=0
 declare -a failure_reasons=()
@@ -149,11 +151,17 @@ elif [[ -f "$KILL_SWITCH" && ! -L "$KILL_SWITCH" ]]; then
     kill_active=YES
 fi
 
-lock_residual=YES
-if [[ -d "$(dirname -- "$LOCK_PATH")" ]]; then
-    exec 8>"$LOCK_PATH"
-    if flock -n 8; then
-        lock_residual=NO
+lock_state_valid=YES
+lock_residual=NO
+if [[ -e "$LOCK_PATH" || -L "$LOCK_PATH" ]]; then
+    lock_metadata="$(stat -Lc '%U:%G:%a' "$LOCK_PATH" 2>/dev/null || true)"
+    if [[ ! -f "$LOCK_PATH" || -L "$LOCK_PATH" ||
+          "$lock_metadata" != "$SERVICE_USER:$SERVICE_GROUP:600" ]]; then
+        lock_state_valid=NO
+    elif ! { exec 8<"$LOCK_PATH"; } 2>/dev/null; then
+        lock_state_valid=NO
+    elif ! flock -n 8; then
+        lock_residual=YES
     fi
 fi
 
@@ -173,6 +181,7 @@ record_check CREDENTIAL_READINESS "$([[ "$credential_ready" == YES ]] && printf 
 record_check KILL_SWITCH_READY "$kill_ready" KILL_SWITCH_STATE_INVALID
 printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_active"
 [[ "$kill_active" == "NO" ]] || record_failure KILL_SWITCH_ACTIVE
+record_check OPERATIONAL_LOCK_STATE_VALID "$lock_state_valid" OPERATIONAL_LOCK_STATE_INVALID
 printf 'OVERLAP_LOCK_RESIDUAL=%s\n' "$lock_residual"
 [[ "$lock_residual" == "NO" ]] || record_failure OVERLAP_LOCK_RESIDUAL
 record_check RUNTIME_DISK_READINESS "$([[ "$disk_ready" == YES ]] && printf PASS || printf FAIL)" RUNTIME_DISK_READINESS_FAILED

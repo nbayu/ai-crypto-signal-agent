@@ -23,6 +23,7 @@ Environment=TELEGRAM_MAX_MESSAGE_LENGTH=4000
 LoadCredential=accepted_locked_commit:/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker
 RuntimeDirectory=ai-crypto-signal-agent
 RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=no
 ExecStart=@@RELEASE_ROOT@@/deploy/operational_v1/bin/ai-crypto-signal-agent-run-once
 TimeoutStartSec=20min
 Restart=no

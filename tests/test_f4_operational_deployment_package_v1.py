@@ -97,6 +97,10 @@ def test_service_contract() -> None:
     assert _directives(text, "LoadCredential") == [
         "accepted_locked_commit:/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker"
     ]
+    assert _directives(text, "RuntimeDirectory") == ["ai-crypto-signal-agent"]
+    assert _directives(text, "RuntimeDirectoryMode") == ["0750"]
+    assert _directives(text, "RuntimeDirectoryPreserve") == ["no"]
+    assert "/run/ai-crypto-signal-agent" in _directives(text, "ReadWritePaths")[0].split()
     assert "[Install]" not in text
 
 
@@ -115,6 +119,12 @@ def test_installer_and_rollback_never_operate_systemd() -> None:
         text = _text(BIN / name)
         assert "systemctl " not in text
         assert "daemon-reload" not in text
+
+
+def test_installer_leaves_runtime_directory_to_systemd() -> None:
+    text = _text(BIN / "ai-crypto-signal-agent-install")
+    assert "install -d" in text
+    assert "/run/ai-crypto-signal-agent" not in text
 
 
 def test_health_output_does_not_emit_environment_values() -> None:
@@ -235,6 +245,13 @@ esac
 
     health = tmp_path / "ai-crypto-signal-agent-health"
     health_text = _text(BIN / "ai-crypto-signal-agent-health")
+    health_text = health_text.replace(
+        'readonly SERVICE_USER="ai-crypto-signal-agent"',
+        f'readonly SERVICE_USER="{runtime.owner()}"',
+    ).replace(
+        'readonly SERVICE_GROUP="ai-crypto-signal-agent"',
+        f'readonly SERVICE_GROUP="{runtime.group()}"',
+    )
     replacements = {
         "/var/lib/ai-crypto-signal-agent/installed-release.path": str(release_ref),
         "/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker": str(marker),
@@ -295,6 +312,7 @@ def _run_health_case(tmp_path: Path, state: dict[str, str], mutation: str | None
         paths["kill_switch"].write_text("active\n")
     elif mutation == "lock":
         held_lock = paths["lock"].open("w", encoding="ascii")
+        paths["lock"].chmod(0o600)
         fcntl.flock(held_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     try:
         return subprocess.run(
@@ -354,6 +372,7 @@ def _make_inert_wrapper_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]
     lock_path = tmp_path / "runtime" / "operational.lock"
     kill_switch = tmp_path / "runtime" / "kill-switch.active"
     lock_path.parent.mkdir()
+    lock_path.parent.chmod(0o750)
     invocation_record = tmp_path / "entrypoint-invocations"
     inert = release / "inert-entrypoint"
     inert.write_text(
@@ -491,6 +510,7 @@ def test_wrapper_kill_switch_blocks_before_entrypoint(tmp_path: Path) -> None:
 def test_wrapper_overlap_lock_blocks_before_entrypoint(tmp_path: Path) -> None:
     wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
     with lock_path.open("w", encoding="ascii") as held:
+        lock_path.chmod(0o600)
         fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = subprocess.run(
             [str(wrapper)],
@@ -502,6 +522,138 @@ def test_wrapper_overlap_lock_blocks_before_entrypoint(tmp_path: Path) -> None:
     assert result.returncode == 75
     assert "OVERLAP_LOCK_HELD" in result.stderr
     assert not invocation_record.exists()
+
+
+def test_wrapper_reacquires_after_inert_holder_exits(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    with lock_path.open("w", encoding="ascii") as held:
+        lock_path.chmod(0o600)
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert invocation_record.read_bytes() == b"x"
+
+
+def test_wrapper_missing_runtime_directory_fails_closed(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    lock_path.parent.rmdir()
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_DIRECTORY" in result.stderr
+    assert not invocation_record.exists()
+
+
+def test_wrapper_rejects_wrong_runtime_directory_owner(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    if os.geteuid() != 0:
+        return
+    os.chown(lock_path.parent, os.getuid() + 1, os.getgid())
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_DIRECTORY_IDENTITY" in result.stderr
+    assert not invocation_record.exists()
+
+
+def test_wrapper_rejects_wrong_runtime_directory_mode(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    lock_path.parent.chmod(0o550)
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_DIRECTORY_IDENTITY" in result.stderr
+    assert not invocation_record.exists()
+
+
+def test_wrapper_rejects_symlink_lock_path(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    target = tmp_path / "symlink-target"
+    target.write_text("unchanged", encoding="ascii")
+    lock_path.symlink_to(target)
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_FILE_STATE" in result.stderr
+    assert target.read_text(encoding="ascii") == "unchanged"
+    assert not invocation_record.exists()
+
+
+def test_wrapper_rejects_incompatible_existing_lock(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    lock_path.write_text("", encoding="ascii")
+    lock_path.chmod(0o600)
+    if os.geteuid() == 0:
+        os.chown(lock_path, os.getuid() + 1, os.getgid())
+    else:
+        lock_path.chmod(0o640)
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_FILE_IDENTITY" in result.stderr
+    assert not invocation_record.exists()
+
+
+def test_wrapper_rejects_non_directory_runtime_path(tmp_path: Path) -> None:
+    wrapper, credentials, lock_path, invocation_record = _make_inert_wrapper_fixture(tmp_path)
+    lock_path.parent.rmdir()
+    lock_path.parent.write_text("not-a-directory", encoding="ascii")
+    result = subprocess.run(
+        [str(wrapper)],
+        check=False,
+        env={**os.environ, "CREDENTIALS_DIRECTORY": str(credentials)},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 78
+    assert "LOCK_DIRECTORY" in result.stderr
+    assert not invocation_record.exists()
+
+
+def test_health_lock_check_never_creates_lock_file(tmp_path: Path) -> None:
+    health, environment, paths = _make_health_fixture(tmp_path)
+    result = subprocess.run(
+        [str(health)],
+        check=False,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "OPERATIONAL_LOCK_STATE_VALID=YES" in result.stdout
+    assert "OVERLAP_LOCK_RESIDUAL=NO" in result.stdout
+    assert not paths["lock"].exists()
 
 
 def test_wrapper_malformed_marker_fails_closed(tmp_path: Path) -> None:
