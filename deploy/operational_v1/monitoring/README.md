@@ -10,9 +10,12 @@ The health command recognizes exactly two healthy terminal states:
   the timer to be disabled and inactive, and no next timer elapse.
 - `HEALTH_STATUS=READY_AND_AUTOMATION_ENABLED` requires the service to be
   inactive and the timer to be enabled, active, waiting, and scheduled for
-  its next elapse with `Persistent=false`. The first cycle is anchored by
-  `OnActiveSec=30min` after timer activation; subsequent cycles are anchored
-  by `OnUnitInactiveSec=30min` after the service becomes inactive.
+  its next elapse with `Persistent=false`. Because both schedule directives
+  are monotonic, readiness uses a finite future `NextElapseUSecMonotonic`;
+  `NextElapseUSecRealtime=0` is valid. The current monotonic time comes from
+  Python's `time.clock_gettime_ns(time.CLOCK_MONOTONIC)`. The first cycle is
+  anchored by `OnActiveSec=30min` after timer activation; subsequent cycles
+  are anchored by `OnUnitInactiveSec=30min` after service inactivity.
 
 Both states require the same immutable-release, trusted-marker, unit,
 credential, kill-switch, overlap-lock, disk, no-retry, and no-trading

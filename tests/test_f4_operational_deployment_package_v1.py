@@ -230,13 +230,7 @@ case "$1:$2" in
   is-active:ai-crypto-signal-agent.timer) printf '%s\\n' "$MOCK_TIMER_ACTIVE" ;;
   is-enabled:ai-crypto-signal-agent.timer) printf '%s\\n' "$MOCK_TIMER_ENABLED" ;;
   show:ai-crypto-signal-agent.timer)
-    if [[ "$*" == *SubState* ]]; then
-      printf '%s\\n' "$MOCK_TIMER_SUBSTATE"
-    elif [[ "$*" == *NextElapseUSecRealtime* ]]; then
-      printf '%s\\n' "$MOCK_TIMER_NEXT"
-    else
-      exit 64
-    fi
+    [[ "$*" == *SubState* ]] && printf '%s\\n' "$MOCK_TIMER_SUBSTATE" || exit 64
     ;;
   *) exit 64 ;;
 esac
@@ -244,6 +238,28 @@ esac
         encoding="utf-8",
     )
     fake_systemctl.chmod(0o755)
+
+    fake_busctl = fake_bin / "busctl"
+    fake_busctl.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+case "$5" in
+  NextElapseUSecMonotonic)
+    [[ "$MOCK_TIMER_NEXT_MONOTONIC" == ABSENT ]] || printf '%s\\n' "$MOCK_TIMER_NEXT_MONOTONIC"
+    ;;
+  NextElapseUSecRealtime) printf '%s\\n' "$MOCK_TIMER_NEXT_REALTIME" ;;
+  *) exit 64 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_busctl.chmod(0o755)
+    fake_clock = fake_bin / "monotonic-clock"
+    fake_clock.write_text(
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$MOCK_CURRENT_MONOTONIC\"\n",
+        encoding="utf-8",
+    )
+    fake_clock.chmod(0o755)
 
     health = tmp_path / "ai-crypto-signal-agent-health"
     health_text = _text(BIN / "ai-crypto-signal-agent-health")
@@ -266,6 +282,7 @@ esac
     }
     for original, replacement in replacements.items():
         health_text = health_text.replace(original, replacement)
+    health_text = health_text.replace("/usr/bin/python3", str(fake_clock))
     health.write_text(health_text, encoding="utf-8")
     health.chmod(0o755)
 
@@ -277,7 +294,9 @@ esac
         "MOCK_TIMER_ACTIVE": "inactive",
         "MOCK_TIMER_ENABLED": "disabled",
         "MOCK_TIMER_SUBSTATE": "dead",
-        "MOCK_TIMER_NEXT": "",
+        "MOCK_TIMER_NEXT_MONOTONIC": "t 18446744073709551615",
+        "MOCK_TIMER_NEXT_REALTIME": "t 0",
+        "MOCK_CURRENT_MONOTONIC": "1000000000",
     }
     paths = {
         "release": release,
@@ -334,22 +353,34 @@ def test_health_state_machine_accepts_two_exact_states_and_rejects_partial_state
         "MOCK_TIMER_ACTIVE": "active",
         "MOCK_TIMER_ENABLED": "enabled",
         "MOCK_TIMER_SUBSTATE": "waiting",
-        "MOCK_TIMER_NEXT": "Sun 2026-07-27 17:00:00 UTC",
+        "MOCK_TIMER_NEXT_MONOTONIC": "t 2800000000",
+        "MOCK_TIMER_NEXT_REALTIME": "t 0",
+        "MOCK_CURRENT_MONOTONIC": "1000000000",
     }
     positive_cases = (
         ("disabled", {}, "READY_NOT_ENABLED"),
-        ("enabled", enabled, "READY_AND_AUTOMATION_ENABLED"),
+        ("enabled_zero_realtime", enabled, "READY_AND_AUTOMATION_ENABLED"),
+        ("enabled_both_clocks", {**enabled, "MOCK_TIMER_NEXT_REALTIME": "t 9999999999"}, "READY_AND_AUTOMATION_ENABLED"),
+        ("microsecond_boundary", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 1000000001"}, "READY_AND_AUTOMATION_ENABLED"),
     )
+    assert len(positive_cases) == 4
     for name, state, expected in positive_cases:
         result = _run_health_case(tmp_path / name, state)
         assert result.returncode == 0, result.stdout + result.stderr
         assert f"HEALTH_STATUS={expected}" in result.stdout
 
     negative_cases = (
+        ("monotonic_zero", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 0"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_MISSING"),
+        ("monotonic_absent", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "ABSENT"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_MISSING"),
+        ("monotonic_infinite", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 18446744073709551615"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_MISSING"),
+        ("monotonic_malformed", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "not-a-number"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_MALFORMED"),
+        ("monotonic_equal_now", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 1000000000"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_NOT_IN_FUTURE"),
+        ("monotonic_past", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 999999999"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_NOT_IN_FUTURE"),
+        ("realtime_only", {**enabled, "MOCK_TIMER_NEXT_MONOTONIC": "t 0", "MOCK_TIMER_NEXT_REALTIME": "t 9999999999"}, None, "TIMER_MONOTONIC_NEXT_ELAPSE_MISSING"),
         ("enabled_inactive", {**enabled, "MOCK_TIMER_ACTIVE": "inactive"}, None, "TIMER_ENABLED_BUT_NOT_ACTIVE"),
         ("active_disabled", {**enabled, "MOCK_TIMER_ENABLED": "disabled"}, None, "TIMER_ACTIVE_BUT_NOT_ENABLED"),
-        ("missing_next", {**enabled, "MOCK_TIMER_NEXT": ""}, None, "TIMER_ENABLED_WITHOUT_NEXT_ELAPSE"),
-        ("unexpected_substate", {**enabled, "MOCK_TIMER_SUBSTATE": "failed"}, None, "TIMER_UNEXPECTED_SUBSTATE"),
+        ("elapsed", {**enabled, "MOCK_TIMER_SUBSTATE": "elapsed"}, None, "TIMER_UNEXPECTED_SUBSTATE"),
+        ("failed", {**enabled, "MOCK_TIMER_SUBSTATE": "failed"}, None, "TIMER_UNEXPECTED_SUBSTATE"),
         ("persistent", enabled, "persistent", "TIMER_PERSISTENT_CONTRACT_MISMATCH"),
         ("cadence", enabled, "cadence", "TIMER_CADENCE_MISMATCH"),
         ("service_active", {"MOCK_SERVICE_ACTIVE": "active"}, None, "SERVICE_NOT_INACTIVE"),
@@ -358,9 +389,8 @@ def test_health_state_machine_accepts_two_exact_states_and_rejects_partial_state
         ("credential_failure", {}, "credential", "CREDENTIAL_READINESS_FAILED"),
         ("kill_switch", {}, "kill", "KILL_SWITCH_ACTIVE"),
         ("overlap_lock", {}, "lock", "OVERLAP_LOCK_RESIDUAL"),
-        ("unknown_timer", {"MOCK_TIMER_ACTIVE": "unknown", "MOCK_TIMER_ENABLED": "unknown"}, None, "TIMER_STATE_UNKNOWN"),
     )
-    assert len(negative_cases) == 13
+    assert len(negative_cases) == 19
     for name, state, mutation, expected_reason in negative_cases:
         result = _run_health_case(tmp_path / name, state, mutation)
         assert result.returncode != 0, name

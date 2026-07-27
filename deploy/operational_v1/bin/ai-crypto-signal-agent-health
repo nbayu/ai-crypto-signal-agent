@@ -105,7 +105,42 @@ service_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.service 2>/
 timer_active_state="$(systemctl is-active ai-crypto-signal-agent.timer 2>/dev/null || true)"
 timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.timer 2>/dev/null || true)"
 timer_substate="$(systemctl show ai-crypto-signal-agent.timer -p SubState --value 2>/dev/null || true)"
-timer_next_elapse="$(systemctl show ai-crypto-signal-agent.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+readonly TIMER_DBUS_OBJECT="/org/freedesktop/systemd1/unit/ai_2dcrypto_2dsignal_2dagent_2etimer"
+timer_next_monotonic_raw="$(busctl get-property org.freedesktop.systemd1 "$TIMER_DBUS_OBJECT" org.freedesktop.systemd1.Timer NextElapseUSecMonotonic 2>/dev/null || true)"
+timer_next_realtime_raw="$(busctl get-property org.freedesktop.systemd1 "$TIMER_DBUS_OBJECT" org.freedesktop.systemd1.Timer NextElapseUSecRealtime 2>/dev/null || true)"
+current_monotonic_usec="$(/usr/bin/python3 -c 'import time; print(time.clock_gettime_ns(time.CLOCK_MONOTONIC) // 1000)' 2>/dev/null || true)"
+
+timer_next_monotonic_usec=""
+timer_next_realtime_usec=""
+remaining_until_elapse_usec=""
+timer_next_monotonic_finite=NO
+timer_next_monotonic_in_future=NO
+timer_next_elapse_scheduled=NO
+timer_schedule_failure_reason=TIMER_MONOTONIC_NEXT_ELAPSE_MISSING
+if [[ "$timer_next_monotonic_raw" =~ ^t[[:space:]]([0-9]+)$ ]]; then
+    timer_next_monotonic_usec="${BASH_REMATCH[1]}"
+    if [[ "$timer_next_monotonic_usec" == "0" ||
+          "$timer_next_monotonic_usec" == "18446744073709551615" ]]; then
+        timer_schedule_failure_reason=TIMER_MONOTONIC_NEXT_ELAPSE_MISSING
+    elif [[ ! "$current_monotonic_usec" =~ ^[0-9]+$ ]]; then
+        timer_schedule_failure_reason=TIMER_MONOTONIC_NEXT_ELAPSE_MALFORMED
+    else
+        timer_next_monotonic_finite=YES
+        remaining_until_elapse_usec=$((timer_next_monotonic_usec - current_monotonic_usec))
+        if [[ "$remaining_until_elapse_usec" -gt 0 ]]; then
+            timer_next_monotonic_in_future=YES
+            timer_next_elapse_scheduled=YES
+            timer_schedule_failure_reason=""
+        else
+            timer_schedule_failure_reason=TIMER_MONOTONIC_NEXT_ELAPSE_NOT_IN_FUTURE
+        fi
+    fi
+elif [[ -n "$timer_next_monotonic_raw" ]]; then
+    timer_schedule_failure_reason=TIMER_MONOTONIC_NEXT_ELAPSE_MALFORMED
+fi
+if [[ "$timer_next_realtime_raw" =~ ^t[[:space:]]([0-9]+)$ ]]; then
+    timer_next_realtime_usec="${BASH_REMATCH[1]}"
+fi
 
 timer_persistent_valid=NO
 timer_model_valid=NO
@@ -117,7 +152,8 @@ trading_execution_disabled=NO
 if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" ]]; then
     [[ "$(unit_directive "$TIMER_UNIT" Persistent)" == "false" ]] &&
         timer_persistent_valid=YES
-    [[ "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" == "30min" ]] && {
+    [[ "$(unit_directive "$TIMER_UNIT" OnActiveSec)" == "30min" &&
+       "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" == "30min" ]] && {
         timer_model_valid=YES
         timer_interval_valid=YES
     }
@@ -200,25 +236,29 @@ health_state=NOT_READY
 if [[ "$service_inactive" == YES && "$service_enabled_valid" == YES ]]; then
     if [[ "$timer_enabled_state" == "disabled" &&
           "$timer_active_state" == "inactive" &&
-          -z "$timer_next_elapse" ]]; then
+          "$timer_next_elapse_scheduled" == "NO" ]]; then
         health_state=READY_NOT_ENABLED
     elif [[ "$timer_enabled_state" == "enabled" &&
             "$timer_active_state" == "active" &&
             "$timer_substate" == "waiting" &&
-            -n "$timer_next_elapse" ]]; then
+            "$timer_next_monotonic_finite" == "YES" &&
+            "$timer_next_monotonic_in_future" == "YES" ]]; then
         health_state=READY_AND_AUTOMATION_ENABLED
     else
         [[ "$timer_enabled_state" != "enabled" || "$timer_active_state" == "active" ]] ||
             record_failure TIMER_ENABLED_BUT_NOT_ACTIVE
         [[ "$timer_active_state" != "active" || "$timer_enabled_state" == "enabled" ]] ||
             record_failure TIMER_ACTIVE_BUT_NOT_ENABLED
-        [[ "$timer_enabled_state" != "enabled" || -n "$timer_next_elapse" ]] ||
-            record_failure TIMER_ENABLED_WITHOUT_NEXT_ELAPSE
+        if [[ "$timer_enabled_state" == "enabled" &&
+              "$timer_next_elapse_scheduled" != "YES" ]]; then
+            record_failure "$timer_schedule_failure_reason"
+        fi
         [[ "$timer_enabled_state" != "enabled" || "$timer_substate" == "waiting" ]] ||
             record_failure TIMER_UNEXPECTED_SUBSTATE
         [[ "$timer_enabled_state" != "disabled" || "$timer_active_state" == "inactive" ]] ||
             record_failure TIMER_ACTIVE_BUT_NOT_ENABLED
-        [[ "$timer_enabled_state" != "disabled" || -z "$timer_next_elapse" ]] ||
+        [[ "$timer_enabled_state" != "disabled" ||
+           "$timer_next_elapse_scheduled" == "NO" ]] ||
             record_failure TIMER_DISABLED_WITH_NEXT_ELAPSE
         [[ "$timer_enabled_state" == "enabled" || "$timer_enabled_state" == "disabled" ]] ||
             record_failure TIMER_STATE_UNKNOWN
@@ -232,7 +272,14 @@ printf 'SERVICE_ENABLED=%s\n' "$service_enabled_state"
 printf 'TIMER_ACTIVE=%s\n' "$timer_active_state"
 printf 'TIMER_ENABLED=%s\n' "$timer_enabled_state"
 printf 'TIMER_SUBSTATE=%s\n' "$timer_substate"
-printf 'TIMER_NEXT_ELAPSE_SCHEDULED=%s\n' "$([[ -n "$timer_next_elapse" ]] && printf YES || printf NO)"
+printf '%s\n' "CURRENT_MONOTONIC_CLOCK_SOURCE=python3_CLOCK_MONOTONIC"
+printf 'CURRENT_MONOTONIC_USEC=%s\n' "${current_monotonic_usec:-UNAVAILABLE}"
+printf 'NEXT_ELAPSE_MONOTONIC_USEC=%s\n' "${timer_next_monotonic_usec:-UNAVAILABLE}"
+printf 'NEXT_ELAPSE_REALTIME_USEC=%s\n' "${timer_next_realtime_usec:-UNAVAILABLE}"
+printf 'REMAINING_UNTIL_ELAPSE_USEC=%s\n' "${remaining_until_elapse_usec:-UNAVAILABLE}"
+printf 'NEXT_ELAPSE_MONOTONIC_FINITE=%s\n' "$timer_next_monotonic_finite"
+printf 'NEXT_ELAPSE_MONOTONIC_IN_FUTURE=%s\n' "$timer_next_monotonic_in_future"
+printf 'TIMER_NEXT_ELAPSE_SCHEDULED=%s\n' "$timer_next_elapse_scheduled"
 
 if [[ "$failure_count" -eq 0 && "$health_state" != "NOT_READY" ]]; then
     printf 'HEALTH_STATUS=%s\n' "$health_state"
