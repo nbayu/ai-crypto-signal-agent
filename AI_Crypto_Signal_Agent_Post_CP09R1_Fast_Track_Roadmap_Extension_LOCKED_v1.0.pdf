@@ -1,0 +1,184 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2539 >>
+stream
+BT
+/F2 16 Tf
+50 760 Td
+(Post-CP09R1 Fast-Track Roadmap Extension - LOCKED v1.0) Tj
+0 -25 Td
+/F1 10 Tf
+13 TL
+/F2 11 Tf
+(Roadmap identity) Tj
+T*
+/F1 10 Tf
+(PROJECT=AI_CRYPTO_SIGNAL_AGENT) Tj
+T*
+(ROADMAP=POST_CP09R1_FAST_TRACK_LOCKED_V1_0) Tj
+T*
+(AUTHORITATIVE_STARTING_POINT=PASS_PHASE09R1_FINAL_CLOSURE_AFTER_FORENSICALLY_PROVEN_REAL) Tj
+T*
+(_TELEGRAM_DELIVERY) Tj
+T*
+(This roadmap is a non-executing governance record. It grants no authority beyond the) Tj
+T*
+(owner decision that created it.) Tj
+T*
+() Tj
+T*
+/F2 11 Tf
+(F1 - Canonical local integration) Tj
+T*
+/F1 10 Tf
+(STATUS=PASS) Tj
+T*
+(OBJECTIVE=Integrate the authorized Phase09R1 remediation and closure checkpoint into) Tj
+T*
+(canonical local master while preserving Phase10-12 behavior.) Tj
+T*
+(EXIT_EVIDENCE=Exact remediation ancestry merged; compatibility boundary restored;) Tj
+T*
+(focused suites passed; full 6063-test regression passed; checkpoint and roadmap) Tj
+T*
+(artifacts created.) Tj
+T*
+(REMOTE_MUTATION=NONE) Tj
+T*
+() Tj
+T*
+/F2 11 Tf
+(Pending separately authorized work) Tj
+T*
+/F1 10 Tf
+(REMOTE_INTEGRATION_AND_LOCK=PENDING_OWNER_AUTHORIZATION) Tj
+T*
+(TRUSTED_CP09_COMMIT_BINDING=PENDING_OWNER_AUTHORIZATION) Tj
+T*
+(PHASE10_TO_12_RECONCILIATION=PENDING_OWNER_AUTHORIZATION) Tj
+T*
+(No pending item permits a push, force push, live signal, service operation, activation,) Tj
+T*
+(retry, trading execution, or credential inspection.) Tj
+T*
+() Tj
+T*
+/F2 11 Tf
+(Permanent safety constraints) Tj
+T*
+/F1 10 Tf
+(NO_PHASE09R1_LIVE_RETRY) Tj
+T*
+(NO_AUTOMATIC_RETRY) Tj
+T*
+(NO_AUTOMATIC_ACTIVATION) Tj
+T*
+(NO_TIMER_CRON_SOCKET_OR_PATH_ACTIVATION) Tj
+T*
+(NO_TRADING_EXECUTION) Tj
+T*
+(NO_CREDENTIAL_VALUE_ACCESS_OR_COMMIT) Tj
+T*
+(NO_PRODUCTION_RUNTIME_RELEASE_OR_SYSTEMD_MUTATION) Tj
+T*
+(NO_HISTORY_REWRITE_OF_PUBLISHED_CANONICAL_HISTORY) Tj
+T*
+() Tj
+T*
+/F2 11 Tf
+(F1 commit chain) Tj
+T*
+/F1 10 Tf
+(BASELINE=cfac13d35868a4b18e3670b56822c972675c7417) Tj
+T*
+(REMEDIATION=d7218fbc443057e64ae28c603c55fc599dd7909e) Tj
+T*
+(MERGE=53d01c1e63129c89e4473546d52e1c732b6542fd) Tj
+T*
+(COMPATIBILITY=c41ee477cfbccaed33676d3fb91dbb8c4838eab5) Tj
+T*
+(IMPORT_TEST_ISOLATION=490c24c406212424fe4d6688ca0324b41b163af1) Tj
+T*
+() Tj
+T*
+/F2 11 Tf
+(F1 closure state) Tj
+T*
+/F1 10 Tf
+(CANONICAL_LOCAL_INTEGRATION=COMPLETE) Tj
+T*
+(CHECKPOINT_ARTIFACT=CP_09R1_REAL_TELEGRAM_DELIVERY_FINAL_CLOSURE.pdf) Tj
+T*
+(ROADMAP_ARTIFACT=AI_Crypto_Signal_Agent_Post_CP09R1_Fast_Track_Roadmap_Extension_LOCKED_) Tj
+T*
+(v1.0.pdf) Tj
+T*
+ET
+BT
+/F1 8 Tf
+50 28 Td
+(Page 1 of 2 - AI Crypto Signal Agent - 2026-07-27 UTC) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 298 >>
+stream
+BT
+/F2 16 Tf
+50 760 Td
+(Post-CP09R1 Fast-Track Roadmap Extension - LOCKED v1.0) Tj
+0 -25 Td
+/F1 10 Tf
+13 TL
+(PUSH_EXECUTED=NO) Tj
+T*
+(TRUSTED_CP09_COMMIT_BOUND=NO) Tj
+T*
+(PHASE12_WORK_EXECUTED=NO) Tj
+T*
+() Tj
+T*
+ET
+BT
+/F1 8 Tf
+50 28 Td
+(Page 2 of 2 - AI Crypto Signal Agent - 2026-07-27 UTC) Tj
+ET
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000197 00000 n 
+0000000272 00000 n 
+0000000408 00000 n 
+0000002998 00000 n 
+0000003134 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+3482
+%%EOF
