@@ -3,6 +3,7 @@ Description=AI Crypto Signal Agent F4 30-minute inactive cadence
 
 [Timer]
 Unit=ai-crypto-signal-agent.service
+OnActiveSec=30min
 OnUnitInactiveSec=30min
 AccuracySec=1min
 Persistent=false

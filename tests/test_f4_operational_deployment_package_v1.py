@@ -107,11 +107,13 @@ def test_service_contract() -> None:
 def test_timer_contract() -> None:
     text = _text(SYSTEMD / "ai-crypto-signal-agent.timer")
     assert _directives(text, "Unit") == ["ai-crypto-signal-agent.service"]
+    assert _directives(text, "OnActiveSec") == ["30min"]
     assert _directives(text, "OnUnitInactiveSec") == ["30min"]
     assert _directives(text, "AccuracySec") == ["1min"]
     assert _directives(text, "Persistent") == ["false"]
     assert not _directives(text, "OnBootSec")
     assert not _directives(text, "OnStartupSec")
+    assert not _directives(text, "OnUnitActiveSec")
 
 
 def test_installer_and_rollback_never_operate_systemd() -> None:

@@ -51,13 +51,13 @@ def _assert_phase09r1_and_f4_timer_scope(root):
     assert _directives(timer_text, "Unit") == [
         "ai-crypto-signal-agent.service"
     ]
+    assert _directives(timer_text, "OnActiveSec") == ["30min"]
     assert _directives(timer_text, "OnUnitInactiveSec") == ["30min"]
     assert _directives(timer_text, "AccuracySec") == ["1min"]
     assert _directives(timer_text, "Persistent") == ["false"]
     for forbidden_schedule in (
         "OnBootSec",
         "OnStartupSec",
-        "OnActiveSec",
         "OnUnitActiveSec",
         "OnCalendar",
     ):
@@ -81,8 +81,11 @@ def test_contract_file_scope_and_no_timer():
     (
         "second_timer",
         "nonauthorized_path",
+        "missing_active_anchor",
+        "immediate_active_anchor",
         "persistent_catchup",
         "boot_catchup",
+        "startup_catchup",
         "wrong_target",
         "installer_enablement",
     ),
@@ -99,6 +102,20 @@ def test_f4_timer_scope_negative_controls(tmp_path, negative_case):
     elif negative_case == "nonauthorized_path":
         other = fixture_root / "deploy/systemd/f4.timer"
         timer.rename(other)
+    elif negative_case == "missing_active_anchor":
+        timer.write_text(
+            timer.read_text(encoding="utf-8").replace(
+                "OnActiveSec=30min\n", ""
+            ),
+            encoding="utf-8",
+        )
+    elif negative_case == "immediate_active_anchor":
+        timer.write_text(
+            timer.read_text(encoding="utf-8").replace(
+                "OnActiveSec=30min", "OnActiveSec=0"
+            ),
+            encoding="utf-8",
+        )
     elif negative_case == "persistent_catchup":
         timer.write_text(
             timer.read_text(encoding="utf-8").replace(
@@ -109,6 +126,11 @@ def test_f4_timer_scope_negative_controls(tmp_path, negative_case):
     elif negative_case == "boot_catchup":
         timer.write_text(
             timer.read_text(encoding="utf-8") + "OnBootSec=1min\n",
+            encoding="utf-8",
+        )
+    elif negative_case == "startup_catchup":
+        timer.write_text(
+            timer.read_text(encoding="utf-8") + "OnStartupSec=1min\n",
             encoding="utf-8",
         )
     elif negative_case == "wrong_target":
