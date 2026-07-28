@@ -126,7 +126,7 @@ def test_owner_control_unit_contract() -> None:
     assert _directives(text, "RestartSec") == ["5s"]
     assert _directives(text, "RuntimeDirectory") == ["ai-crypto-signal-agent-telegram-control"]
     assert _directives(text, "LoadCredentialEncrypted") == [
-        "telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token"
+        "telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token"
     ]
     assert _directives(text, "ExecStart") == [
         "@@RELEASE_ROOT@@/deploy/operational_v1/bin/"

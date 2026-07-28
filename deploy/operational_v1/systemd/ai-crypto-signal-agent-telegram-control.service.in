@@ -15,7 +15,7 @@ WorkingDirectory=/var/lib/ai-crypto-signal-agent/phase09r1
 EnvironmentFile=/etc/ai-crypto-signal-agent/owner-control.env
 Environment=ACTIVE_SIGNAL_LEDGER_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json
 Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json
-LoadCredentialEncrypted=telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token
+LoadCredentialEncrypted=telegram_bot_token:/etc/credstore.encrypted/telegram_bot_token
 RuntimeDirectory=ai-crypto-signal-agent-telegram-control
 RuntimeDirectoryMode=0750
 ExecStart=@@RELEASE_ROOT@@/deploy/operational_v1/bin/ai-crypto-signal-agent-telegram-control

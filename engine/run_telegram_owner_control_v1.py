@@ -26,7 +26,7 @@ def load_owner_control_config(environment: Mapping[str, str]) -> TelegramOwnerCo
         "owner_chat_id": environment.get("TELEGRAM_OWNER_CHAT_ID"),
         "ledger_path": environment.get("ACTIVE_SIGNAL_LEDGER_PATH"),
         "state_path": environment.get("TELEGRAM_OWNER_CONTROL_STATE_PATH"),
-        "token_file": str(Path(credentials_directory) / "telegram-bot-token") if credentials_directory else None,
+        "token_file": str(Path(credentials_directory) / "telegram_bot_token") if credentials_directory else None,
     }
     if not all(isinstance(value, str) and value.strip() for value in values.values()):
         raise ValueError("OWNER_CONTROL_CONFIGURATION_INVALID")

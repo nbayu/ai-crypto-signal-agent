@@ -13,7 +13,7 @@ def test_config_uses_credential_file_and_explicit_owner_authority(tmp_path):
         "TELEGRAM_OWNER_CHAT_ID": "200", "ACTIVE_SIGNAL_LEDGER_PATH": "/state/ledger.json",
         "TELEGRAM_OWNER_CONTROL_STATE_PATH": "/state/control.json",
     })
-    assert config.token_file == tmp_path / "telegram-bot-token"
+    assert config.token_file == tmp_path / "telegram_bot_token"
     assert config.owner_user_id == "100" and config.owner_chat_id == "200"
     with pytest.raises(ValueError):
         load_owner_control_config({})
