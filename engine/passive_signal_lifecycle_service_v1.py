@@ -439,6 +439,31 @@ def reconcile_terminal_refill_after_restart(
         )
 
 
+def commit_owner_confirmed_entry(
+    *, ledger_path: str | Path, expected_revision: int, transition_id: str,
+    signal_id: str, timestamp: str,
+) -> dict[str, Any]:
+    """Commit the sole owner-authorized slot and pair-lock acquisition event."""
+    return active.mark_entry_active(
+        ledger_path, expected_revision=expected_revision, transition_id=transition_id,
+        signal_id=signal_id, entry_at=timestamp, updated_at=timestamp,
+    )
+
+
+def commit_owner_terminal(
+    *, ledger_path: str | Path, expected_revision: int, transition_id: str,
+    signal_id: str, terminal_state: str, timestamp: str, reason: str,
+) -> dict[str, Any]:
+    """Commit an owner rejection or manual close without triggering a scan."""
+    if terminal_state not in {active.REJECTED_BY_OWNER, active.CLOSED_MANUAL}:
+        raise ValueError("OWNER_TERMINAL_INVALID")
+    return active.transition_terminal(
+        ledger_path, expected_revision=expected_revision, transition_id=transition_id,
+        signal_id=signal_id, terminal_state=terminal_state, terminal_at=timestamp,
+        terminal_reason=reason, updated_at=timestamp,
+    )
+
+
 def inspect_signal_lifecycle(
     *,
     active_ledger: Mapping[str, Any],

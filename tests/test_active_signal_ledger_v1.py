@@ -164,6 +164,29 @@ def test_entry_transition_is_narrow_and_idempotent(tmp_path):
     _error("LIFECYCLE_TRANSITION_INVALID", lambda: mark_entry_active(path, expected_revision=entered["ledger_revision"], transition_id="entry-2", signal_id="signal-1", entry_at=LATER, updated_at=LATER))
 
 
+def test_entry_replay_ignores_stale_revision_but_not_changed_identity(tmp_path):
+    path = _initialize(tmp_path)
+    pending = _reserve(path)
+    entered = mark_entry_active(
+        path, expected_revision=pending["ledger_revision"], transition_id="owner-command",
+        signal_id="signal-1", entry_at=LATER, updated_at=LATER,
+    )
+    replay = mark_entry_active(
+        path, expected_revision=0, transition_id="owner-command",
+        signal_id="signal-1", entry_at=LATER, updated_at=LATER,
+    )
+    assert replay == entered
+    before = path.read_bytes()
+    _error(
+        "EXPECTED_REVISION_MISMATCH",
+        lambda: mark_entry_active(
+            path, expected_revision=0, transition_id="owner-command",
+            signal_id="signal-1", entry_at=NOW, updated_at=LATER,
+        ),
+    )
+    assert path.read_bytes() == before
+
+
 @pytest.mark.parametrize("terminal", (CLOSED_PROFIT, CLOSED_STOP_LOSS, CLOSED_MANUAL, REJECTED_BY_OWNER, CANCELLED, EXPIRED, INVALIDATED))
 def test_all_terminals_are_allowed_from_pending_and_release_capacity(tmp_path, terminal):
     path = _initialize(tmp_path)

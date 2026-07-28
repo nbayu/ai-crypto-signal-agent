@@ -668,7 +668,6 @@ def mark_entry_active(
         _reject(EXPECTED_REVISION_MISMATCH)
     with _ledger_lock(path):
         ledger = _read_ledger(path)
-        _expected_revision(ledger, expected_revision)
         record = ledger["signals"].get(signal_id)
         if record is None:
             _reject(SIGNAL_ID_INVALID)
@@ -678,8 +677,17 @@ def mark_entry_active(
             occurred_at=entry_at, terminal_reason=None,
             ledger_revision=ledger["ledger_revision"] + 1,
         )
-        if _existing_transition(ledger, transition_id, candidate):
+        try:
+            replay = _existing_transition(ledger, transition_id, candidate)
+        except ActiveSignalLedgerError as error:
+            if error.reason_code == TRANSITION_ID_COLLISION:
+                _expected_revision(ledger, expected_revision)
+            raise
+        if replay:
+            if require_current_revision:
+                _expected_revision(ledger, expected_revision)
             return ledger
+        _expected_revision(ledger, expected_revision)
         if record["state"] in TERMINAL_STATES:
             _reject(TERMINAL_SIGNAL_REOPEN_FORBIDDEN)
         if record["state"] != PUBLISHED_PENDING_ENTRY:
@@ -720,23 +728,26 @@ def transition_terminal(
     path = _path(ledger_path)
     with _ledger_lock(path):
         ledger = _read_ledger(path)
+        existing_transition = ledger["transitions"].get(transition_id)
+        if existing_transition is not None:
+            equivalent_transition = (
+                existing_transition["operation"] == "TERMINAL"
+                and existing_transition["signal_id"] == signal_id
+                and existing_transition["to_state"] == terminal_state
+                and existing_transition["occurred_at"] == terminal_at
+                and existing_transition["terminal_reason"] == terminal_reason
+            )
+            if equivalent_transition:
+                if require_current_revision:
+                    _expected_revision(ledger, expected_revision)
+                return ledger
+            _expected_revision(ledger, expected_revision)
+            _reject(TRANSITION_ID_COLLISION)
         _expected_revision(ledger, expected_revision)
         record = ledger["signals"].get(signal_id)
         if record is None:
             _reject(SIGNAL_ID_INVALID)
         if record["state"] in TERMINAL_STATES:
-            existing = ledger["transitions"].get(transition_id)
-            if existing is not None:
-                equivalent_transition = (
-                    existing["operation"] == "TERMINAL"
-                    and existing["signal_id"] == signal_id
-                    and existing["to_state"] == terminal_state
-                    and existing["occurred_at"] == terminal_at
-                    and existing["terminal_reason"] == terminal_reason
-                )
-                if equivalent_transition:
-                    return ledger
-                _reject(TRANSITION_ID_COLLISION)
             equivalent = (
                 record["state"] == terminal_state
                 and record["terminal_at"] == terminal_at

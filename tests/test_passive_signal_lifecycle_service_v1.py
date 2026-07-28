@@ -76,6 +76,22 @@ def test_pending_signal_activates_with_complete_result_schema(tmp_path):
     )
 
 
+def test_owner_wrappers_commit_entry_and_manual_close_without_refill(tmp_path):
+    path, _ = _paths(tmp_path)
+    pending = _reserve(path)
+    entered = lifecycle.commit_owner_confirmed_entry(
+        ledger_path=path, expected_revision=pending["ledger_revision"],
+        transition_id="owner-entry", signal_id="signal-one", timestamp=ENTRY_AT,
+    )
+    closed = lifecycle.commit_owner_terminal(
+        ledger_path=path, expected_revision=entered["ledger_revision"],
+        transition_id="owner-close", signal_id="signal-one",
+        terminal_state=active.CLOSED_MANUAL, timestamp=TERMINAL_AT,
+        reason="OWNER_CONFIRMED_CLOSE",
+    )
+    assert closed["signals"]["signal-one"]["state"] == active.CLOSED_MANUAL
+
+
 @pytest.mark.parametrize("mode", active.STYLES)
 def test_entry_preserves_all_modes_and_transition_identity(tmp_path, mode):
     path, _ = _paths(tmp_path, mode)
