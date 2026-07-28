@@ -66,6 +66,7 @@ def test_pending_signal_activates_with_complete_result_schema(tmp_path):
     assert result.entry_applied and not result.terminal_applied
     assert result.current_state == active.ENTRY_ACTIVE
     assert result.active_ledger_revision == reserved["ledger_revision"] + 1
+    assert active.inspect_capacity(active.load_ledger(path))["total_active"] == 1
     assert tuple(result.to_dict()) == (
         "result", "operation", "signal_id", "mode", "previous_state", "current_state",
         "entry_transition_id", "terminal_transition_id", "active_ledger_revision",

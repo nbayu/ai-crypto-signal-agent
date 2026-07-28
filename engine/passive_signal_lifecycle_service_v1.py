@@ -1,6 +1,7 @@
 """Caller-driven composition of passive signal lifecycle persistence seams.
 
-Only explicit entry activation delegates to an occupying ledger transition.
+Only explicit entry activation delegates to the ledger's atomic style-slot and
+global canonical-pair ownership transition.
 """
 
 from __future__ import annotations

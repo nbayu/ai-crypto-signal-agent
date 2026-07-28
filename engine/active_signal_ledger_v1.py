@@ -17,6 +17,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
+from engine.canonical_pair_v1 import CanonicalPairError, normalize_pair
+
 
 SCHEMA_NAME = "active-signal-ledger"
 SCHEMA_VERSION = 2
@@ -70,6 +72,8 @@ TRANSITION_ID_COLLISION = "TRANSITION_ID_COLLISION"
 EXPECTED_REVISION_MISMATCH = "EXPECTED_REVISION_MISMATCH"
 STYLE_CAPACITY_FULL = "STYLE_CAPACITY_FULL"
 TOTAL_CAPACITY_FULL = "TOTAL_CAPACITY_FULL"
+PAIR_INVALID = "PAIR_INVALID"
+GLOBAL_PAIR_ALREADY_ACTIVE = "GLOBAL_PAIR_ALREADY_ACTIVE"
 PUBLICATION_OCCUPANCY_RECONCILIATION_REQUIRED = (
     "PUBLICATION_OCCUPANCY_RECONCILIATION_REQUIRED"
 )
@@ -186,6 +190,10 @@ def _validate_signal(signal_id: str, record: Any) -> None:
     if record["mode"] not in STYLES:
         _reject(STYLE_INVALID)
     _identifier(record["symbol"])
+    try:
+        normalize_pair(record["symbol"])
+    except CanonicalPairError:
+        _reject(LEDGER_CORRUPT)
     if record["state"] not in LIFECYCLE_STATES:
         _reject(LEDGER_CORRUPT)
     _timestamp(record["published_at"])
@@ -299,6 +307,13 @@ def validate_ledger(ledger: Any) -> dict[str, Any]:
         if record["delivery_id"] in delivery_ids:
             _reject(PUBLICATION_ID_COLLISION)
         delivery_ids.add(record["delivery_id"])
+    active_pairs: set[str] = set()
+    for record in signals.values():
+        if record["state"] == ENTRY_ACTIVE:
+            pair = normalize_pair(record["symbol"])
+            if pair in active_pairs:
+                _reject(GLOBAL_PAIR_ALREADY_ACTIVE)
+            active_pairs.add(pair)
     for transition_id, transition in transitions.items():
         _validate_transition(transition_id, transition, signals)
     transaction_ids: set[str] = set()
@@ -469,6 +484,10 @@ def _transaction_payload(
     if mode not in STYLES:
         _reject(STYLE_INVALID)
     _identifier(symbol)
+    try:
+        normalize_pair(symbol)
+    except CanonicalPairError:
+        _reject(PAIR_INVALID)
     _timestamp(published_at)
     _timestamp(updated_at)
     _hash(source_payload_hash)
@@ -670,6 +689,14 @@ def mark_entry_active(
             _reject(STYLE_CAPACITY_FULL)
         if capacity["TOTAL"] >= TOTAL_CAPACITY:
             _reject(TOTAL_CAPACITY_FULL)
+        pair = normalize_pair(record["symbol"])
+        if any(
+            other["state"] == ENTRY_ACTIVE
+            and normalize_pair(other["symbol"]) == pair
+            and other["signal_id"] != signal_id
+            for other in ledger["signals"].values()
+        ):
+            _reject(GLOBAL_PAIR_ALREADY_ACTIVE)
         record["state"] = ENTRY_ACTIVE
         record["entry_at"] = entry_at
         record["last_transition_id"] = transition_id

@@ -96,14 +96,19 @@ def test_each_style_allows_three_then_rejects_fourth(tmp_path, mode):
     path = _initialize(tmp_path)
     ledger = load_ledger(path)
     for number in range(3):
-        ledger = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-{number}")
+        ledger = _reserve(
+            path, ledger["ledger_revision"], mode, f"{mode}-{number}",
+            symbol=f"{mode}{number}/USDT",
+        )
         ledger = mark_entry_active(
             path, expected_revision=ledger["ledger_revision"],
             transition_id=f"entry-{mode}-{number}", signal_id=f"signal-{mode}-{number}",
             entry_at=LATER, updated_at=LATER,
         )
     assert inspect_capacity(ledger)["active_by_mode"][mode] == 3
-    pending = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-4")
+    pending = _reserve(
+        path, ledger["ledger_revision"], mode, f"{mode}-4", symbol=f"{mode}4/USDT",
+    )
     assert inspect_capacity(pending)["active_by_mode"][mode] == 3
     _error("STYLE_CAPACITY_FULL", lambda: mark_entry_active(
         path, expected_revision=pending["ledger_revision"], transition_id=f"entry-{mode}-4",
@@ -116,7 +121,10 @@ def test_total_capacity_is_nine_and_is_derived_from_records(tmp_path):
     ledger = load_ledger(path)
     for mode in (SWING, INTRADAY, SCALP):
         for number in range(3):
-            ledger = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-{number}")
+            ledger = _reserve(
+                path, ledger["ledger_revision"], mode, f"{mode}-{number}",
+                symbol=f"{mode}{number}/USDT",
+            )
             ledger = mark_entry_active(
                 path, expected_revision=ledger["ledger_revision"],
                 transition_id=f"entry-{mode}-{number}", signal_id=f"signal-{mode}-{number}",
@@ -222,7 +230,10 @@ def test_over_capacity_ledger_is_rejected_during_restart_loading(tmp_path):
     path = _initialize(tmp_path)
     ledger = load_ledger(path)
     for number in range(3):
-        ledger = _reserve(path, ledger["ledger_revision"], SWING, f"swing-{number}")
+        ledger = _reserve(
+            path, ledger["ledger_revision"], SWING, f"swing-{number}",
+            symbol=f"SWING{number}/USDT",
+        )
         ledger = mark_entry_active(
             path, expected_revision=ledger["ledger_revision"],
             transition_id=f"entry-swing-{number}", signal_id=f"signal-swing-{number}",
@@ -233,6 +244,7 @@ def test_over_capacity_ledger_is_rejected_during_restart_loading(tmp_path):
     copied["signal_id"] = "signal-swing-over"
     copied["delivery_id"] = "delivery-swing-over"
     copied["last_transition_id"] = "transition-swing-over"
+    copied["symbol"] = "OVER/USDT"
     corrupt["signals"][copied["signal_id"]] = copied
     path.write_text(json.dumps(corrupt), encoding="utf-8")
     _error("STYLE_CAPACITY_FULL", lambda: load_ledger(path))
@@ -270,6 +282,47 @@ def test_owner_entry_consumes_and_manual_close_releases_exactly_one_slot(tmp_pat
         terminal_reason="OWNER_CONFIRMED_CLOSE", updated_at=LATER,
     )
     assert inspect_capacity(closed)["remaining_by_mode"][SWING] == 3
+
+
+def test_global_pair_is_atomic_across_styles_and_side_labels(tmp_path):
+    path = _initialize(tmp_path)
+    first = _reserve(path, mode=SWING, suffix="LONG", symbol="sol/usdt")
+    first = mark_entry_active(
+        path, expected_revision=first["ledger_revision"], transition_id="entry-long",
+        signal_id="signal-LONG", entry_at=LATER, updated_at=LATER,
+    )
+    second = _reserve(
+        path, first["ledger_revision"], INTRADAY, "SHORT", symbol="SOL/USDT:USDT",
+    )
+    before = path.read_bytes()
+    _error("GLOBAL_PAIR_ALREADY_ACTIVE", lambda: mark_entry_active(
+        path, expected_revision=second["ledger_revision"], transition_id="entry-short",
+        signal_id="signal-SHORT", entry_at=LATER, updated_at=LATER,
+    ))
+    assert path.read_bytes() == before
+    assert inspect_capacity(load_ledger(path))["active_by_mode"] == {
+        SWING: 1, INTRADAY: 0, SCALP: 0,
+    }
+
+
+def test_pair_lock_releases_only_with_committed_terminal_close(tmp_path):
+    path = _initialize(tmp_path)
+    first = _reserve(path, mode=SWING, suffix="one", symbol="SOL/USDT")
+    first = mark_entry_active(
+        path, expected_revision=first["ledger_revision"], transition_id="entry-one",
+        signal_id="signal-one", entry_at=LATER, updated_at=LATER,
+    )
+    closed = transition_terminal(
+        path, expected_revision=first["ledger_revision"], transition_id="close-one",
+        signal_id="signal-one", terminal_state=CLOSED_MANUAL, terminal_at=LATER,
+        terminal_reason="OWNER_CONFIRMED_CLOSE", updated_at=LATER,
+    )
+    second = _reserve(path, closed["ledger_revision"], INTRADAY, "two", symbol="sol/usdt:usdt")
+    second = mark_entry_active(
+        path, expected_revision=second["ledger_revision"], transition_id="entry-two",
+        signal_id="signal-two", entry_at=LATER, updated_at=LATER,
+    )
+    assert second["signals"]["signal-two"]["state"] == ENTRY_ACTIVE
 
 
 def test_source_has_no_runtime_integration_imports():
