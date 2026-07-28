@@ -9,6 +9,9 @@ readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/kill-switch.active"
 readonly LOCK_PATH="/run/ai-crypto-signal-agent/operational.lock"
 readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent.service"
 readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent.timer"
+readonly CONTROL_UNIT="/etc/systemd/system/ai-crypto-signal-agent-telegram-control.service"
+readonly OWNER_CONTROL_ENV="/etc/ai-crypto-signal-agent/owner-control.env"
+readonly OWNER_CONTROL_STATE="/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json"
 readonly TELEGRAM_ENV="/etc/ai-crypto-signal-agent/phase09r1.env"
 readonly PROVIDER_ENV="/etc/ai-crypto-signal-agent/deepseek.env"
 readonly SERVICE_USER="ai-crypto-signal-agent"
@@ -101,6 +104,22 @@ service_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.service 2>/
 [[ "$service_active_state" == "inactive" ]] && service_inactive=YES
 [[ "$service_enabled_state" == "static" || "$service_enabled_state" == "disabled" ]] &&
     service_enabled_valid=YES
+
+control_installed=NO
+control_state_valid=NO
+owner_authority_valid=NO
+control_active_state="$(systemctl is-active ai-crypto-signal-agent-telegram-control.service 2>/dev/null || true)"
+control_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent-telegram-control.service 2>/dev/null || true)"
+[[ -f "$CONTROL_UNIT" && ! -L "$CONTROL_UNIT" ]] && control_installed=YES
+if verify_env_metadata "$OWNER_CONTROL_ENV" TELEGRAM_OWNER_USER_ID TELEGRAM_OWNER_CHAT_ID; then
+    owner_authority_valid=YES
+fi
+if [[ -f "$OWNER_CONTROL_STATE" && ! -L "$OWNER_CONTROL_STATE" &&
+      "$(stat -c '%U:%G:%a' "$OWNER_CONTROL_STATE")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] &&
+   grep -q '"schema_name":"telegram-owner-control-state"' "$OWNER_CONTROL_STATE" &&
+   grep -q '"schema_version":1' "$OWNER_CONTROL_STATE"; then
+    control_state_valid=YES
+fi
 
 timer_active_state="$(systemctl is-active ai-crypto-signal-agent.timer 2>/dev/null || true)"
 timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent.timer 2>/dev/null || true)"
@@ -213,6 +232,9 @@ record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
 record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
 record_check SERVICE_INACTIVE "$service_inactive" SERVICE_NOT_INACTIVE
 record_check SERVICE_ENABLED_VALID "$service_enabled_valid" SERVICE_ENABLEMENT_STATE_MISMATCH
+record_check CONTROL_INSTALLED "$control_installed" CONTROL_UNIT_MISSING
+record_check CONTROL_STATE_VALID "$control_state_valid" CONTROL_STATE_INVALID
+record_check OWNER_AUTHORITY_METADATA_VALID "$owner_authority_valid" OWNER_AUTHORITY_METADATA_INVALID
 record_check CREDENTIAL_READINESS "$([[ "$credential_ready" == YES ]] && printf PASS || printf FAIL)" CREDENTIAL_READINESS_FAILED
 record_check KILL_SWITCH_READY "$kill_ready" KILL_SWITCH_STATE_INVALID
 printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_active"
@@ -236,13 +258,17 @@ health_state=NOT_READY
 if [[ "$service_inactive" == YES && "$service_enabled_valid" == YES ]]; then
     if [[ "$timer_enabled_state" == "disabled" &&
           "$timer_active_state" == "inactive" &&
-          "$timer_next_elapse_scheduled" == "NO" ]]; then
+          "$timer_next_elapse_scheduled" == "NO" &&
+          "$control_enabled_state" == "disabled" &&
+          "$control_active_state" == "inactive" ]]; then
         health_state=READY_NOT_ENABLED
     elif [[ "$timer_enabled_state" == "enabled" &&
             "$timer_active_state" == "active" &&
             "$timer_substate" == "waiting" &&
             "$timer_next_monotonic_finite" == "YES" &&
-            "$timer_next_monotonic_in_future" == "YES" ]]; then
+            "$timer_next_monotonic_in_future" == "YES" &&
+            "$control_enabled_state" == "enabled" &&
+            "$control_active_state" == "active" ]]; then
         health_state=READY_AND_AUTOMATION_ENABLED
     else
         [[ "$timer_enabled_state" != "enabled" || "$timer_active_state" == "active" ]] ||
@@ -271,6 +297,8 @@ printf 'SERVICE_ACTIVE=%s\n' "$service_active_state"
 printf 'SERVICE_ENABLED=%s\n' "$service_enabled_state"
 printf 'TIMER_ACTIVE=%s\n' "$timer_active_state"
 printf 'TIMER_ENABLED=%s\n' "$timer_enabled_state"
+printf 'CONTROL_ACTIVE=%s\n' "$control_active_state"
+printf 'CONTROL_ENABLED=%s\n' "$control_enabled_state"
 printf 'TIMER_SUBSTATE=%s\n' "$timer_substate"
 printf '%s\n' "CURRENT_MONOTONIC_CLOCK_SOURCE=python3_CLOCK_MONOTONIC"
 printf 'CURRENT_MONOTONIC_USEC=%s\n' "${current_monotonic_usec:-UNAVAILABLE}"

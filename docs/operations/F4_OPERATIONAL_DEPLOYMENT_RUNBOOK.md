@@ -32,3 +32,12 @@ The required F4 state is:
 
 F5 owner authorization is required before any controlled canary or
 enablement.
+
+The owner-blueprint release additionally stages
+`ai-crypto-signal-agent-telegram-control.service` and its libexec wrapper.
+Installation does not daemon-reload, enable, or start either unit. FT3 must
+create `/etc/ai-crypto-signal-agent/owner-control.env` as root:root `0600`,
+perform the tested state migration, and verify `READY_NOT_ENABLED` before any
+explicit owner activation. Autonomous scanner delivery does not consult the
+legacy `f4-operational-cycle` quota; legacy quota state remains untouched for
+the explicit `/scan` and manual one-shot scope.

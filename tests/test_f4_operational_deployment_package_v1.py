@@ -36,9 +36,11 @@ def test_exact_package_inventory() -> None:
         "bin/ai-crypto-signal-agent-install",
         "bin/ai-crypto-signal-agent-rollback",
         "bin/ai-crypto-signal-agent-run-once",
+        "bin/ai-crypto-signal-agent-telegram-control",
         "deployment-package-manifest.txt",
         "monitoring/README.md",
         "systemd/ai-crypto-signal-agent.service.in",
+        "systemd/ai-crypto-signal-agent-telegram-control.service.in",
         "systemd/ai-crypto-signal-agent.timer",
         "tmpfiles.d/ai-crypto-signal-agent.conf",
     }
@@ -56,6 +58,7 @@ def test_shell_files_have_valid_syntax() -> None:
         "ai-crypto-signal-agent-install",
         "ai-crypto-signal-agent-rollback",
         "ai-crypto-signal-agent-run-once",
+        "ai-crypto-signal-agent-telegram-control",
     ):
         subprocess.run(["bash", "-n", str(BIN / name)], check=True)
 
@@ -114,6 +117,28 @@ def test_timer_contract() -> None:
     assert not _directives(text, "OnBootSec")
     assert not _directives(text, "OnStartupSec")
     assert not _directives(text, "OnUnitActiveSec")
+
+
+def test_owner_control_unit_contract() -> None:
+    text = _text(SYSTEMD / "ai-crypto-signal-agent-telegram-control.service.in")
+    assert _directives(text, "Type") == ["simple"]
+    assert _directives(text, "Restart") == ["on-failure"]
+    assert _directives(text, "RestartSec") == ["5s"]
+    assert _directives(text, "RuntimeDirectory") == ["ai-crypto-signal-agent-telegram-control"]
+    assert _directives(text, "LoadCredentialEncrypted") == [
+        "telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token"
+    ]
+    assert _directives(text, "ExecStart") == [
+        "/usr/local/libexec/ai-crypto-signal-agent-telegram-control"
+    ]
+    assert "WantedBy=multi-user.target" in text
+
+
+def test_scanner_service_has_no_static_operational_quota_gate() -> None:
+    text = _text(SYSTEMD / "ai-crypto-signal-agent.service.in")
+    assert "f4-operational-cycle" not in text
+    assert "TELEGRAM_QUOTA_LIMIT" not in text
+    assert "TELEGRAM_SLOT_CAPACITY" not in text
 
 
 def test_installer_and_rollback_never_operate_systemd() -> None:
@@ -199,8 +224,11 @@ def _make_health_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str
     lock_path = runtime / "operational.lock"
     service = units / "ai-crypto-signal-agent.service"
     timer = units / "ai-crypto-signal-agent.timer"
+    control_unit = units / "ai-crypto-signal-agent-telegram-control.service"
     telegram_env = credentials / "phase09r1.env"
     provider_env = credentials / "deepseek.env"
+    owner_env = credentials / "owner-control.env"
+    control_state = runtime / "telegram-owner-control-state-v1.json"
 
     release_ref.write_text(f"{release}\n", encoding="ascii")
     marker.write_bytes((TRUSTED + "\n").encode("ascii"))
@@ -212,19 +240,31 @@ def _make_health_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str
     service.write_bytes(service_bytes)
     (release / ".f4-rendered/ai-crypto-signal-agent.service").write_bytes(service_bytes)
     timer.write_bytes((SYSTEMD / "ai-crypto-signal-agent.timer").read_bytes())
+    control_unit.write_bytes((SYSTEMD / "ai-crypto-signal-agent-telegram-control.service.in").read_bytes())
     telegram_env.write_text(
         "TELEGRAM_BOT_TOKEN=synthetic-token\nTELEGRAM_DESTINATION_ID=synthetic-destination\n",
         encoding="ascii",
     )
     provider_env.write_text("DEEPSEEK_API_KEY=synthetic-provider-key\n", encoding="ascii")
+    owner_env.write_text("TELEGRAM_OWNER_USER_ID=100\nTELEGRAM_OWNER_CHAT_ID=200\n", encoding="ascii")
+    control_state.write_text(
+        '{"last_update_id":-1,"processed_commands":{},"processed_updates":{},"revision":0,'
+        '"schema_name":"telegram-owner-control-state","schema_version":1,'
+        '"signal_message_bindings":{},"updated_at":"2026-07-28T00:00:00Z"}\n',
+        encoding="ascii",
+    )
     telegram_env.chmod(0o600)
     provider_env.chmod(0o600)
+    owner_env.chmod(0o600)
+    control_state.chmod(0o600)
 
     fake_systemctl = fake_bin / "systemctl"
     fake_systemctl.write_text(
         """#!/usr/bin/env bash
 set -euo pipefail
 case "$1:$2" in
+  is-active:ai-crypto-signal-agent-telegram-control.service) printf '%s\\n' "$MOCK_CONTROL_ACTIVE" ;;
+  is-enabled:ai-crypto-signal-agent-telegram-control.service) printf '%s\\n' "$MOCK_CONTROL_ENABLED" ;;
   is-active:ai-crypto-signal-agent.service) printf '%s\\n' "$MOCK_SERVICE_ACTIVE" ;;
   is-enabled:ai-crypto-signal-agent.service) printf '%s\\n' "$MOCK_SERVICE_ENABLED" ;;
   is-active:ai-crypto-signal-agent.timer) printf '%s\\n' "$MOCK_TIMER_ACTIVE" ;;
@@ -279,6 +319,9 @@ esac
         "/etc/systemd/system/ai-crypto-signal-agent.timer": str(timer),
         "/etc/ai-crypto-signal-agent/phase09r1.env": str(telegram_env),
         "/etc/ai-crypto-signal-agent/deepseek.env": str(provider_env),
+        "/etc/systemd/system/ai-crypto-signal-agent-telegram-control.service": str(control_unit),
+        "/etc/ai-crypto-signal-agent/owner-control.env": str(owner_env),
+        "/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json": str(control_state),
     }
     for original, replacement in replacements.items():
         health_text = health_text.replace(original, replacement)
@@ -294,6 +337,8 @@ esac
         "MOCK_TIMER_ACTIVE": "inactive",
         "MOCK_TIMER_ENABLED": "disabled",
         "MOCK_TIMER_SUBSTATE": "dead",
+        "MOCK_CONTROL_ACTIVE": "inactive",
+        "MOCK_CONTROL_ENABLED": "disabled",
         "MOCK_TIMER_NEXT_MONOTONIC": "t 18446744073709551615",
         "MOCK_TIMER_NEXT_REALTIME": "t 0",
         "MOCK_CURRENT_MONOTONIC": "1000000000",
@@ -314,6 +359,9 @@ esac
 def _run_health_case(tmp_path: Path, state: dict[str, str], mutation: str | None = None) -> subprocess.CompletedProcess[str]:
     health, environment, paths = _make_health_fixture(tmp_path)
     environment.update(state)
+    if state.get("MOCK_TIMER_ENABLED") == "enabled":
+        environment["MOCK_CONTROL_ACTIVE"] = state.get("MOCK_CONTROL_ACTIVE", "active")
+        environment["MOCK_CONTROL_ENABLED"] = state.get("MOCK_CONTROL_ENABLED", "enabled")
     held_lock = None
     if mutation == "persistent":
         for path in (paths["timer"], paths["release_timer"]):
@@ -454,6 +502,8 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
     marker = destdir / "var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker"
     assert service.is_file()
     assert timer.is_file()
+    assert (destdir / "etc/systemd/system/ai-crypto-signal-agent-telegram-control.service").is_file()
+    assert (destdir / "usr/local/libexec/ai-crypto-signal-agent-telegram-control").is_file()
     assert marker.read_bytes() == (TRUSTED + "\n").encode("ascii")
     assert "@@RELEASE_ROOT@@" not in service.read_text()
 
@@ -466,6 +516,8 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
         "\n".join(
             (
                 "SERVICE_STATE=PRESENT",
+                "CONTROL_SERVICE_STATE=ABSENT",
+                "CONTROL_WRAPPER_STATE=ABSENT",
                 "TIMER_STATE=ABSENT",
                 "HEALTH_STATE=ABSENT",
                 "RETENTION_STATE=ABSENT",

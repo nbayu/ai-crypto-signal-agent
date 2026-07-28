@@ -8,7 +8,10 @@ from pandas import Timestamp
 
 from engine.scanner import scan_market
 from engine.validated_pipeline_v4 import run_validated_pipeline_v4
-from engine.outcome_tracker_v4 import save_outcome_snapshot
+from engine.outcome_tracker_v4 import (
+    save_outcome_snapshot,
+    validate_outcome_invocation_id,
+)
 from engine.top5_watchlist_artifact_v4 import (
     save_top5_watchlist_artifact,
 )
@@ -107,6 +110,7 @@ def save_validated_snapshot_v4(out, *, directory=None, now=None):
 
 def run_master_engine_v4(
     *,
+    outcome_invocation_id,
     scanner=scan_market,
     pipeline=run_validated_pipeline_v4,
     snapshot_saver=save_validated_snapshot_v4,
@@ -122,6 +126,9 @@ def run_master_engine_v4(
     publication_root=None,
     owner_blueprint_ledger=None,
 ):
+    validated_outcome_invocation_id = validate_outcome_invocation_id(
+        outcome_invocation_id
+    )
     results = scanner()
 
     out = pipeline(results)
@@ -134,7 +141,9 @@ def run_master_engine_v4(
         now=now,
     )
     outcome_path = outcome_saver(
-        out["final_top5"]
+        out["final_top5"],
+        outcome_invocation_id=validated_outcome_invocation_id,
+        captured_at=validated_at,
     )
     watchlist_path = watchlist_saver(
         out["final_top5"]

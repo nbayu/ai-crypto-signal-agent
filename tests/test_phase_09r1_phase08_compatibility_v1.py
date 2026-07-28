@@ -81,7 +81,14 @@ def test_characterize_phase08_master_engine_path(tmp_path):
         path.write_text(json.dumps(out))
         return path
 
-    def fake_outcome_saver(top5):
+    def fake_outcome_saver(
+        top5,
+        *,
+        outcome_invocation_id,
+        captured_at,
+    ):
+        assert outcome_invocation_id == "a" * 32
+        assert captured_at == "2026-07-16T12:00:00"
         path = tmp_path / "outcome.json"
         path.write_text(json.dumps(top5))
         return path
@@ -130,6 +137,7 @@ def test_characterize_phase08_master_engine_path(tmp_path):
     downstream_before = downstream_modules.intersection(sys.modules)
 
     run_out = run_master_engine_v4(
+        outcome_invocation_id="a" * 32,
         scanner=fake_scanner,
         pipeline=fake_pipeline,
         snapshot_saver=fake_snapshot_saver,

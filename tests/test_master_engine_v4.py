@@ -30,7 +30,7 @@ def test_save_validated_snapshot_v4_preserves_existing_contract(tmp_path):
     )
 
 
-def test_run_master_engine_v4_orchestrates_existing_production_flow():
+def test_outcome_invocation_identity_and_captured_at_propagate_to_outcome_saver():
     calls = []
 
     scanner_results = [
@@ -61,8 +61,18 @@ def test_run_master_engine_v4_orchestrates_existing_production_flow():
         calls.append(("snapshot_saver", out, now))
         return Path("validated.json")
 
-    def outcome_saver(final_top5):
-        calls.append(("outcome_saver", final_top5))
+    def outcome_saver(
+        final_top5,
+        *,
+        outcome_invocation_id,
+        captured_at,
+    ):
+        calls.append((
+            "outcome_saver",
+            final_top5,
+            outcome_invocation_id,
+            captured_at,
+        ))
         return Path("outcome.json")
 
     def watchlist_saver(final_top5):
@@ -106,6 +116,7 @@ def test_run_master_engine_v4_orchestrates_existing_production_flow():
         return datetime(2026, 7, 14, 12, 0, 0)
 
     result = run_master_engine_v4(
+        outcome_invocation_id="a" * 32,
         scanner=scanner,
         pipeline=pipeline,
         snapshot_saver=snapshot_saver,
@@ -142,7 +153,12 @@ def test_run_master_engine_v4_orchestrates_existing_production_flow():
             pipeline_out,
             datetime(2026, 7, 14, 12, 0, 0),
         ),
-        ("outcome_saver", pipeline_out["final_top5"]),
+        (
+            "outcome_saver",
+            pipeline_out["final_top5"],
+            "a" * 32,
+            "2026-07-14T12:00:00",
+        ),
         ("watchlist_saver", pipeline_out["final_top5"]),
         (
             "pre_delivery_runner",

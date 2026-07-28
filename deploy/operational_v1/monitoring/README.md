@@ -24,6 +24,11 @@ checks. Every partial, inconsistent, or unknown state reports
 leave and verify `READY_NOT_ENABLED`; later owner-authorized automation may
 use `READY_AND_AUTOMATION_ENABLED`.
 
+Owner-blueprint health also verifies the separate Telegram control unit,
+root-owned owner-ID authority metadata, persisted update/idempotency state,
+and matching control enablement. `READY_NOT_ENABLED` requires the control
+service disabled and inactive; enabled automation requires it enabled and active.
+
 For sanitized unit metadata, use:
 
 ```text

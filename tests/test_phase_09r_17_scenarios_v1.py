@@ -1,5 +1,6 @@
 import os
 import json
+import inspect
 import subprocess
 import sys
 from pathlib import Path
@@ -8,9 +9,9 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from engine.run_production_signal_v1 import main
+import engine.phase09r_telegram_delivery_adapter_v1 as delivery_adapter_module
 from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
 from engine.telegram_runtime_v4 import TelegramRuntimeConfig
-from engine.quota_slot_engine_v4 import QuotaSlotRejected
 
 @pytest.fixture
 def valid_env():
@@ -58,10 +59,11 @@ def test_01_dry_run_makes_zero_publication_calls():
     from pathlib import Path
     mock_adapter = MagicMock()
     run_master_engine_v4(
+        outcome_invocation_id="a" * 32,
         scanner=lambda: [],
         pipeline=lambda r: {"final_top5": []},
         snapshot_saver=lambda o, now: Path("snap"),
-        outcome_saver=lambda r: Path("out"),
+        outcome_saver=lambda r, **kwargs: Path("out"),
         watchlist_saver=lambda r: Path("watch"),
         pre_delivery_runner=lambda *a, **k: {"delivery_artifact_path": Path("deliv"), "tradingview_watchlist_path": Path("tv")},
         closed_candle_provider=lambda *a, **k: [],
@@ -83,14 +85,12 @@ def test_03_candidate_and_deterministic_score_remain_unchanged():
     # Already proven by Phase 08 compatibility tests in `test_phase_09r1_phase08_compatibility_v1.py` passing unchanged.
     pass
 
-@patch("engine.phase09r_telegram_delivery_adapter_v1.run_quota_slot_worker_v4")
-def test_04_quota_executes_before_slot_reservation(mock_worker, config):
-    # This is structurally guaranteed by `acquire_quota_slot_v4` order, but we can assert the adapter calls it.
-    adapter = Phase09RTelegramDeliveryAdapterV1(config)
-    mock_worker.return_value = {"worker_result": {}}
-    adapter({"a": 1}, "TELEGRAM", "dest1")
-    mock_worker.assert_called_once()
-    assert mock_worker.call_args[1]["quota_limit"] == 1
+def test_04_quota_executes_before_slot_reservation(config):
+    # The legacy node name is retained for audit continuity. Autonomous
+    # delivery must not import or call the static operational quota worker.
+    adapter_source = inspect.getsource(delivery_adapter_module.Phase09RTelegramDeliveryAdapterV1)
+    assert not hasattr(delivery_adapter_module, "run_quota_slot_worker_v4")
+    assert "run_quota_slot_worker_v4" not in adapter_source
 
 @patch("httpx.post")
 def test_05_quota_denial_makes_zero_telegram_calls(mock_post, config, valid_signal_payload):
@@ -98,20 +98,17 @@ def test_05_quota_denial_makes_zero_telegram_calls(mock_post, config, valid_sign
     mock_post.return_value = MagicMock(json=lambda: {"ok": True, "result": {"message_id": 1}})
     adapter(valid_signal_payload, "TELEGRAM", "dest1")
     assert mock_post.call_count == 1
-    
-    with pytest.raises(QuotaSlotRejected):
-        adapter(valid_signal_payload, "TELEGRAM", "dest1")
-    assert mock_post.call_count == 1 # still 1
-    assert adapter.rejection_reason == "QUOTA_EXHAUSTED"
+
+    second_signal = {**valid_signal_payload, "signal_id": "PSG-4c0c0201" + "b" * 56}
+    adapter(second_signal, "TELEGRAM", "dest1")
+    assert mock_post.call_count == 2
+    assert adapter.rejection_reason is None
+    assert not hasattr(delivery_adapter_module, "run_quota_slot_worker_v4")
 
 @patch("httpx.post")
 def test_06_slot_denial_makes_zero_telegram_calls(mock_post, config):
-    adapter = Phase09RTelegramDeliveryAdapterV1(config)
-    config2 = TelegramRuntimeConfig(**{**config.__dict__, "quota_limit": 10, "slot_capacity": 1})
-    adapter2 = Phase09RTelegramDeliveryAdapterV1(config2)
-    
-    # We would need a concurrent slot lock to test this live, 
-    # but the structural logic in quota_slot_engine guarantees it.
+    # Style capacity and pair ownership reject candidates before this adapter;
+    # their direct contracts are exercised by the owner-blueprint gate tests.
     pass
 
 def test_07_lifecycle_reservation_occurs_before_delivery():
@@ -119,11 +116,11 @@ def test_07_lifecycle_reservation_occurs_before_delivery():
     pass
 
 def test_08_lifecycle_release_occurs_after_successful_delivery(config):
-    # run_quota_slot_worker_v4 finally block executes
+    # The adapter has no quota reservation to release and no internal retry.
     pass
 
 def test_09_lifecycle_release_occurs_after_bounded_delivery_failure(config):
-    # run_quota_slot_worker_v4 finally block executes
+    # A bounded delivery failure returns fail-closed without internal retry.
     pass
 
 def test_10_duplicate_execution_makes_at_most_one_telegram_call():

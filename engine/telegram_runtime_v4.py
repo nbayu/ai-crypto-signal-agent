@@ -15,6 +15,14 @@ class TelegramRuntimeConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class TelegramDeliveryConfig:
+    """Autonomous delivery config with no static operational quota admission."""
+
+    bot_token: str = field(repr=False)
+    max_response_chars: int
+
+
+@dataclass(frozen=True)
 class TelegramRuntimeConfig:
     bot_token: str = field(repr=False)
     bot_username: str | None
@@ -73,6 +81,16 @@ def load_telegram_runtime_config(environment):
         ),
     )
     _validate_config(config)
+    return config
+
+
+def load_telegram_delivery_config(environment):
+    config = TelegramDeliveryConfig(
+        bot_token=_required_string(environment, "TELEGRAM_BOT_TOKEN"),
+        max_response_chars=_positive_integer(environment, "TELEGRAM_MAX_MESSAGE_LENGTH"),
+    )
+    if config.max_response_chars <= TRUNCATION_MARKER_LENGTH:
+        raise TelegramRuntimeConfigError("Invalid Telegram runtime configuration")
     return config
 
 

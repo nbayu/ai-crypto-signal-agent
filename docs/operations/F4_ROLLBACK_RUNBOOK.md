@@ -11,3 +11,8 @@ remain inactive and the timer remains disabled.
 
 The remotely locked F4 commit and immutable release are retained. Rollback
 does not rewrite Git history or remove sealed evidence.
+
+Owner-control rollback first stops and disables the control service under
+explicit FT3 authority, restores the prior control unit and wrapper bytes (or
+their recorded absence), and restores migrated state only from the sealed
+rollback record. It never deletes historical signal or quota evidence.

@@ -3,7 +3,6 @@ import json
 from unittest.mock import patch, MagicMock
 from engine.telegram_runtime_v4 import TelegramRuntimeConfig
 from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
-from engine.quota_slot_engine_v4 import QuotaSlotRejected
 
 
 def _payload():
@@ -64,26 +63,15 @@ def test_telegram_network_faked_failure(config):
         with pytest.raises(RuntimeError, match="Telegram delivery failed"):
             adapter(_payload(), "TELEGRAM", "dest1")
 
-def test_quota_denial_makes_zero_telegram_calls(config):
-    config = TelegramRuntimeConfig(
-        bot_token="test_token", bot_username=None, quota_limit=1, slot_capacity=1,
-        window_id="w1", quota_state_path=config.quota_state_path, worker_state_path=config.worker_state_path,
-        max_response_chars=4000
-    )
+def test_static_operational_quota_does_not_gate_autonomous_delivery(config):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     with patch("httpx.post") as mock_post:
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"ok": True, "result": {"message_id": 123}}
         mock_post.return_value = mock_resp
 
-        # First call succeeds and consumes the quota
         adapter(_payload(), "TELEGRAM", "dest1")
-        assert mock_post.call_count == 1
-
-        # Second call fails quota
-        with pytest.raises(QuotaSlotRejected):
-            adapter(_payload(), "TELEGRAM", "dest1")
-
-        # Call count is still 1
-        assert mock_post.call_count == 1
-        assert adapter.rejection_reason == "QUOTA_EXHAUSTED"
+        adapter(_payload(), "TELEGRAM", "dest1")
+        assert mock_post.call_count == 2
+        assert adapter.rejection_reason is None
+        assert not (config.quota_state_path and __import__("pathlib").Path(config.quota_state_path).exists())

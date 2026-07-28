@@ -1,9 +1,6 @@
 import httpx
 from datetime import datetime, timezone
 import uuid
-
-from engine.quota_slot_worker_v4 import run_quota_slot_worker_v4
-from engine.quota_slot_engine_v4 import QuotaSlotRejected
 from engine.telegram_human_formatter_v1 import format_signal_message
 
 class Phase09RTelegramDeliveryAdapterV1:
@@ -14,11 +11,13 @@ class Phase09RTelegramDeliveryAdapterV1:
         quota_now_provider=None,
         reservation_id_provider=None,
         available_slots_provider=None,
+        message_binding_recorder=None,
     ):
         self.config = config
         self.quota_now_provider = quota_now_provider or (lambda: datetime.now(timezone.utc))
         self.reservation_id_provider = reservation_id_provider or (lambda: str(uuid.uuid4()))
         self.available_slots_provider = available_slots_provider or (lambda _style: 3)
+        self.message_binding_recorder = message_binding_recorder
         self.rejection_reason = None
         self.malformed_receipt = False
 
@@ -54,27 +53,17 @@ class Phase09RTelegramDeliveryAdapterV1:
                 self.malformed_receipt = True
                 raise RuntimeError("Malformed receipt: missing message_id")
 
+            delivered_at = self.quota_now_provider().strftime("%Y-%m-%dT%H:%M:%SZ")
+            if self.message_binding_recorder is not None:
+                self.message_binding_recorder(
+                    payload=payload, destination_id=str(destination_id),
+                    message_id=int(message_id), timestamp=delivered_at,
+                )
+
             return {
                 "channel": channel,
                 "destination_id": destination_id,
                 "external_delivery_id": str(message_id),
-                "delivered_at": self.quota_now_provider().strftime("%Y-%m-%dT%H:%M:%SZ")
+                "delivered_at": delivered_at
             }
-
-        try:
-            result = run_quota_slot_worker_v4(
-                subject_id="autonomous:production_signal:v1",
-                window_id=self.config.window_id,
-                quota_limit=self.config.quota_limit,
-                slot_capacity=self.config.slot_capacity,
-                quota_state_path=self.config.quota_state_path,
-                worker_state_path=self.config.worker_state_path,
-                quota_now_provider=self.quota_now_provider,
-                reservation_id_provider=self.reservation_id_provider,
-                worker=do_delivery,
-            )
-        except QuotaSlotRejected as exc:
-            self.rejection_reason = exc.reason_code
-            raise
-
-        return result["worker_result"]
+        return do_delivery(state_path=None)

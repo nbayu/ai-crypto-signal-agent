@@ -56,6 +56,7 @@ FIXTURE_SHA256 = (
 CLASSIFICATION = "REPLAY"
 BOUNDARY = "MASTER_ENGINE_RECORDED_INPUT"
 MASTER_DEPENDENCIES = {
+    "outcome_invocation_id",
     "scanner",
     "pipeline",
     "snapshot_saver",
@@ -316,7 +317,11 @@ def _invoke_like_master_engine(dependencies):
     now = dependencies["now_provider"]()
     validated_at = now.isoformat()
     snapshot_path = dependencies["snapshot_saver"](out, now=now)
-    outcome_path = dependencies["outcome_saver"](out["final_top5"])
+    outcome_path = dependencies["outcome_saver"](
+        out["final_top5"],
+        outcome_invocation_id=dependencies["outcome_invocation_id"],
+        captured_at=validated_at,
+    )
     watchlist_path = dependencies["watchlist_saver"](out["final_top5"])
     delivery_out = dependencies["pre_delivery_runner"](
         watchlist_path,

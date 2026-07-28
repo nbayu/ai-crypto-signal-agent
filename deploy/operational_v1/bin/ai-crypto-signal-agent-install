@@ -56,6 +56,8 @@ atomic_install() {
 
 service_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.service)"
 timer_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.timer)"
+control_service_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent-telegram-control.service)"
+control_wrapper_path="$(rooted /usr/local/libexec/ai-crypto-signal-agent-telegram-control)"
 health_path="$(rooted /usr/local/sbin/ai-crypto-signal-agent-health)"
 retention_path="$(rooted /etc/tmpfiles.d/ai-crypto-signal-agent.conf)"
 marker_path="$(rooted /var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker)"
@@ -70,14 +72,24 @@ chmod 0644 "$rendered_service"
 chown root:root "$rendered_service"
 mv -fT -- "$rendered_service" "$service_path"
 
+rendered_control_service="$(mktemp "$(dirname -- "$control_service_path")/.ft2-control-service.XXXXXXXX")"
+sed -e "s|@@RELEASE_ROOT@@|$release_root|g" \
+    "$package_root/systemd/ai-crypto-signal-agent-telegram-control.service.in" > "$rendered_control_service"
+chmod 0644 "$rendered_control_service"
+chown root:root "$rendered_control_service"
+mv -fT -- "$rendered_control_service" "$control_service_path"
+
 atomic_install "$package_root/systemd/ai-crypto-signal-agent.timer" "$timer_path" 0644
 atomic_install "$package_root/bin/ai-crypto-signal-agent-health" "$health_path" 0755
+atomic_install "$package_root/bin/ai-crypto-signal-agent-telegram-control" "$control_wrapper_path" 0755
 atomic_install "$package_root/tmpfiles.d/ai-crypto-signal-agent.conf" "$retention_path" 0644
 
 install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
     "$(rooted /var/lib/ai-crypto-signal-agent)"
 install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
     "$(rooted /var/lib/ai-crypto-signal-agent/operational-artifacts)"
+install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
+    "$(rooted /var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint)"
 marker_source="$release_root/TRUSTED_CP09_COMMIT"
 atomic_install "$marker_source" "$marker_path" 0400
 

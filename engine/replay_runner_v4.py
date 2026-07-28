@@ -90,6 +90,7 @@ def run_replay_v4(
     replay_id = derive_replay_id_v4(bundle)
     fixture_id = derive_replay_fixture_id_v4(bundle)
     bundle_hash = calculate_replay_bundle_hash_v4(bundle)
+    outcome_invocation_id = bundle_hash[:32]
 
     scanner = _build_scanner_provider(bundle)
     oi_provider = _build_oi_provider(bundle)
@@ -103,7 +104,11 @@ def run_replay_v4(
         raise ReplayExecutionError("Invalid replay output root") from exc
     paths = _ReplayPaths(root)
     snapshot_saver = _build_snapshot_saver(paths)
-    outcome_saver = _build_outcome_saver(paths, bundle.fixed_execution_time)
+    outcome_saver = _build_outcome_saver(
+        paths,
+        bundle.fixed_execution_time,
+        outcome_invocation_id,
+    )
     watchlist_saver = _build_watchlist_saver(paths, fixed_now)
     pre_delivery_runner = _build_pre_delivery_runner(paths)
     evidence_saver = _build_evidence_saver(
@@ -117,6 +122,7 @@ def run_replay_v4(
         master_result = _invoke_master_engine(
             resolved_master_engine_runner,
             {
+                "outcome_invocation_id": outcome_invocation_id,
                 "scanner": scanner,
                 "pipeline": pipeline,
                 "snapshot_saver": snapshot_saver,
@@ -355,8 +361,25 @@ def _build_snapshot_saver(paths: _ReplayPaths):
     return snapshot_saver
 
 
-def _build_outcome_saver(paths: _ReplayPaths, fixed_execution_time: str):
-    def outcome_saver(final_top5):
+def _build_outcome_saver(
+    paths: _ReplayPaths,
+    fixed_execution_time: str,
+    expected_outcome_invocation_id: str,
+):
+    def outcome_saver(
+        final_top5,
+        *,
+        outcome_invocation_id,
+        captured_at,
+    ):
+        if outcome_invocation_id != expected_outcome_invocation_id:
+            raise ReplayExecutionError(
+                "Invalid replay outcome invocation identity"
+            )
+        if captured_at != fixed_execution_time:
+            raise ReplayExecutionError(
+                "Invalid replay outcome capture time"
+            )
         _write_json(
             paths.outcome,
             build_outcome_snapshot(

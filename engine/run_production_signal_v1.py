@@ -2,10 +2,16 @@ import os
 import sys
 from collections.abc import Mapping
 
-from engine.telegram_runtime_v4 import load_telegram_runtime_config
+from engine.telegram_runtime_v4 import load_telegram_delivery_config
 from engine.master_engine_v4 import run_master_engine_v4
+from engine.outcome_tracker_v4 import (
+    generate_outcome_invocation_id,
+    validate_outcome_invocation_id,
+)
 from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
-from engine.active_signal_ledger_v1 import load_ledger
+from engine.active_signal_ledger_v1 import inspect_capacity, load_ledger
+from engine.canonical_pair_v1 import normalize_pair
+from engine.telegram_owner_control_state_v1 import bind_signal_message
 from engine.phase09r_observability_v1 import (
     BOUNDARY_UNKNOWN,
     MASTER_ENGINE_UNCLASSIFIED,
@@ -26,25 +32,62 @@ def _exit7(failure_stage, failure_code, exc, boundary=BOUNDARY_UNKNOWN):
     ))
     return 7
 
-def main():
+def main(
+    *,
+    outcome_invocation_id=None,
+    outcome_invocation_id_provider=generate_outcome_invocation_id,
+):
     try:
-        config = load_telegram_runtime_config(os.environ)
+        selected_outcome_invocation_id = (
+            outcome_invocation_id
+            if outcome_invocation_id is not None
+            else outcome_invocation_id_provider()
+        )
+        selected_outcome_invocation_id = validate_outcome_invocation_id(
+            selected_outcome_invocation_id
+        )
+    except Exception:
+        return 7
+
+    try:
+        config = load_telegram_delivery_config(os.environ)
         destination_id = os.environ.get("TELEGRAM_DESTINATION_ID")
         if not destination_id:
             return 2
     except Exception:
         return 2
 
-    adapter = Phase09RTelegramDeliveryAdapterV1(config)
     ledger_path = os.environ.get("ACTIVE_SIGNAL_LEDGER_PATH")
     try:
         owner_blueprint_ledger = load_ledger(ledger_path) if ledger_path else None
     except Exception:
         return 2
 
+    control_state_path = os.environ.get("TELEGRAM_OWNER_CONTROL_STATE_PATH")
+
+    def record_binding(*, payload, destination_id, message_id, timestamp):
+        if not control_state_path:
+            return
+        bind_signal_message(
+            control_state_path, signal_id=payload["signal_id"],
+            canonical_pair=normalize_pair(payload["symbol"]), style=payload["mode"],
+            telegram_chat_id=destination_id, telegram_message_id=message_id,
+            timestamp=timestamp,
+        )
+
+    adapter = Phase09RTelegramDeliveryAdapterV1(
+        config,
+        available_slots_provider=(
+            (lambda style: inspect_capacity(owner_blueprint_ledger)["remaining_by_mode"][style])
+            if owner_blueprint_ledger is not None else None
+        ),
+        message_binding_recorder=record_binding if control_state_path else None,
+    )
+
     try:
         pub_dir = os.environ.get("PRODUCTION_SIGNAL_DIR")
         run_out = run_master_engine_v4(
+            outcome_invocation_id=selected_outcome_invocation_id,
             enable_publication=True,
             delivery_adapter=adapter,
             destination_id=destination_id,
@@ -61,10 +104,6 @@ def main():
             exc,
         )
 
-    if adapter.rejection_reason == "QUOTA_EXHAUSTED":
-        return 3
-    if adapter.rejection_reason == "SLOTS_FULL":
-        return 4
     if adapter.malformed_receipt:
         return 6
 

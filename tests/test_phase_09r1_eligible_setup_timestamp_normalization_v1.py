@@ -145,7 +145,7 @@ def _master_fakes(tmp_path, out):
         "scanner": lambda: object(),
         "pipeline": lambda _scanner_result: out,
         "snapshot_saver": lambda _out, now: tmp_path / "snapshot.json",
-        "outcome_saver": lambda _top5: tmp_path / "outcome.json",
+        "outcome_saver": lambda _top5, **kwargs: tmp_path / "outcome.json",
         "watchlist_saver": lambda _top5: tmp_path / "top-five.json",
         "pre_delivery_runner": lambda *args, **kwargs: {
             "delivery_artifact_path": tmp_path / "pre-delivery.json",
@@ -182,6 +182,7 @@ def _run_master_with_capture(
         lambda *args, **kwargs: (SOURCE_COMMIT + "\n").encode("ascii"),
     )
     result = master_module.run_master_engine_v4(
+        outcome_invocation_id="a" * 32,
         **_master_fakes(tmp_path, out),
         enable_publication=True,
         delivery_adapter=adapter,
@@ -343,6 +344,8 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
     out = _live_shaped_out(candidate)
     adapter = UnreachableAdapter()
     service_calls = []
+    synthetic_config = object()
+    adapter_constructor_calls = []
 
     monkeypatch.setattr(
         master_module,
@@ -363,13 +366,26 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
 
     monkeypatch.setattr(
         entrypoint_module,
-        "load_telegram_runtime_config",
-        lambda environment: object(),
+        "load_telegram_delivery_config",
+        lambda environment: synthetic_config,
     )
+
+    def build_adapter(
+        config,
+        *,
+        available_slots_provider=None,
+        message_binding_recorder=None,
+    ):
+        assert config is synthetic_config
+        assert available_slots_provider is None
+        assert message_binding_recorder is None
+        adapter_constructor_calls.append(config)
+        return adapter
+
     monkeypatch.setattr(
         entrypoint_module,
         "Phase09RTelegramDeliveryAdapterV1",
-        lambda config: adapter,
+        build_adapter,
     )
     monkeypatch.setattr(
         entrypoint_module,
@@ -386,6 +402,7 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
 
     captured = capsys.readouterr()
     assert exit_code == 7
+    assert adapter_constructor_calls == [synthetic_config]
     assert captured.out == ""
     lines = captured.err.splitlines()
     assert len(lines) == 1

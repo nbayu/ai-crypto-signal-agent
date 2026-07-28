@@ -1,0 +1,33 @@
+[Unit]
+Description=AI Crypto Signal Agent owner-only Telegram control
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=@@RELEASE_ROOT@@/.f4-release-manifest
+ConditionPathExists=/etc/ai-crypto-signal-agent/owner-control.env
+StartLimitIntervalSec=60s
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ai-crypto-signal-agent
+Group=ai-crypto-signal-agent
+WorkingDirectory=/var/lib/ai-crypto-signal-agent/phase09r1
+EnvironmentFile=/etc/ai-crypto-signal-agent/owner-control.env
+Environment=ACTIVE_SIGNAL_LEDGER_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json
+Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json
+LoadCredentialEncrypted=telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token
+RuntimeDirectory=ai-crypto-signal-agent-telegram-control
+RuntimeDirectoryMode=0750
+ExecStart=/usr/local/libexec/ai-crypto-signal-agent-telegram-control
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/ai-crypto-signal-agent/phase09r1/production-signals
+ReadWritePaths=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint /run/ai-crypto-signal-agent-telegram-control
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

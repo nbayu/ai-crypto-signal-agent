@@ -107,14 +107,34 @@ def _source_envelope(*, outcome_kind="PUBLISHED_SIGNAL", symbol="TEST/USDT"):
 
 
 def _invoke_main(monkeypatch, capsys, valid_env, run_master, adapter):
+    constructor_calls = []
+
+    def build_adapter(
+        config,
+        *,
+        available_slots_provider=None,
+        message_binding_recorder=None,
+    ):
+        constructor_calls.append(
+            {
+                "config": config,
+                "available_slots_provider": available_slots_provider,
+                "message_binding_recorder": message_binding_recorder,
+            }
+        )
+        return adapter
+
     monkeypatch.setattr(
         entrypoint_module,
         "Phase09RTelegramDeliveryAdapterV1",
-        lambda config: adapter,
+        build_adapter,
     )
     monkeypatch.setattr(entrypoint_module, "run_master_engine_v4", run_master)
     with patch.dict(os.environ, valid_env, clear=True):
         exit_code = entrypoint_module.main()
+    assert len(constructor_calls) == 1
+    assert constructor_calls[0]["available_slots_provider"] is None
+    assert constructor_calls[0]["message_binding_recorder"] is None
     captured = capsys.readouterr()
     return exit_code, captured.out, captured.err
 
@@ -158,7 +178,7 @@ def _master_fakes(tmp_path, final_top5, evidence_path):
         "scanner": lambda: [],
         "pipeline": lambda results: {"final_top5": final_top5},
         "snapshot_saver": lambda out, now: tmp_path / "snapshot.json",
-        "outcome_saver": lambda out: tmp_path / "outcome.json",
+        "outcome_saver": lambda out, **kwargs: tmp_path / "outcome.json",
         "watchlist_saver": lambda out: tmp_path / "watchlist.json",
         "pre_delivery_runner": lambda *args, **kwargs: {
             "delivery_artifact_path": tmp_path / "delivery.json",
@@ -485,8 +505,8 @@ def test_delivery_failed_remains_exit5_without_observability(
 @pytest.mark.parametrize(
     ("adapter_field", "adapter_value", "expected_exit"),
     [
-        ("rejection_reason", "QUOTA_EXHAUSTED", 3),
-        ("rejection_reason", "SLOTS_FULL", 4),
+        ("rejection_reason", "QUOTA_EXHAUSTED", 5),
+        ("rejection_reason", "SLOTS_FULL", 5),
         ("malformed_receipt", True, 6),
     ],
 )
@@ -516,6 +536,7 @@ def test_quota_slot_and_malformed_receipt_exit_codes_are_unchanged(
         adapter,
     )
     assert exit_code == expected_exit
+    assert adapter.calls == 0
     assert stdout == ""
     assert stderr == ""
 

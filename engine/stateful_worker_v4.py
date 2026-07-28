@@ -4,6 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 from engine.master_engine_v4 import run_master_engine_v4
+from engine.outcome_tracker_v4 import (
+    generate_outcome_invocation_id,
+    validate_outcome_invocation_id,
+)
 
 
 WORKER_NAME = "master_engine_v4"
@@ -89,7 +93,17 @@ def run_master_engine_worker_v4(
     state_path=DEFAULT_STATE_PATH,
     now_provider=datetime.now,
     run_id_provider=_default_run_id_provider,
+    outcome_invocation_id=None,
+    outcome_invocation_id_provider=generate_outcome_invocation_id,
 ):
+    selected_outcome_invocation_id = (
+        outcome_invocation_id
+        if outcome_invocation_id is not None
+        else outcome_invocation_id_provider()
+    )
+    selected_outcome_invocation_id = validate_outcome_invocation_id(
+        selected_outcome_invocation_id
+    )
     run_id = run_id_provider()
     started_at = now_provider()
 
@@ -100,7 +114,9 @@ def run_master_engine_worker_v4(
     write_worker_state_atomic(event, state_path)
 
     try:
-        run = master_engine()
+        run = master_engine(
+            outcome_invocation_id=selected_outcome_invocation_id
+        )
     except Exception as exc:
         failed = dict(event)
         failed.update(

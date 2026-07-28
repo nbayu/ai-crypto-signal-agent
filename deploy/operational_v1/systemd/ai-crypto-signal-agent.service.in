@@ -14,12 +14,9 @@ EnvironmentFile=/etc/ai-crypto-signal-agent/phase09r1.env
 EnvironmentFile=/etc/ai-crypto-signal-agent/deepseek.env
 Environment=F4_RELEASE_COMMIT=@@F4_COMMIT@@
 Environment=PRODUCTION_SIGNAL_DIR=/var/lib/ai-crypto-signal-agent/phase09r1/production-signals
-Environment=TELEGRAM_QUOTA_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/quota-slot-state/q.json
-Environment=TELEGRAM_WORKER_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/quota-slot-state/w.json
-Environment=TELEGRAM_QUOTA_LIMIT=1
-Environment=TELEGRAM_SLOT_CAPACITY=1
-Environment=TELEGRAM_WINDOW_ID=f4-operational-cycle
 Environment=TELEGRAM_MAX_MESSAGE_LENGTH=4000
+Environment=ACTIVE_SIGNAL_LEDGER_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json
+Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json
 LoadCredential=accepted_locked_commit:/var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker
 RuntimeDirectory=ai-crypto-signal-agent
 RuntimeDirectoryMode=0750

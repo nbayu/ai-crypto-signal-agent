@@ -5,7 +5,11 @@ from pathlib import Path
 
 from engine.scanner import scan_market
 from engine.validated_pipeline_v4 import run_validated_pipeline_v4
-from engine.outcome_tracker_v4 import save_outcome_snapshot
+from engine.outcome_tracker_v4 import (
+    generate_outcome_invocation_id,
+    save_outcome_snapshot,
+    validate_outcome_invocation_id,
+)
 from engine.validation_semantic_guard_v4 import (
     SemanticValidationError,
 )
@@ -100,7 +104,20 @@ def build_summary(out):
 
 
 
-def main():
+def main(
+    *,
+    outcome_invocation_id=None,
+    outcome_invocation_id_provider=generate_outcome_invocation_id,
+):
+    selected_outcome_invocation_id = (
+        outcome_invocation_id
+        if outcome_invocation_id is not None
+        else outcome_invocation_id_provider()
+    )
+    selected_outcome_invocation_id = validate_outcome_invocation_id(
+        selected_outcome_invocation_id
+    )
+    captured_at = datetime.now().isoformat()
     results = scan_market()
 
     try:
@@ -152,7 +169,11 @@ def main():
 
         raise
 
-    outcome_path = save_outcome_snapshot(out["final_top5"])
+    outcome_path = save_outcome_snapshot(
+        out["final_top5"],
+        outcome_invocation_id=selected_outcome_invocation_id,
+        captured_at=captured_at,
+    )
 
     summary = build_summary(out)
 

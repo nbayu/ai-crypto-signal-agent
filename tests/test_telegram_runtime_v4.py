@@ -11,10 +11,12 @@ from engine.telegram_application_v4 import (
 )
 from engine.telegram_runtime_v4 import (
     TelegramRuntimeConfig,
+    TelegramDeliveryConfig,
     TelegramRuntimeConfigError,
     TelegramRuntimeV4,
     build_telegram_runtime,
     load_telegram_runtime_config,
+    load_telegram_delivery_config,
 )
 from engine.telegram_transport_v4 import TelegramTransportV4
 
@@ -62,6 +64,15 @@ def _update(text="/status"):
             "chat": {"id": -100987654321},
         }
     }
+
+
+def test_autonomous_delivery_config_does_not_require_static_quota_window():
+    config = load_telegram_delivery_config({
+        "TELEGRAM_BOT_TOKEN": TOKEN,
+        "TELEGRAM_MAX_MESSAGE_LENGTH": "4000",
+    })
+    assert config == TelegramDeliveryConfig(bot_token=TOKEN, max_response_chars=4000)
+    assert TOKEN not in repr(config)
 
 
 def test_loads_immutable_redacted_runtime_configuration_from_mapping():
