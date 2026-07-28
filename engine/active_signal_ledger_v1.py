@@ -19,7 +19,7 @@ from typing import Any, Iterator, Mapping
 
 
 SCHEMA_NAME = "active-signal-ledger"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SWING = "SWING"
 INTRADAY = "INTRADAY"
@@ -33,18 +33,22 @@ PUBLISHED_PENDING_ENTRY = "PUBLISHED_PENDING_ENTRY"
 ENTRY_ACTIVE = "ENTRY_ACTIVE"
 CLOSED_PROFIT = "CLOSED_PROFIT"
 CLOSED_STOP_LOSS = "CLOSED_STOP_LOSS"
+CLOSED_MANUAL = "CLOSED_MANUAL"
+REJECTED_BY_OWNER = "REJECTED_BY_OWNER"
 CANCELLED = "CANCELLED"
 EXPIRED = "EXPIRED"
 INVALIDATED = "INVALIDATED"
-OCCUPYING_STATES = (PUBLISHED_PENDING_ENTRY, ENTRY_ACTIVE)
+OCCUPYING_STATES = (ENTRY_ACTIVE,)
 TERMINAL_STATES = (
     CLOSED_PROFIT,
     CLOSED_STOP_LOSS,
+    CLOSED_MANUAL,
+    REJECTED_BY_OWNER,
     CANCELLED,
     EXPIRED,
     INVALIDATED,
 )
-LIFECYCLE_STATES = OCCUPYING_STATES + TERMINAL_STATES
+LIFECYCLE_STATES = (PUBLISHED_PENDING_ENTRY,) + OCCUPYING_STATES + TERMINAL_STATES
 
 PREPARED = "PREPARED"
 OCCUPANCY_COMMITTED = "OCCUPANCY_COMMITTED"
@@ -492,11 +496,7 @@ def _reservation_equivalent(transaction: Mapping[str, Any], candidate: Mapping[s
 
 
 def _commit_occupancy(ledger: dict[str, Any], transaction: dict[str, Any], *, updated_at: str) -> None:
-    capacity = _capacity(ledger)
-    if capacity[transaction["mode"]] >= CAPACITY_BY_MODE[transaction["mode"]]:
-        _reject(STYLE_CAPACITY_FULL)
-    if capacity["TOTAL"] >= TOTAL_CAPACITY:
-        _reject(TOTAL_CAPACITY_FULL)
+    # Publication creates lifecycle evidence, not owner entry occupancy.
     record = {
         "signal_id": transaction["signal_id"],
         "delivery_id": transaction["delivery_id"],
@@ -553,7 +553,7 @@ def reserve_published_signal(
     updated_at: str,
     publication_intent_durable: bool = True,
 ) -> dict[str, Any]:
-    """Durably prepare, then (when caller confirms intent) occupy one style slot."""
+    """Durably register publication without consuming an active-entry slot."""
     if type(publication_intent_durable) is not bool:
         _reject(PUBLICATION_OCCUPANCY_RECONCILIATION_REQUIRED)
     path = _path(ledger_path)
@@ -640,10 +640,13 @@ def _existing_transition(ledger: Mapping[str, Any], transition_id: str, candidat
 def mark_entry_active(
     ledger_path: str | Path, *, expected_revision: int, transition_id: str,
     signal_id: str, entry_at: str, updated_at: str,
+    require_current_revision: bool = False,
 ) -> dict[str, Any]:
     path = _path(ledger_path)
     _timestamp(entry_at)
     _timestamp(updated_at)
+    if type(require_current_revision) is not bool:
+        _reject(EXPECTED_REVISION_MISMATCH)
     with _ledger_lock(path):
         ledger = _read_ledger(path)
         _expected_revision(ledger, expected_revision)
@@ -662,6 +665,11 @@ def mark_entry_active(
             _reject(TERMINAL_SIGNAL_REOPEN_FORBIDDEN)
         if record["state"] != PUBLISHED_PENDING_ENTRY:
             _reject(LIFECYCLE_TRANSITION_INVALID)
+        capacity = _capacity(ledger)
+        if capacity[record["mode"]] >= CAPACITY_BY_MODE[record["mode"]]:
+            _reject(STYLE_CAPACITY_FULL)
+        if capacity["TOTAL"] >= TOTAL_CAPACITY:
+            _reject(TOTAL_CAPACITY_FULL)
         record["state"] = ENTRY_ACTIVE
         record["entry_at"] = entry_at
         record["last_transition_id"] = transition_id
@@ -673,13 +681,15 @@ def mark_entry_active(
 def transition_terminal(
     ledger_path: str | Path, *, expected_revision: int, transition_id: str,
     signal_id: str, terminal_state: str, terminal_at: str, terminal_reason: str,
-    updated_at: str,
+    updated_at: str, require_current_revision: bool = False,
 ) -> dict[str, Any]:
     if terminal_state not in TERMINAL_STATES:
         _reject(LIFECYCLE_TRANSITION_INVALID)
     _timestamp(terminal_at)
     _timestamp(updated_at)
     _identifier(terminal_reason, TERMINAL_REASON_INVALID)
+    if type(require_current_revision) is not bool:
+        _reject(EXPECTED_REVISION_MISMATCH)
     path = _path(ledger_path)
     with _ledger_lock(path):
         ledger = _read_ledger(path)

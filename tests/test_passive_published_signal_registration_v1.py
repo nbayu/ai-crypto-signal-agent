@@ -1,4 +1,4 @@
-"""Focused passive registration contract tests; no publication or runtime work."""
+"""Focused contracts for non-occupying published-signal registration."""
 
 from __future__ import annotations
 

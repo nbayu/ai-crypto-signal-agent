@@ -1,4 +1,7 @@
-"""Thin caller-driven façade for one passive production-signal flow operation."""
+"""Thin caller-driven façade for publication, owner entry, and terminal close.
+
+Publication registration is non-occupying; entry activation is the occupancy seam.
+"""
 
 from __future__ import annotations
 
@@ -269,6 +272,7 @@ def activate_registered_signal(
             signal_id=signal_id,
             entry_at=entry_at,
             timestamp=timestamp,
+            require_current_revision=True,
         )
         return _lifecycle_result(outcome, operation=ACTIVATE_REGISTERED_SIGNAL)
     except Exception:
@@ -306,6 +310,7 @@ def terminate_active_signal(
             terminal_at=terminal_at,
             terminal_reason=terminal_reason,
             timestamp=timestamp,
+            require_current_revision=True,
         )
         return _lifecycle_result(outcome, operation=TERMINATE_ACTIVE_SIGNAL)
     except Exception:

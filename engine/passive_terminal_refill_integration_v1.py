@@ -1,4 +1,7 @@
-"""Passive composition of one terminal transition and one durable refill record."""
+"""Passive composition of one terminal transition and one durable refill record.
+
+Terminal close commits release capacity; this layer never starts an immediate scan.
+"""
 
 from __future__ import annotations
 
@@ -310,6 +313,7 @@ def transition_and_reconcile_refill(
     terminal_at: str,
     terminal_reason: str,
     timestamp: str,
+    require_current_revision: bool = False,
 ) -> PassiveTerminalRefillResultV1:
     """Apply one terminal event, then passively reconcile its durable refill record."""
     before: Mapping[str, Any] | None = None
@@ -338,6 +342,7 @@ def transition_and_reconcile_refill(
             terminal_at=terminal_at,
             terminal_reason=terminal_reason,
             updated_at=timestamp,
+            require_current_revision=require_current_revision,
         )
     except active.ActiveSignalLedgerError as error:
         if (

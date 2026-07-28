@@ -14,6 +14,7 @@ from engine.active_signal_ledger_v1 import (
     ABORTED,
     ActiveSignalLedgerError,
     CANCELLED,
+    CLOSED_MANUAL,
     CLOSED_PROFIT,
     CLOSED_STOP_LOSS,
     ENTRY_ACTIVE,
@@ -23,6 +24,7 @@ from engine.active_signal_ledger_v1 import (
     OCCUPANCY_COMMITTED,
     PREPARED,
     PUBLISHED_PENDING_ENTRY,
+    REJECTED_BY_OWNER,
     SCALP,
     SWING,
     TOTAL_CAPACITY,
@@ -82,7 +84,7 @@ def test_explicit_initialization_and_missing_ledger_failure(tmp_path):
 def test_schema_validation_and_unsupported_schema_are_fail_closed(tmp_path):
     path = _initialize(tmp_path)
     document = load_ledger(path)
-    document["schema_version"] = 2
+    document["schema_version"] = 99
     path.write_text(json.dumps(document), encoding="utf-8")
     _error("LEDGER_SCHEMA_UNSUPPORTED", lambda: load_ledger(path))
     path.write_text("{not-json", encoding="utf-8")
@@ -95,8 +97,18 @@ def test_each_style_allows_three_then_rejects_fourth(tmp_path, mode):
     ledger = load_ledger(path)
     for number in range(3):
         ledger = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-{number}")
+        ledger = mark_entry_active(
+            path, expected_revision=ledger["ledger_revision"],
+            transition_id=f"entry-{mode}-{number}", signal_id=f"signal-{mode}-{number}",
+            entry_at=LATER, updated_at=LATER,
+        )
     assert inspect_capacity(ledger)["active_by_mode"][mode] == 3
-    _error("STYLE_CAPACITY_FULL", lambda: _reserve(path, ledger["ledger_revision"], mode, f"{mode}-4"))
+    pending = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-4")
+    assert inspect_capacity(pending)["active_by_mode"][mode] == 3
+    _error("STYLE_CAPACITY_FULL", lambda: mark_entry_active(
+        path, expected_revision=pending["ledger_revision"], transition_id=f"entry-{mode}-4",
+        signal_id=f"signal-{mode}-4", entry_at=LATER, updated_at=LATER,
+    ))
 
 
 def test_total_capacity_is_nine_and_is_derived_from_records(tmp_path):
@@ -105,6 +117,11 @@ def test_total_capacity_is_nine_and_is_derived_from_records(tmp_path):
     for mode in (SWING, INTRADAY, SCALP):
         for number in range(3):
             ledger = _reserve(path, ledger["ledger_revision"], mode, f"{mode}-{number}")
+            ledger = mark_entry_active(
+                path, expected_revision=ledger["ledger_revision"],
+                transition_id=f"entry-{mode}-{number}", signal_id=f"signal-{mode}-{number}",
+                entry_at=LATER, updated_at=LATER,
+            )
     assert inspect_capacity(ledger)["total_active"] == TOTAL_CAPACITY
     assert "active_count" not in ledger and "capacity_count" not in ledger
 
@@ -139,7 +156,7 @@ def test_entry_transition_is_narrow_and_idempotent(tmp_path):
     _error("LIFECYCLE_TRANSITION_INVALID", lambda: mark_entry_active(path, expected_revision=entered["ledger_revision"], transition_id="entry-2", signal_id="signal-1", entry_at=LATER, updated_at=LATER))
 
 
-@pytest.mark.parametrize("terminal", (CLOSED_PROFIT, CLOSED_STOP_LOSS, CANCELLED, EXPIRED, INVALIDATED))
+@pytest.mark.parametrize("terminal", (CLOSED_PROFIT, CLOSED_STOP_LOSS, CLOSED_MANUAL, REJECTED_BY_OWNER, CANCELLED, EXPIRED, INVALIDATED))
 def test_all_terminals_are_allowed_from_pending_and_release_capacity(tmp_path, terminal):
     path = _initialize(tmp_path)
     ledger = _reserve(path)
@@ -195,7 +212,7 @@ def test_prepared_transaction_reconciliation_commit_abort_and_contradiction(tmp_
 def test_corrupt_and_over_capacity_state_fail_closed_and_restart_reconstructs(tmp_path):
     path = _initialize(tmp_path)
     ledger = _reserve(path)
-    assert inspect_capacity(load_ledger(path))["active_by_mode"][SWING] == 1
+    assert inspect_capacity(load_ledger(path))["active_by_mode"][SWING] == 0
     ledger["signals"]["signal-1"]["mode"] = "UNKNOWN"
     path.write_text(json.dumps(ledger), encoding="utf-8")
     _error("STYLE_INVALID", lambda: load_ledger(path))
@@ -206,6 +223,11 @@ def test_over_capacity_ledger_is_rejected_during_restart_loading(tmp_path):
     ledger = load_ledger(path)
     for number in range(3):
         ledger = _reserve(path, ledger["ledger_revision"], SWING, f"swing-{number}")
+        ledger = mark_entry_active(
+            path, expected_revision=ledger["ledger_revision"],
+            transition_id=f"entry-swing-{number}", signal_id=f"signal-swing-{number}",
+            entry_at=LATER, updated_at=LATER,
+        )
     corrupt = load_ledger(path)
     copied = dict(corrupt["signals"]["signal-swing-0"])
     copied["signal_id"] = "signal-swing-over"
@@ -229,8 +251,25 @@ def test_atomic_write_and_lock_failures_have_stable_codes(monkeypatch, tmp_path)
 def test_delivery_failure_alone_never_releases_occupied_capacity(tmp_path):
     path = _initialize(tmp_path)
     ledger = _reserve(path)
-    assert inspect_capacity(ledger)["total_active"] == 1
-    assert ledger["signals"]["signal-1"]["state"] in {PUBLISHED_PENDING_ENTRY, ENTRY_ACTIVE}
+    assert inspect_capacity(ledger)["total_active"] == 0
+    assert ledger["signals"]["signal-1"]["state"] == PUBLISHED_PENDING_ENTRY
+
+
+def test_owner_entry_consumes_and_manual_close_releases_exactly_one_slot(tmp_path):
+    path = _initialize(tmp_path)
+    pending = _reserve(path)
+    assert inspect_capacity(pending)["remaining_by_mode"][SWING] == 3
+    active = mark_entry_active(
+        path, expected_revision=pending["ledger_revision"], transition_id="owner-entry",
+        signal_id="signal-1", entry_at=LATER, updated_at=LATER,
+    )
+    assert inspect_capacity(active)["remaining_by_mode"][SWING] == 2
+    closed = transition_terminal(
+        path, expected_revision=active["ledger_revision"], transition_id="owner-close",
+        signal_id="signal-1", terminal_state=CLOSED_MANUAL, terminal_at=LATER,
+        terminal_reason="OWNER_CONFIRMED_CLOSE", updated_at=LATER,
+    )
+    assert inspect_capacity(closed)["remaining_by_mode"][SWING] == 3
 
 
 def test_source_has_no_runtime_integration_imports():

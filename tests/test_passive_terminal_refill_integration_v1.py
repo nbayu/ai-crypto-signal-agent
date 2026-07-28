@@ -1,4 +1,4 @@
-"""Focused contract tests for passive terminal-to-refill composition."""
+"""Focused contracts for terminal release without immediate scanning."""
 
 from __future__ import annotations
 
@@ -91,7 +91,10 @@ def test_persisted_signal_mode_is_propagated(tmp_path, mode):
     assert result.mode == mode
 
 
-@pytest.mark.parametrize("terminal", active.TERMINAL_STATES)
+@pytest.mark.parametrize("terminal", tuple(
+    state for state in active.TERMINAL_STATES
+    if state not in {active.CLOSED_MANUAL, active.REJECTED_BY_OWNER}
+))
 def test_every_terminal_state_is_supported_from_pending(tmp_path, terminal):
     path, refill_path = _paths(tmp_path, terminal)
     reserved = _reserve(path, suffix=terminal)

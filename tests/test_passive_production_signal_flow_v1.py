@@ -1,4 +1,4 @@
-"""Focused contracts for the passive production-signal flow façade."""
+"""Focused contracts for non-occupying publication and owner lifecycle."""
 
 from __future__ import annotations
 
@@ -263,7 +263,10 @@ def test_terminal_partial_success_and_refill_revision_conflict_are_normalized(tm
     assert pending.terminal_applied and pending.partial_success and not pending.refill_reconciled
 
 
-@pytest.mark.parametrize("terminal_state", active.TERMINAL_STATES)
+@pytest.mark.parametrize("terminal_state", tuple(
+    state for state in active.TERMINAL_STATES
+    if state not in {active.CLOSED_MANUAL, active.REJECTED_BY_OWNER}
+))
 def test_terminal_preserves_each_supported_terminal_state(tmp_path, terminal_state):
     active_path, refill_path, created = _registered_paths(tmp_path)
     result = flow.terminate_active_signal(

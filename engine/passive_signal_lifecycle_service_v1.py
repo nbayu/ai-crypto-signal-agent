@@ -1,4 +1,7 @@
-"""Caller-driven composition of passive signal lifecycle persistence seams."""
+"""Caller-driven composition of passive signal lifecycle persistence seams.
+
+Only explicit entry activation delegates to an occupying ledger transition.
+"""
 
 from __future__ import annotations
 
@@ -204,6 +207,7 @@ def activate_signal_entry(
     signal_id: str,
     entry_at: str,
     timestamp: str,
+    require_current_revision: bool = False,
 ) -> PassiveSignalLifecycleResultV1:
     """Persist one caller-authorized entry event without external inference."""
     before: Mapping[str, Any] | None = None
@@ -223,6 +227,7 @@ def activate_signal_entry(
             signal_id=signal_id,
             entry_at=entry_at,
             updated_at=timestamp,
+            require_current_revision=require_current_revision,
         )
     except active.ActiveSignalLedgerError as error:
         classification, reason = _active_failure(error)
@@ -343,6 +348,7 @@ def terminate_signal_and_reconcile_refill(
     terminal_at: str,
     terminal_reason: str,
     timestamp: str,
+    require_current_revision: bool = False,
 ) -> PassiveSignalLifecycleResultV1:
     """Delegate one terminal event and its durable passive refill reconciliation."""
     try:
@@ -370,6 +376,7 @@ def terminate_signal_and_reconcile_refill(
             terminal_at=terminal_at,
             terminal_reason=terminal_reason,
             timestamp=timestamp,
+            require_current_revision=require_current_revision,
         )
         return _terminal_result(outcome=outcome, operation="TERMINAL_TRANSITION", timestamp=timestamp)
     except OSError:

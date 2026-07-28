@@ -1,4 +1,7 @@
-"""Caller-driven durable registration of already completed publications."""
+"""Caller-driven durable registration of completed, non-occupying publications.
+
+Publication evidence is intentionally distinct from an owner-confirmed entry.
+"""
 
 from __future__ import annotations
 

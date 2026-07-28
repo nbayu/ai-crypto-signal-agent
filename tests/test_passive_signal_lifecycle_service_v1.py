@@ -1,4 +1,4 @@
-"""Focused contracts for the passive signal lifecycle service."""
+"""Focused contracts for owner-entry occupancy and terminal lifecycle."""
 
 from __future__ import annotations
 
@@ -147,7 +147,10 @@ def test_entry_lock_and_atomic_failures_are_sanitized(tmp_path, monkeypatch):
     assert atomic.reason == lifecycle.ACTIVE_PERSISTENCE_FAILURE
 
 
-@pytest.mark.parametrize("terminal", active.TERMINAL_STATES)
+@pytest.mark.parametrize("terminal", tuple(
+    state for state in active.TERMINAL_STATES
+    if state not in {active.CLOSED_MANUAL, active.REJECTED_BY_OWNER}
+))
 def test_terminal_delegation_supports_all_terminal_states(tmp_path, terminal):
     path, refill_path = _paths(tmp_path, terminal)
     reserved = _reserve(path, suffix=terminal)
