@@ -73,3 +73,7 @@ def main(environment: Mapping[str, str] | None = None) -> int:
         return 2
     asyncio.run(run_forever(config, token))
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
