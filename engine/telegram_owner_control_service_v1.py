@@ -11,6 +11,7 @@ from engine import active_signal_ledger_v1 as active
 from engine import passive_signal_lifecycle_service_v1 as lifecycle
 from engine.canonical_pair_v1 import CanonicalPairError, normalize_pair
 from engine import telegram_owner_control_state_v1 as control_state
+from engine.telegram_human_formatter_v1 import format_acknowledgement
 
 
 ENTRY_ACCEPTED = "ENTRY_ACCEPTED"
@@ -47,7 +48,7 @@ def _result(outcome: str, *, update_id=None, command_id=None, record=None, mutat
         canonical_pair=normalize_pair(record["symbol"]) if isinstance(record, Mapping) else None,
         style=record.get("mode") if isinstance(record, Mapping) else None,
         ledger_mutated=mutated, slot_change=slot, pair_lock_change=pair,
-        acknowledgement=outcome,
+        acknowledgement=format_acknowledgement(outcome),
     )
 
 

@@ -1,10 +1,10 @@
-import json
 import httpx
 from datetime import datetime, timezone
 import uuid
 
 from engine.quota_slot_worker_v4 import run_quota_slot_worker_v4
 from engine.quota_slot_engine_v4 import QuotaSlotRejected
+from engine.telegram_human_formatter_v1 import format_signal_message
 
 class Phase09RTelegramDeliveryAdapterV1:
     def __init__(
@@ -13,10 +13,12 @@ class Phase09RTelegramDeliveryAdapterV1:
         *,
         quota_now_provider=None,
         reservation_id_provider=None,
+        available_slots_provider=None,
     ):
         self.config = config
         self.quota_now_provider = quota_now_provider or (lambda: datetime.now(timezone.utc))
         self.reservation_id_provider = reservation_id_provider or (lambda: str(uuid.uuid4()))
+        self.available_slots_provider = available_slots_provider or (lambda _style: 3)
         self.rejection_reason = None
         self.malformed_receipt = False
 
@@ -25,7 +27,11 @@ class Phase09RTelegramDeliveryAdapterV1:
             raise ValueError("Unsupported channel")
 
         def do_delivery(*, state_path):
-            text = json.dumps(payload, separators=(',', ':'))
+            text = format_signal_message(
+                payload, available_slots=self.available_slots_provider(payload["mode"]),
+            )
+            if len(text) > self.config.max_response_chars:
+                raise RuntimeError("Telegram message exceeds configured maximum")
             url = f"https://api.telegram.org/bot{self.config.bot_token}/sendMessage"
 
             try:

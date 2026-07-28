@@ -38,6 +38,21 @@ def config(tmp_path):
         max_response_chars=4000
     )
 
+@pytest.fixture
+def valid_signal_payload():
+    return {
+        "signal_id": "PSG-3b9b9190" + "a" * 56,
+        "mode": "SWING",
+        "symbol": "ena/usdt:usdt",
+        "side": "LONG",
+        "entry_zone": {"min": 0.08554582, "max": 0.08674366},
+        "stop_loss": 0.08402,
+        "take_profit": {"tp1": 0.0930751, "tp2": 0.0930751},
+        "valid_until": "2026-07-29T00:00:00Z",
+        "strategy_version": "v4",
+        "source_evaluation_id": "evaluation-one",
+    }
+
 def test_01_dry_run_makes_zero_publication_calls():
     from engine.master_engine_v4 import run_master_engine_v4
     from pathlib import Path
@@ -78,14 +93,14 @@ def test_04_quota_executes_before_slot_reservation(mock_worker, config):
     assert mock_worker.call_args[1]["quota_limit"] == 1
 
 @patch("httpx.post")
-def test_05_quota_denial_makes_zero_telegram_calls(mock_post, config):
+def test_05_quota_denial_makes_zero_telegram_calls(mock_post, config, valid_signal_payload):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     mock_post.return_value = MagicMock(json=lambda: {"ok": True, "result": {"message_id": 1}})
-    adapter({"a": 1}, "TELEGRAM", "dest1")
+    adapter(valid_signal_payload, "TELEGRAM", "dest1")
     assert mock_post.call_count == 1
     
     with pytest.raises(QuotaSlotRejected):
-        adapter({"a": 1}, "TELEGRAM", "dest1")
+        adapter(valid_signal_payload, "TELEGRAM", "dest1")
     assert mock_post.call_count == 1 # still 1
     assert adapter.rejection_reason == "QUOTA_EXHAUSTED"
 
@@ -116,35 +131,35 @@ def test_10_duplicate_execution_makes_at_most_one_telegram_call():
     pass
 
 @patch("httpx.post")
-def test_11_successful_synthetic_telegram_response_produces_one_valid_receipt(mock_post, config):
+def test_11_successful_synthetic_telegram_response_produces_one_valid_receipt(mock_post, config, valid_signal_payload):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     mock_post.return_value = MagicMock(json=lambda: {"ok": True, "result": {"message_id": 999}})
-    res = adapter({"a": 1}, "TELEGRAM", "dest1")
+    res = adapter(valid_signal_payload, "TELEGRAM", "dest1")
     assert res["external_delivery_id"] == "999"
     assert res["channel"] == "TELEGRAM"
     assert res["destination_id"] == "dest1"
     assert "delivered_at" in res
 
 @patch("httpx.post")
-def test_12_timeout_or_network_failure_is_not_classified_as_published(mock_post, config):
+def test_12_timeout_or_network_failure_is_not_classified_as_published(mock_post, config, valid_signal_payload):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     mock_post.side_effect = Exception("timeout")
     with pytest.raises(RuntimeError, match="Telegram delivery network failure"):
-        adapter({"a": 1}, "TELEGRAM", "dest1")
+        adapter(valid_signal_payload, "TELEGRAM", "dest1")
 
 @patch("httpx.post")
-def test_13_telegram_ok_false_is_classified_as_delivery_failure(mock_post, config):
+def test_13_telegram_ok_false_is_classified_as_delivery_failure(mock_post, config, valid_signal_payload):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     mock_post.return_value = MagicMock(json=lambda: {"ok": False})
     with pytest.raises(RuntimeError, match="Telegram delivery failed"):
-        adapter({"a": 1}, "TELEGRAM", "dest1")
+        adapter(valid_signal_payload, "TELEGRAM", "dest1")
 
 @patch("httpx.post")
-def test_14_malformed_json_or_missing_message_id_maps_to_malformed_receipt(mock_post, config):
+def test_14_malformed_json_or_missing_message_id_maps_to_malformed_receipt(mock_post, config, valid_signal_payload):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
     mock_post.return_value = MagicMock(json=lambda: {"ok": True, "result": {}})
     with pytest.raises(RuntimeError, match="Malformed receipt: missing message_id"):
-        adapter({"a": 1}, "TELEGRAM", "dest1")
+        adapter(valid_signal_payload, "TELEGRAM", "dest1")
     assert adapter.malformed_receipt is True
 
 def test_15_missing_destination_or_adapter_maps_to_exit_code_2(valid_env):

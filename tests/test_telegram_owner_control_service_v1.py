@@ -58,12 +58,14 @@ def test_reply_bound_entry_duplicate_update_and_close(tmp_path):
     )
     accepted = _process(_update(1, "entry SOL/USDT", reply=50), ledger_path, state_path)
     assert accepted.outcome == ENTRY_ACCEPTED and accepted.slot_change == -1
+    assert accepted.acknowledgement.startswith("Entry accepted")
     revision = active.load_ledger(ledger_path)["ledger_revision"]
     duplicate = _process(_update(1, "entry SOL/USDT", reply=50), ledger_path, state_path)
     assert duplicate.outcome == COMMAND_ALREADY_PROCESSED
     assert active.load_ledger(ledger_path)["ledger_revision"] == revision
     closed = _process(_update(2, "close sol/usdt"), ledger_path, state_path)
     assert closed.outcome == POSITION_CLOSED and closed.slot_change == 1
+    assert closed.acknowledgement.startswith("Position closed")
     assert active.inspect_capacity(active.load_ledger(ledger_path))["total_active"] == 0
 
 

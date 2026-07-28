@@ -5,6 +5,16 @@ from engine.telegram_runtime_v4 import TelegramRuntimeConfig
 from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
 from engine.quota_slot_engine_v4 import QuotaSlotRejected
 
+
+def _payload():
+    return {
+        "signal_id": "PSG-" + "a" * 64, "mode": "SWING", "symbol": "BTCUSDT",
+        "side": "LONG", "entry_zone": {"min": 100.0, "max": 101.0},
+        "stop_loss": 95.0, "take_profit": {"tp1": 110.0, "tp2": 120.0},
+        "valid_until": "2026-07-29T00:00:00Z", "strategy_version": "v4",
+        "source_evaluation_id": "evaluation-one",
+    }
+
 @pytest.fixture
 def config(tmp_path):
     return TelegramRuntimeConfig(
@@ -25,11 +35,13 @@ def test_telegram_network_faked_successful(config):
         mock_resp.json.return_value = {"ok": True, "result": {"message_id": 12345}}
         mock_post.return_value = mock_resp
 
-        result = adapter({"a": 1}, "TELEGRAM", "dest1")
+        result = adapter(_payload(), "TELEGRAM", "dest1")
         assert result["external_delivery_id"] == "12345"
         mock_post.assert_called_once()
         assert "bottest_token" in mock_post.call_args[0][0]
         assert mock_post.call_args[1]["json"]["chat_id"] == "dest1"
+        assert mock_post.call_args[1]["json"]["text"].startswith("AI CRYPTO SIGNAL")
+        assert not mock_post.call_args[1]["json"]["text"].startswith("{")
 
 def test_telegram_network_faked_malformed(config):
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
@@ -39,7 +51,7 @@ def test_telegram_network_faked_malformed(config):
         mock_post.return_value = mock_resp
 
         with pytest.raises(RuntimeError, match="Malformed receipt"):
-            adapter({"a": 1}, "TELEGRAM", "dest1")
+            adapter(_payload(), "TELEGRAM", "dest1")
         assert adapter.malformed_receipt is True
 
 def test_telegram_network_faked_failure(config):
@@ -50,7 +62,7 @@ def test_telegram_network_faked_failure(config):
         mock_post.return_value = mock_resp
 
         with pytest.raises(RuntimeError, match="Telegram delivery failed"):
-            adapter({"a": 1}, "TELEGRAM", "dest1")
+            adapter(_payload(), "TELEGRAM", "dest1")
 
 def test_quota_denial_makes_zero_telegram_calls(config):
     config = TelegramRuntimeConfig(
@@ -65,12 +77,12 @@ def test_quota_denial_makes_zero_telegram_calls(config):
         mock_post.return_value = mock_resp
 
         # First call succeeds and consumes the quota
-        adapter({"a": 1}, "TELEGRAM", "dest1")
+        adapter(_payload(), "TELEGRAM", "dest1")
         assert mock_post.call_count == 1
 
         # Second call fails quota
         with pytest.raises(QuotaSlotRejected):
-            adapter({"a": 1}, "TELEGRAM", "dest1")
+            adapter(_payload(), "TELEGRAM", "dest1")
 
         # Call count is still 1
         assert mock_post.call_count == 1
