@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from engine.telegram_runtime_v4 import load_telegram_runtime_config
 from engine.master_engine_v4 import run_master_engine_v4
 from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
+from engine.active_signal_ledger_v1 import load_ledger
 from engine.phase09r_observability_v1 import (
     BOUNDARY_UNKNOWN,
     MASTER_ENGINE_UNCLASSIFIED,
@@ -35,6 +36,11 @@ def main():
         return 2
 
     adapter = Phase09RTelegramDeliveryAdapterV1(config)
+    ledger_path = os.environ.get("ACTIVE_SIGNAL_LEDGER_PATH")
+    try:
+        owner_blueprint_ledger = load_ledger(ledger_path) if ledger_path else None
+    except Exception:
+        return 2
 
     try:
         pub_dir = os.environ.get("PRODUCTION_SIGNAL_DIR")
@@ -43,6 +49,7 @@ def main():
             delivery_adapter=adapter,
             destination_id=destination_id,
             publication_root=pub_dir,
+            owner_blueprint_ledger=owner_blueprint_ledger,
         )
     except Phase09RExit7Failure as failure:
         emit_exit7_event(failure)

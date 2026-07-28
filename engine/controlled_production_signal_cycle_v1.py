@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from engine import passive_production_signal_flow_v1 as flow
 from engine import production_signal_service_v1 as production
+from engine.owner_blueprint_scanner_gate_v1 import evaluate_candidate
 
 
 RUN_CONTROLLED_PRODUCTION_SIGNAL_CYCLE = "RUN_CONTROLLED_PRODUCTION_SIGNAL_CYCLE"
@@ -307,6 +308,7 @@ def run_controlled_production_signal_cycle(
     stage_a_budget_policy: object = None,
     stage_a_provider_probe: object = None,
     stage_a_evidence_storage: object = None,
+    owner_blueprint_ledger: object = None,
 ) -> ControlledProductionSignalCycleResultV1:
     """Perform one explicitly authorized publication and registration attempt."""
     if hasattr(phase_12_config, "activation_mode"):
@@ -367,6 +369,26 @@ def run_controlled_production_signal_cycle(
             reason=INVALID_SIGNAL_CANDIDATE,
             candidate_generated=True,
         )
+
+    if owner_blueprint_ledger is not None:
+        try:
+            setup = candidate["eligible_setups"][0]
+            decision = evaluate_candidate(
+                owner_blueprint_ledger,
+                style=candidate["mode"],
+                pair=setup["symbol"],
+            )
+        except Exception:
+            return _result(
+                FAIL_CLOSED, timestamp=timestamp, reason=FAIL_CLOSED,
+                candidate_generated=True,
+            )
+        if not decision.eligible:
+            return _result(
+                NO_ELIGIBLE_SIGNAL, timestamp=timestamp, reason=decision.reason,
+                mode=decision.style, symbol=decision.canonical_pair,
+                candidate_generated=True,
+            )
 
     try:
         delivery_adapter = delivery_adapter_factory(credential_material)

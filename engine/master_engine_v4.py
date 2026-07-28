@@ -22,6 +22,7 @@ from engine.production_evidence_v4 import (
     save_production_evidence,
 )
 from engine.production_signal_service_v1 import run_production_signal_service_v1
+from engine.owner_blueprint_scanner_gate_v1 import evaluate_candidate
 from engine.phase09r_observability_v1 import (
     BOUNDARY_NO,
     BOUNDARY_UNKNOWN,
@@ -119,6 +120,7 @@ def run_master_engine_v4(
     delivery_adapter=None,
     destination_id=None,
     publication_root=None,
+    owner_blueprint_ledger=None,
 ):
     results = scanner()
 
@@ -224,6 +226,15 @@ def run_master_engine_v4(
                     "strategy_version": "v4",
                     "source_payload_hash": _hash_payload(normalized_setup)
                 }]
+                if owner_blueprint_ledger is not None:
+                    decision = evaluate_candidate(
+                        owner_blueprint_ledger,
+                        style="SWING",
+                        pair=eligible_setups[0]["symbol"],
+                    )
+                    if not decision.eligible:
+                        outcome_kind = "NO_TRADE"
+                        eligible_setups = []
         except Exception as exc:
             raise classified_failure(
                 failure_stage="ELIGIBLE_SETUP_CONSTRUCTION",

@@ -165,3 +165,8 @@ def test_run_master_engine_v4_orchestrates_existing_production_flow():
             },
         ),
     ]
+
+
+def test_owner_gate_is_wired_before_production_service():
+    source = (Path(__file__).parents[1] / "engine" / "master_engine_v4.py").read_text()
+    assert source.index("evaluate_candidate(") < source.index("run_production_signal_service_v1(")

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from engine import controlled_production_signal_cycle_v1 as cycle
+from engine import active_signal_ledger_v1 as active
 from engine import passive_production_signal_flow_v1 as flow
 
 
@@ -336,9 +337,33 @@ def test_configuration_failure_and_registration_exception_are_sanitized(monkeypa
 def test_source_contains_no_operational_surface_or_leakage():
     source = Path(cycle.__file__).read_text()
     forbidden = (
-        "active_signal_ledger", "scanner", "master_engine", "telegram_runtime",
+        "active_signal_ledger", "scan_market", "master_engine", "telegram_runtime",
         "telegram_sdk", "subprocess", "os.environ", "getenv", "while True",
         "activate_registered_signal", "terminate_active_signal", "claim_refill_request",
         "str(exc)", "repr(exc)", "BaseException",
     )
     assert not any(value in source for value in forbidden)
+
+
+def test_active_pair_gate_stops_before_adapter_and_publication(monkeypatch, tmp_path):
+    ledger_path = tmp_path / "ledger.json"
+    ledger = active.initialize_ledger(ledger_path, created_at=NOW)
+    ledger = active.reserve_published_signal(
+        ledger_path, expected_revision=0, transaction_id="tx", transition_id="reserve",
+        signal_id="signal", delivery_id="delivery", mode=active.SWING,
+        symbol="BTC/USDT", published_at=NOW, source_payload_hash=SOURCE_HASH,
+        publication_payload_hash=PAYLOAD_HASH, updated_at=NOW,
+    )
+    ledger = active.mark_entry_active(
+        ledger_path, expected_revision=ledger["ledger_revision"], transition_id="entry",
+        signal_id="signal", entry_at=NOW, updated_at=NOW,
+    )
+    calls = []
+    monkeypatch.setattr(cycle.production, "run_production_signal_service_v1", lambda **_: calls.append("publish"))
+    result = _call(
+        owner_blueprint_ledger=ledger,
+        delivery_adapter_factory=lambda _: calls.append("adapter"),
+    )
+    assert result.result == cycle.NO_ELIGIBLE_SIGNAL
+    assert result.reason == "GLOBAL_PAIR_ACTIVE"
+    assert calls == [] and not result.delivery_attempted

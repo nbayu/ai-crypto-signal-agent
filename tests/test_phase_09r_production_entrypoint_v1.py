@@ -38,6 +38,7 @@ def test_production_entrypoint_calls_master_engine_once(mock_run, valid_env):
         assert main() == 0
     mock_run.assert_called_once()
     assert mock_run.call_args[1]["enable_publication"] is True
+    assert mock_run.call_args[1]["owner_blueprint_ledger"] is None
 
 @patch("engine.run_production_signal_v1.run_master_engine_v4")
 def test_no_credentials_in_logs_and_returns_7_on_failure(mock_run, valid_env):
