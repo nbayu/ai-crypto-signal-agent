@@ -34,7 +34,10 @@ F5 owner authorization is required before any controlled canary or
 enablement.
 
 The owner-blueprint release additionally stages
-`ai-crypto-signal-agent-telegram-control.service` and its libexec wrapper.
+`ai-crypto-signal-agent-telegram-control.service`. Its rendered `ExecStart`
+points directly at the controller wrapper inside the selected immutable
+release; the wrapper is not copied to an unversioned host path because its
+relative manifest binding depends on its release-resident location.
 Installation does not daemon-reload, enable, or start either unit. FT3 must
 create `/etc/ai-crypto-signal-agent/owner-control.env` as root:root `0600`,
 perform the tested state migration, and verify `READY_NOT_ENABLED` before any

@@ -18,7 +18,7 @@ Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/ph
 LoadCredentialEncrypted=telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token
 RuntimeDirectory=ai-crypto-signal-agent-telegram-control
 RuntimeDirectoryMode=0750
-ExecStart=/usr/local/libexec/ai-crypto-signal-agent-telegram-control
+ExecStart=@@RELEASE_ROOT@@/deploy/operational_v1/bin/ai-crypto-signal-agent-telegram-control
 Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=true

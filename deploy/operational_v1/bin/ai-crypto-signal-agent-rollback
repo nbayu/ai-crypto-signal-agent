@@ -64,7 +64,6 @@ restore_path() {
 
 restore_path SERVICE_STATE "$(rooted /etc/systemd/system/ai-crypto-signal-agent.service)" ai-crypto-signal-agent.service.before
 restore_path CONTROL_SERVICE_STATE "$(rooted /etc/systemd/system/ai-crypto-signal-agent-telegram-control.service)" ai-crypto-signal-agent-telegram-control.service.before
-restore_path CONTROL_WRAPPER_STATE "$(rooted /usr/local/libexec/ai-crypto-signal-agent-telegram-control)" ai-crypto-signal-agent-telegram-control.before
 restore_path TIMER_STATE "$(rooted /etc/systemd/system/ai-crypto-signal-agent.timer)" ai-crypto-signal-agent.timer.before
 restore_path HEALTH_STATE "$(rooted /usr/local/sbin/ai-crypto-signal-agent-health)" ai-crypto-signal-agent-health.before
 restore_path RETENTION_STATE "$(rooted /etc/tmpfiles.d/ai-crypto-signal-agent.conf)" ai-crypto-signal-agent.conf.before

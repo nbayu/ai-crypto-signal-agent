@@ -129,8 +129,10 @@ def test_owner_control_unit_contract() -> None:
         "telegram-bot-token:/etc/credstore.encrypted/telegram_bot_token"
     ]
     assert _directives(text, "ExecStart") == [
-        "/usr/local/libexec/ai-crypto-signal-agent-telegram-control"
+        "@@RELEASE_ROOT@@/deploy/operational_v1/bin/"
+        "ai-crypto-signal-agent-telegram-control"
     ]
+    assert "/usr/local/libexec/ai-crypto-signal-agent-telegram-control" not in text
     assert "WantedBy=multi-user.target" in text
 
 
@@ -498,14 +500,62 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
         capture_output=True,
     )
     service = destdir / "etc/systemd/system/ai-crypto-signal-agent.service"
+    control_service = (
+        destdir
+        / "etc/systemd/system/ai-crypto-signal-agent-telegram-control.service"
+    )
+    copied_control_wrapper = (
+        destdir / "usr/local/libexec/ai-crypto-signal-agent-telegram-control"
+    )
+    historical_host_wrapper = Path(
+        "/usr/local/libexec/ai-crypto-signal-agent-telegram-control"
+    )
+    historical_release_root = historical_host_wrapper.parent.joinpath(
+        "../../.."
+    ).resolve()
+    assert historical_release_root == Path("/")
+    assert not (historical_release_root / ".f4-release-manifest").is_file()
     timer = destdir / "etc/systemd/system/ai-crypto-signal-agent.timer"
     marker = destdir / "var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker"
     assert service.is_file()
     assert timer.is_file()
-    assert (destdir / "etc/systemd/system/ai-crypto-signal-agent-telegram-control.service").is_file()
-    assert (destdir / "usr/local/libexec/ai-crypto-signal-agent-telegram-control").is_file()
+    assert control_service.is_file()
+    assert not copied_control_wrapper.exists()
     assert marker.read_bytes() == (TRUSTED + "\n").encode("ascii")
     assert "@@RELEASE_ROOT@@" not in service.read_text()
+
+    release_wrapper = (
+        release
+        / "deploy/operational_v1/bin/ai-crypto-signal-agent-telegram-control"
+    )
+    expected_exec_start = f"ExecStart={release_wrapper}"
+    control_service_bytes = control_service.read_bytes()
+    control_service_text = control_service_bytes.decode("utf-8")
+    assert expected_exec_start in control_service_text
+    assert "@@RELEASE_ROOT@@" not in control_service_text
+    assert (
+        "/usr/local/libexec/ai-crypto-signal-agent-telegram-control"
+        not in control_service_text
+    )
+    assert release_wrapper.resolve().parents[3] == release.resolve()
+    assert (
+        release_wrapper.resolve().parents[3] / ".f4-release-manifest"
+    ).is_file()
+
+    subprocess.run(
+        [
+            str(BIN / "ai-crypto-signal-agent-install"),
+            "--release-root",
+            str(release),
+            "--destdir",
+            str(destdir),
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    assert control_service.read_bytes() == control_service_bytes
+    assert not copied_control_wrapper.exists()
 
     backup = tmp_path / "backup"
     backup.mkdir()
@@ -517,7 +567,6 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
             (
                 "SERVICE_STATE=PRESENT",
                 "CONTROL_SERVICE_STATE=ABSENT",
-                "CONTROL_WRAPPER_STATE=ABSENT",
                 "TIMER_STATE=ABSENT",
                 "HEALTH_STATE=ABSENT",
                 "RETENTION_STATE=ABSENT",
@@ -541,6 +590,8 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
         capture_output=True,
     )
     assert service.read_bytes() == prior_service
+    assert not control_service.exists()
+    assert not copied_control_wrapper.exists()
     assert not timer.exists()
     assert not marker.exists()
 

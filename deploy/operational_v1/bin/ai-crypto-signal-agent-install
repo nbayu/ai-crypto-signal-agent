@@ -57,7 +57,6 @@ atomic_install() {
 service_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.service)"
 timer_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent.timer)"
 control_service_path="$(rooted /etc/systemd/system/ai-crypto-signal-agent-telegram-control.service)"
-control_wrapper_path="$(rooted /usr/local/libexec/ai-crypto-signal-agent-telegram-control)"
 health_path="$(rooted /usr/local/sbin/ai-crypto-signal-agent-health)"
 retention_path="$(rooted /etc/tmpfiles.d/ai-crypto-signal-agent.conf)"
 marker_path="$(rooted /var/lib/ai-crypto-signal-agent/accepted-locked-commit.marker)"
@@ -81,7 +80,6 @@ mv -fT -- "$rendered_control_service" "$control_service_path"
 
 atomic_install "$package_root/systemd/ai-crypto-signal-agent.timer" "$timer_path" 0644
 atomic_install "$package_root/bin/ai-crypto-signal-agent-health" "$health_path" 0755
-atomic_install "$package_root/bin/ai-crypto-signal-agent-telegram-control" "$control_wrapper_path" 0755
 atomic_install "$package_root/tmpfiles.d/ai-crypto-signal-agent.conf" "$retention_path" 0644
 
 install -d -o ai-crypto-signal-agent -g ai-crypto-signal-agent -m 0750 \
