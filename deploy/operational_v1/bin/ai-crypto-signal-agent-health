@@ -74,6 +74,7 @@ binding_match=NO
 marker_match=NO
 service_match=NO
 timer_match=NO
+control_release_match=NO
 if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" &&
       "$(basename -- "$release_root")" =~ ^[0-9a-f]{40}$ &&
       -f "$release_root/.f4-release-manifest" ]]; then
@@ -93,6 +94,12 @@ if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" &&
     if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" &&
           "$(sha256sum "$TIMER_UNIT" | awk '{print $1}')" == "$(sha256sum "$release_root/deploy/operational_v1/systemd/ai-crypto-signal-agent.timer" | awk '{print $1}')" ]]; then
         timer_match=YES
+    fi
+    if [[ -f "$CONTROL_UNIT" && ! -L "$CONTROL_UNIT" &&
+          "$(unit_directive "$SERVICE_UNIT" ExecStart)" == "$release_root/deploy/operational_v1/bin/ai-crypto-signal-agent-run-once" &&
+          "$(unit_directive "$CONTROL_UNIT" ExecStart)" == "$release_root/deploy/operational_v1/bin/ai-crypto-signal-agent-telegram-control" ]] &&
+       grep -Fxq "ConditionPathExists=$release_root/.f4-release-manifest" "$CONTROL_UNIT"; then
+        control_release_match=YES
     fi
 fi
 verify_exact_marker "$RUNTIME_MARKER" && marker_match=YES
@@ -230,6 +237,7 @@ record_check TRUSTED_CP09_BINDING_MATCH "$binding_match" TRUSTED_CP09_BINDING_MI
 record_check RUNTIME_MARKER_MATCH "$marker_match" RUNTIME_MARKER_MISMATCH
 record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
 record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
+record_check SCANNER_CONTROLLER_RELEASE_PARITY "$control_release_match" SCANNER_CONTROLLER_RELEASE_SPLIT
 record_check SERVICE_INACTIVE "$service_inactive" SERVICE_NOT_INACTIVE
 record_check SERVICE_ENABLED_VALID "$service_enabled_valid" SERVICE_ENABLEMENT_STATE_MISMATCH
 record_check CONTROL_INSTALLED "$control_installed" CONTROL_UNIT_MISSING

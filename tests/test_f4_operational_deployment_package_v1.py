@@ -242,7 +242,12 @@ def _make_health_fixture(tmp_path: Path) -> tuple[Path, dict[str, str], dict[str
     service.write_bytes(service_bytes)
     (release / ".f4-rendered/ai-crypto-signal-agent.service").write_bytes(service_bytes)
     timer.write_bytes((SYSTEMD / "ai-crypto-signal-agent.timer").read_bytes())
-    control_unit.write_bytes((SYSTEMD / "ai-crypto-signal-agent-telegram-control.service.in").read_bytes())
+    control_unit.write_text(
+        (SYSTEMD / "ai-crypto-signal-agent-telegram-control.service.in")
+        .read_text(encoding="utf-8")
+        .replace("@@RELEASE_ROOT@@", str(release)),
+        encoding="utf-8",
+    )
     telegram_env.write_text(
         "TELEGRAM_BOT_TOKEN=synthetic-token\nTELEGRAM_DESTINATION_ID=synthetic-destination\n",
         encoding="ascii",
@@ -353,6 +358,7 @@ esac
         "lock": lock_path,
         "timer": timer,
         "release_timer": release / "deploy/operational_v1/systemd/ai-crypto-signal-agent.timer",
+        "control_unit": control_unit,
         "telegram_env": telegram_env,
     }
     return health, environment, paths
@@ -446,6 +452,52 @@ def test_health_state_machine_accepts_two_exact_states_and_rejects_partial_state
         assert result.returncode != 0, name
         assert "HEALTH_STATUS=NOT_READY" in result.stdout, name
         assert f"HEALTH_REASON={expected_reason}" in result.stdout, result.stdout
+
+
+def test_health_rejects_scanner_controller_split_release(tmp_path: Path) -> None:
+    health, environment, paths = _make_health_fixture(tmp_path)
+    old_release = "/opt/ai-crypto-signal-agent-releases/d263fbf2c218db846a46e015f4efbc30a14e4641"
+    paths["control_unit"].write_text(
+        paths["control_unit"].read_text(encoding="utf-8").replace(
+            str(paths["release"]), old_release,
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(health)], check=False, env=environment, text=True, capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "SCANNER_CONTROLLER_RELEASE_PARITY=NO" in result.stdout
+    assert "HEALTH_REASON=SCANNER_CONTROLLER_RELEASE_SPLIT" in result.stdout
+
+
+def test_install_renders_scanner_and_controller_to_same_release(tmp_path: Path) -> None:
+    release = _make_release(tmp_path)
+    destdir = tmp_path / "host"
+    subprocess.run(
+        [
+            str(BIN / "ai-crypto-signal-agent-install"),
+            "--release-root", str(release), "--destdir", str(destdir),
+        ],
+        check=True, text=True, capture_output=True,
+    )
+    scanner = (
+        destdir / "etc/systemd/system/ai-crypto-signal-agent.service"
+    ).read_text(encoding="utf-8")
+    controller = (
+        destdir
+        / "etc/systemd/system/ai-crypto-signal-agent-telegram-control.service"
+    ).read_text(encoding="utf-8")
+    scanner_exec = next(line for line in scanner.splitlines() if line.startswith("ExecStart="))
+    controller_exec = next(line for line in controller.splitlines() if line.startswith("ExecStart="))
+    assert scanner_exec == (
+        f"ExecStart={release}/deploy/operational_v1/bin/ai-crypto-signal-agent-run-once"
+    )
+    assert controller_exec == (
+        f"ExecStart={release}/deploy/operational_v1/bin/ai-crypto-signal-agent-telegram-control"
+    )
+    assert scanner.count(f"ConditionPathExists={release}/.f4-release-manifest") == 1
+    assert controller.count(f"ConditionPathExists={release}/.f4-release-manifest") == 1
 
 
 def _make_inert_wrapper_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
