@@ -5,6 +5,7 @@ import hashlib
 import pytest
 
 from engine import active_signal_ledger_v1 as active
+from engine import passive_production_signal_flow_v1 as publication_flow
 from engine import telegram_owner_control_service_v1 as service
 from engine.telegram_owner_control_service_v1 import (
     COMMAND_ALREADY_PROCESSED, COMMAND_REJECTED_AMBIGUOUS,
@@ -234,3 +235,87 @@ def test_response_receipt_is_nonsecret_bound_and_idempotent(tmp_path):
             state_path, update_id=40, outcome=result.outcome,
             response_message_id=4001, timestamp=NOW,
         )
+
+
+def _register_runner_publication(path, ledger, *, suffix, pair="KMNO/USDT:USDT"):
+    signal_id = f"PSG-{suffix * 64}"
+    delivery_id = f"PDL-{suffix * 64}"
+    evidence = {
+        "delivery_state": "DELIVERY_SUCCEEDED",
+        "signal_id": signal_id,
+        "delivery_id": delivery_id,
+        "mode": "SWING",
+        "published_at": NOW,
+        "source_payload_hash": "a" * 64,
+        "publication_payload_hash": "b" * 64,
+        "publication_payload": {
+            "signal_id": signal_id,
+            "mode": "SWING",
+            "symbol": pair,
+        },
+    }
+    outcome = publication_flow.register_completed_publication(
+        active_ledger_path=path,
+        expected_active_ledger_revision=ledger["ledger_revision"],
+        publication_evidence=evidence,
+        reservation_transition_id=f"runner-register-{suffix}",
+        timestamp=NOW,
+    )
+    assert outcome.result == publication_flow.PUBLISHED_SIGNAL_REGISTERED
+    return active.load_ledger(path), signal_id
+
+
+def test_runner_registered_identity_resolves_by_reply_and_unique_pair_only(tmp_path):
+    reply_root = tmp_path / "reply"
+    reply_root.mkdir()
+    ledger_path, state_path, ledger = _paths(reply_root)
+    ledger, signal_id = _register_runner_publication(
+        ledger_path, ledger, suffix="1",
+    )
+    assert active.inspect_capacity(ledger)["active_by_mode"]["SWING"] == 0
+    bind_signal_message(
+        state_path, signal_id=signal_id, canonical_pair="KMNO/USDT", style="SWING",
+        telegram_chat_id=CHAT, telegram_message_id=913, timestamp=NOW,
+    )
+    reply = _process(
+        _update(50, "entry KMNO/USDT", reply=913), ledger_path, state_path,
+    )
+    assert reply.outcome == ENTRY_ACCEPTED
+    assert reply.signal_id == signal_id
+    assert reply.slot_change == -1 and reply.pair_lock_change == 1
+
+    pair_root = tmp_path / "pair"
+    pair_root.mkdir()
+    pair_ledger_path, pair_state_path, pair_ledger = _paths(pair_root)
+    pair_ledger, pair_signal_id = _register_runner_publication(
+        pair_ledger_path, pair_ledger, suffix="2",
+    )
+    pair = _process(
+        _update(51, "entry kmno/usdt"), pair_ledger_path, pair_state_path,
+    )
+    assert pair.outcome == ENTRY_ACCEPTED
+    assert pair.signal_id == pair_signal_id
+
+    zero_root = tmp_path / "zero"
+    zero_root.mkdir()
+    zero_ledger_path, zero_state_path, _ = _paths(zero_root)
+    zero = _process(
+        _update(52, "entry KMNO/USDT"), zero_ledger_path, zero_state_path,
+    )
+    assert zero.outcome == COMMAND_REJECTED_AMBIGUOUS
+
+    multiple_root = tmp_path / "multiple"
+    multiple_root.mkdir()
+    multiple_ledger_path, multiple_state_path, multiple = _paths(multiple_root)
+    multiple, _ = _register_runner_publication(
+        multiple_ledger_path, multiple, suffix="3",
+    )
+    multiple, _ = _register_runner_publication(
+        multiple_ledger_path, multiple, suffix="4",
+    )
+    before = multiple_ledger_path.read_bytes()
+    ambiguous = _process(
+        _update(53, "entry KMNO/USDT"), multiple_ledger_path, multiple_state_path,
+    )
+    assert multiple_ledger_path.read_bytes() == before
+    assert ambiguous.outcome == COMMAND_REJECTED_AMBIGUOUS

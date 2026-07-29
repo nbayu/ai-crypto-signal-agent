@@ -1,9 +1,14 @@
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from engine import active_signal_ledger_v1 as active
+from engine.telegram_owner_control_state_v1 import initialize_state, load_state
 from engine.run_production_signal_v1 import main
+
+NOW = "2026-07-29T11:17:41Z"
 
 
 @pytest.fixture
@@ -138,3 +143,98 @@ def test_malformed_receipt_returns_6(mock_run, valid_env):
     mock_run.side_effect = fake_run
     with patch.dict(os.environ, valid_env, clear=True):
         assert main(outcome_invocation_id="a" * 32) == 6
+
+
+def _completed_publication():
+    signal_id = "PSG-" + "1" * 64
+    delivery_id = "PDL-" + "2" * 64
+    return {
+        "delivery_state": "DELIVERY_SUCCEEDED",
+        "signal_id": signal_id,
+        "delivery_id": delivery_id,
+        "mode": "SWING",
+        "published_at": "2026-07-29T11:17:37Z",
+        "source_payload_hash": "3" * 64,
+        "publication_payload_hash": "4" * 64,
+        "publication_payload": {
+            "signal_id": signal_id,
+            "mode": "SWING",
+            "symbol": "KMNO/USDT:USDT",
+        },
+        "delivery_receipt": {
+            "destination_id": "test_dest_id",
+            "external_delivery_id": "913",
+            "delivered_at": NOW,
+        },
+    }
+
+
+@patch("engine.run_production_signal_v1.run_master_engine_v4")
+def test_delivery_success_registers_pending_before_binding_and_replays_idempotently(
+    mock_run, valid_env, tmp_path,
+):
+    ledger_path = tmp_path / "ledger.json"
+    control_path = tmp_path / "control.json"
+    active.initialize_ledger(ledger_path, created_at=NOW)
+    initialize_state(control_path, timestamp=NOW)
+    publication = _completed_publication()
+    mock_run.return_value = {
+        "production_signal_out": {"status": "OK", "publication": publication},
+    }
+    env = {
+        **valid_env,
+        "ACTIVE_SIGNAL_LEDGER_PATH": str(ledger_path),
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
+    }
+
+    with patch.dict(os.environ, env, clear=True):
+        assert main(outcome_invocation_id="c" * 32) == 0
+
+    ledger = active.load_ledger(ledger_path)
+    signal = ledger["signals"][publication["signal_id"]]
+    assert signal["state"] == active.PUBLISHED_PENDING_ENTRY
+    assert signal["delivery_id"] == publication["delivery_id"]
+    assert active.inspect_capacity(ledger)["active_by_mode"]["SWING"] == 0
+    assert not any(
+        record["state"] == active.ENTRY_ACTIVE
+        for record in ledger["signals"].values()
+    )
+    binding = load_state(control_path)["signal_message_bindings"]["test_dest_id:913"]
+    assert binding["signal_id"] == publication["signal_id"]
+    assert binding["canonical_pair"] == "KMNO/USDT"
+    before_ledger = ledger_path.read_bytes()
+    before_control = control_path.read_bytes()
+
+    with patch.dict(os.environ, env, clear=True):
+        assert main(outcome_invocation_id="d" * 32) == 0
+
+    assert ledger_path.read_bytes() == before_ledger
+    assert control_path.read_bytes() == before_control
+
+
+@patch("engine.run_production_signal_v1.run_master_engine_v4")
+def test_registration_failure_fails_closed_without_binding_or_occupancy(
+    mock_run, valid_env, tmp_path,
+):
+    ledger_path = tmp_path / "ledger.json"
+    control_path = tmp_path / "control.json"
+    active.initialize_ledger(ledger_path, created_at=NOW)
+    initialize_state(control_path, timestamp=NOW)
+    mock_run.return_value = {
+        "production_signal_out": {
+            "status": "OK", "publication": _completed_publication(),
+        },
+    }
+    env = {
+        **valid_env,
+        "ACTIVE_SIGNAL_LEDGER_PATH": str(ledger_path),
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
+    }
+
+    with patch.dict(os.environ, env, clear=True), patch(
+        "engine.run_production_signal_v1.signal_flow.register_completed_publication",
+        return_value=SimpleNamespace(result="FAIL_CLOSED"),
+    ):
+        assert main(outcome_invocation_id="e" * 32) == 7
+    assert active.load_ledger(ledger_path)["ledger_revision"] == 0
+    assert load_state(control_path)["signal_message_bindings"] == {}

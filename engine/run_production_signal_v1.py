@@ -1,7 +1,9 @@
+import hashlib
 import os
 import sys
 from collections.abc import Mapping
 
+from engine import passive_production_signal_flow_v1 as signal_flow
 from engine.telegram_runtime_v4 import load_telegram_delivery_config
 from engine.master_engine_v4 import run_master_engine_v4
 from engine.outcome_tracker_v4 import (
@@ -64,16 +66,17 @@ def main(
         return 2
 
     control_state_path = os.environ.get("TELEGRAM_OWNER_CONTROL_STATE_PATH")
+    delivered_bindings = []
 
     def record_binding(*, payload, destination_id, message_id, timestamp):
-        if not control_state_path:
-            return
-        bind_signal_message(
-            control_state_path, signal_id=payload["signal_id"],
-            canonical_pair=normalize_pair(payload["symbol"]), style=payload["mode"],
-            telegram_chat_id=destination_id, telegram_message_id=message_id,
-            timestamp=timestamp,
-        )
+        delivered_bindings.append({
+            "signal_id": payload["signal_id"],
+            "canonical_pair": normalize_pair(payload["symbol"]),
+            "style": payload["mode"],
+            "telegram_chat_id": destination_id,
+            "telegram_message_id": message_id,
+            "timestamp": timestamp,
+        })
 
     adapter = Phase09RTelegramDeliveryAdapterV1(
         config,
@@ -155,6 +158,68 @@ def main(
         if delivery_state == "DELIVERY_FAILED":
             return 5
         if delivery_state == "DELIVERY_SUCCEEDED":
+            if ledger_path:
+                try:
+                    current_ledger = load_ledger(ledger_path)
+                    signal_id = publication["signal_id"]
+                    delivery_id = publication["delivery_id"]
+                    transition_digest = hashlib.sha256(
+                        (
+                            "published-signal-registration-v1\0"
+                            + signal_id
+                            + "\0"
+                            + delivery_id
+                        ).encode("utf-8")
+                    ).hexdigest()
+                    receipt = publication["delivery_receipt"]
+                    if not isinstance(receipt, Mapping):
+                        raise ValueError
+                    binding = {
+                        "signal_id": signal_id,
+                        "canonical_pair": normalize_pair(
+                            publication["publication_payload"]["symbol"]
+                        ),
+                        "style": publication["mode"],
+                        "telegram_chat_id": str(receipt["destination_id"]),
+                        "telegram_message_id": int(receipt["external_delivery_id"]),
+                        "timestamp": receipt["delivered_at"],
+                    }
+                    if delivered_bindings and (
+                        len(delivered_bindings) != 1
+                        or delivered_bindings[0] != binding
+                    ):
+                        raise ValueError
+                    registered = signal_flow.register_completed_publication(
+                        active_ledger_path=ledger_path,
+                        expected_active_ledger_revision=current_ledger["ledger_revision"],
+                        publication_evidence=publication,
+                        reservation_transition_id=(
+                            f"published-signal-registration-{transition_digest}"
+                        ),
+                        timestamp=receipt["delivered_at"],
+                    )
+                    if registered.result not in {
+                        signal_flow.PUBLISHED_SIGNAL_REGISTERED,
+                        signal_flow.PUBLISHED_SIGNAL_REGISTRATION_REPLAYED,
+                    }:
+                        raise RuntimeError
+                    if not control_state_path:
+                        raise RuntimeError
+                    bind_signal_message(
+                        control_state_path,
+                        signal_id=binding["signal_id"],
+                        canonical_pair=binding["canonical_pair"],
+                        style=binding["style"],
+                        telegram_chat_id=binding["telegram_chat_id"],
+                        telegram_message_id=binding["telegram_message_id"],
+                        timestamp=binding["timestamp"],
+                    )
+                except Exception as exc:
+                    return _exit7(
+                        "PUBLISHED_SIGNAL_REGISTRATION",
+                        "PUBLISHED_SIGNAL_REGISTRATION_FAILED",
+                        exc,
+                    )
             return 0
 
     # Maybe it was a NO_TRADE outcome?
