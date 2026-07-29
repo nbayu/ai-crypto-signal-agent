@@ -10,11 +10,13 @@ import types
 
 import pytest
 
+from engine import active_signal_ledger_v1 as active
 from engine.run_telegram_owner_control_v1 import (
     TelegramOwnerControlConfigV1,
     load_owner_control_config,
     run_forever,
 )
+from engine.telegram_owner_control_state_v1 import initialize_state, load_state
 
 
 MODULE_NAME = "engine.run_telegram_owner_control_v1"
@@ -155,3 +157,138 @@ def test_release_wrapper_module_target_rejects_silent_success_without_controller
     statement = guards[0].body[0]
     assert isinstance(statement, ast.Raise)
     assert ast.unparse(statement.exc) == "SystemExit(main())"
+
+
+class _FakeUpdate:
+    def __init__(self, value):
+        self._value = value
+
+    def to_dict(self):
+        return self._value
+
+
+def _runtime_config(tmp_path: Path) -> TelegramOwnerControlConfigV1:
+    ledger_path = tmp_path / "ledger.json"
+    state_path = tmp_path / "control.json"
+    active.initialize_ledger(ledger_path, created_at="2026-07-28T00:00:00Z")
+    initialize_state(state_path, timestamp="2026-07-28T00:00:00Z")
+    return TelegramOwnerControlConfigV1(
+        owner_user_id="100", owner_chat_id="200", ledger_path=ledger_path,
+        state_path=state_path, token_file=tmp_path / "telegram_bot_token",
+    )
+
+
+def test_run_forever_sends_first_decision_once_and_suppresses_replay(
+    monkeypatch, tmp_path, caplog,
+):
+    caplog.set_level("INFO")
+
+    class PollingComplete(RuntimeError):
+        pass
+
+    update = {"update_id": 50, "message": {
+        "message_id": 1050, "from": {"id": 100}, "chat": {"id": 200},
+        "text": "unsupported",
+    }}
+
+    class FakeBot:
+        offsets = []
+        sends = []
+
+        def __init__(self, *, token):
+            assert token == "fixture-token"
+
+        async def get_updates(self, *, offset, timeout):
+            assert timeout == 25
+            type(self).offsets.append(offset)
+            if len(type(self).offsets) > 2:
+                raise PollingComplete
+            return [_FakeUpdate(update)]
+
+        async def send_message(self, **kwargs):
+            type(self).sends.append(kwargs)
+            return types.SimpleNamespace(message_id=9050)
+
+    fake_telegram = types.ModuleType("telegram")
+    fake_telegram.Bot = FakeBot
+    monkeypatch.setitem(sys.modules, "telegram", fake_telegram)
+    config = _runtime_config(tmp_path)
+
+    with pytest.raises(PollingComplete):
+        asyncio.run(run_forever(config, "fixture-token"))
+
+    assert FakeBot.offsets == [0, 51, 51]
+    assert len(FakeBot.sends) == 1
+    decision = load_state(config.state_path)["processed_updates"]["50"]
+    assert decision["response_message_id"] == 9050
+    send_records = [
+        record for record in caplog.records
+        if record.msg == "telegram_owner_response_sent"
+    ]
+    assert len(send_records) == 1
+    assert send_records[0].update_id == 50
+    assert send_records[0].response_message_id == 9050
+
+
+def test_send_failure_then_restart_replay_produces_no_second_attempt(
+    monkeypatch, tmp_path,
+):
+    class FloodControlFailure(RuntimeError):
+        pass
+
+    class PollingComplete(RuntimeError):
+        pass
+
+    update = {"update_id": 60, "message": {
+        "message_id": 1060, "from": {"id": 999}, "chat": {"id": 200},
+        "text": "/status",
+    }}
+
+    class FirstBot:
+        send_attempts = 0
+
+        def __init__(self, *, token):
+            assert token == "fixture-token"
+
+        async def get_updates(self, *, offset, timeout):
+            assert offset == 0 and timeout == 25
+            return [_FakeUpdate(update)]
+
+        async def send_message(self, **_kwargs):
+            type(self).send_attempts += 1
+            raise FloodControlFailure
+
+    fake_telegram = types.ModuleType("telegram")
+    fake_telegram.Bot = FirstBot
+    monkeypatch.setitem(sys.modules, "telegram", fake_telegram)
+    config = _runtime_config(tmp_path)
+
+    with pytest.raises(FloodControlFailure):
+        asyncio.run(run_forever(config, "fixture-token"))
+    assert FirstBot.send_attempts == 1
+    assert load_state(config.state_path)["last_update_id"] == 60
+
+    class RestartBot:
+        send_attempts = 0
+        polls = 0
+
+        def __init__(self, *, token):
+            assert token == "fixture-token"
+
+        async def get_updates(self, *, offset, timeout):
+            assert offset == 61 and timeout == 25
+            type(self).polls += 1
+            if type(self).polls > 1:
+                raise PollingComplete
+            return [_FakeUpdate(update)]
+
+        async def send_message(self, **_kwargs):
+            type(self).send_attempts += 1
+            raise AssertionError("duplicate response attempted")
+
+    fake_telegram.Bot = RestartBot
+    with pytest.raises(PollingComplete):
+        asyncio.run(run_forever(config, "fixture-token"))
+
+    assert RestartBot.send_attempts == 0
+    assert load_state(config.state_path)["last_update_id"] == 60

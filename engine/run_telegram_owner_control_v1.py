@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import asyncio
+import logging
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +43,10 @@ def load_owner_control_config(environment: Mapping[str, str]) -> TelegramOwnerCo
 async def run_forever(config: TelegramOwnerControlConfigV1, token: str) -> None:
     """Poll continuously; any transport failure escapes for systemd supervision."""
     from telegram import Bot
-    from engine.telegram_owner_control_service_v1 import process_owner_update
+    from engine.telegram_owner_control_service_v1 import (
+        process_owner_update,
+        record_response_success,
+    )
     from engine.telegram_owner_control_state_v1 import load_state
 
     bot = Bot(token=token)
@@ -55,10 +61,27 @@ async def run_forever(config: TelegramOwnerControlConfigV1, token: str) -> None:
                 ledger_path=config.ledger_path, control_state_path=config.state_path,
                 timestamp=timestamp,
             )
+            if not result.response_required:
+                continue
             message = raw.get("message", {})
-            await bot.send_message(
+            response = await bot.send_message(
                 chat_id=config.owner_chat_id, text=result.acknowledgement,
                 reply_to_message_id=message.get("message_id"),
+            )
+            response_message_id = response.message_id
+            record_response_success(
+                config.state_path,
+                update_id=result.update_id,
+                outcome=result.outcome,
+                response_message_id=response_message_id,
+                timestamp=timestamp,
+            )
+            _LOGGER.info(
+                "telegram_owner_response_sent",
+                extra={
+                    "update_id": result.update_id,
+                    "response_message_id": response_message_id,
+                },
             )
 
 

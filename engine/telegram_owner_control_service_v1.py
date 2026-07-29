@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -23,6 +24,8 @@ COMMAND_REJECTED_AMBIGUOUS = "COMMAND_REJECTED_AMBIGUOUS"
 COMMAND_ALREADY_PROCESSED = "COMMAND_ALREADY_PROCESSED"
 COMMAND_REJECTED_INVALID = "COMMAND_REJECTED_INVALID"
 
+_LOGGER = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class OwnerCommandResultV1:
@@ -36,12 +39,21 @@ class OwnerCommandResultV1:
     slot_change: int
     pair_lock_change: int
     acknowledgement: str
+    response_required: bool
+    response_idempotency_key: str | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _result(outcome: str, *, update_id=None, command_id=None, record=None, mutated=False, slot=0, pair=0):
+def _result(
+    outcome: str, *, update_id=None, command_id=None, record=None,
+    mutated=False, slot=0, pair=0, response_required=False,
+):
+    response_idempotency_key = (
+        hashlib.sha256(f"{update_id}\0{outcome}".encode()).hexdigest()
+        if type(update_id) is int else None
+    )
     return OwnerCommandResultV1(
         outcome=outcome, command_id=command_id, update_id=update_id,
         signal_id=record.get("signal_id") if isinstance(record, Mapping) else None,
@@ -49,13 +61,14 @@ def _result(outcome: str, *, update_id=None, command_id=None, record=None, mutat
         style=record.get("mode") if isinstance(record, Mapping) else None,
         ledger_mutated=mutated, slot_change=slot, pair_lock_change=pair,
         acknowledgement=format_acknowledgement(outcome),
+        response_required=response_required,
+        response_idempotency_key=response_idempotency_key,
     )
 
 
-def _message(update: Mapping[str, Any]) -> tuple[int, str, str, str, int | None]:
-    update_id = update.get("update_id")
+def _message(update: Mapping[str, Any]) -> tuple[str, str, str, int | None]:
     message = update.get("message")
-    if type(update_id) is not int or not isinstance(message, Mapping):
+    if not isinstance(message, Mapping):
         raise ValueError
     user = message.get("from")
     chat = message.get("chat")
@@ -66,7 +79,7 @@ def _message(update: Mapping[str, Any]) -> tuple[int, str, str, str, int | None]
     reply_id = reply.get("message_id") if isinstance(reply, Mapping) else None
     if reply_id is not None and type(reply_id) is not int:
         raise ValueError
-    return update_id, str(user.get("id")), str(chat.get("id")), text.strip(), reply_id
+    return str(user.get("id")), str(chat.get("id")), text.strip(), reply_id
 
 
 def _parse(text: str) -> tuple[str, str | None]:
@@ -83,6 +96,27 @@ def _parse(text: str) -> tuple[str, str | None]:
 def _command_id(update_id: int, user_id: str, chat_id: str, text: str) -> str:
     raw = f"{update_id}\0{user_id}\0{chat_id}\0{text}".encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+def _record_decision(
+    state: dict[str, Any], *, result: OwnerCommandResultV1, timestamp: str,
+) -> tuple[dict[str, Any], OwnerCommandResultV1]:
+    update_id = result.update_id
+    if type(update_id) is not int or not result.response_required:
+        raise ValueError("OWNER_CONTROL_DECISION_INVALID")
+    state["processed_updates"][str(update_id)] = {
+        "command_id": result.command_id,
+        "outcome": result.outcome,
+        "processed_at": timestamp,
+        "response_idempotency_key": result.response_idempotency_key,
+    }
+    if result.command_id is not None:
+        state["processed_commands"][result.command_id] = {
+            "outcome": result.outcome,
+            "processed_at": timestamp,
+        }
+    state["last_update_id"] = max(state["last_update_id"], update_id)
+    return state, result
 
 
 def _resolve(
@@ -108,68 +142,175 @@ def process_owner_update(
     update: Mapping[str, Any], *, owner_user_id: str, owner_chat_id: str,
     ledger_path: str | Path, control_state_path: str | Path, timestamp: str,
 ) -> OwnerCommandResultV1:
-    """Process one injected update; authorization precedes every state mutation."""
-    try:
-        update_id, user_id, chat_id, text, reply_id = _message(update)
-    except (TypeError, ValueError):
-        return _result(COMMAND_REJECTED_INVALID)
-    if user_id != str(owner_user_id) or chat_id != str(owner_chat_id):
-        return _result(COMMAND_REJECTED_UNAUTHORIZED, update_id=update_id)
-    command_id = _command_id(update_id, user_id, chat_id, text)
-    try:
-        command, pair = _parse(text)
-    except (CanonicalPairError, ValueError):
-        return _result(COMMAND_REJECTED_INVALID, update_id=update_id, command_id=command_id)
+    """Persist one terminal update decision before exposing a sendable response."""
+    update_id = update.get("update_id") if isinstance(update, Mapping) else None
+    if type(update_id) is not int:
+        result = _result(COMMAND_REJECTED_INVALID)
+        _LOGGER.info(
+            "telegram_owner_update_decision",
+            extra={
+                "update_id": None,
+                "outcome": result.outcome,
+                "response_required": result.response_required,
+            },
+        )
+        return result
 
     def apply(state: dict[str, Any]):
-        if str(update_id) in state["processed_updates"] or command_id in state["processed_commands"]:
-            return state, _result(COMMAND_ALREADY_PROCESSED, update_id=update_id, command_id=command_id)
-        ledger = active.load_ledger(ledger_path)
-        record = None
-        outcome = STATUS_REPORT
-        changed = ledger
-        slot_change = pair_change = 0
-        if command != "STATUS":
-            record = _resolve(
-                state, ledger, command=command, pair=pair, chat_id=chat_id,
-                reply_message_id=reply_id,
+        existing = state["processed_updates"].get(str(update_id))
+        if existing is not None:
+            existing_command_id = (
+                existing.get("command_id") if isinstance(existing, Mapping) else existing
             )
-            if record is None:
-                outcome = COMMAND_REJECTED_AMBIGUOUS
-            elif command == "ENTRY":
-                changed = lifecycle.commit_owner_confirmed_entry(
-                    ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
-                    transition_id=f"owner-entry-{command_id}", signal_id=record["signal_id"],
-                    timestamp=timestamp,
+            return state, _result(
+                COMMAND_ALREADY_PROCESSED,
+                update_id=update_id,
+                command_id=existing_command_id,
+            )
+        try:
+            user_id, chat_id, text, reply_id = _message(update)
+        except (TypeError, ValueError):
+            return _record_decision(
+                state,
+                result=_result(
+                    COMMAND_REJECTED_INVALID,
+                    update_id=update_id,
+                    response_required=True,
+                ),
+                timestamp=timestamp,
+            )
+        if user_id != str(owner_user_id) or chat_id != str(owner_chat_id):
+            return _record_decision(
+                state,
+                result=_result(
+                    COMMAND_REJECTED_UNAUTHORIZED,
+                    update_id=update_id,
+                    response_required=True,
+                ),
+                timestamp=timestamp,
+            )
+        command_id = _command_id(update_id, user_id, chat_id, text)
+        try:
+            command, pair = _parse(text)
+        except (CanonicalPairError, ValueError):
+            return _record_decision(
+                state,
+                result=_result(
+                    COMMAND_REJECTED_INVALID,
+                    update_id=update_id,
+                    command_id=command_id,
+                    response_required=True,
+                ),
+                timestamp=timestamp,
+            )
+        if command_id in state["processed_commands"]:
+            return _record_decision(
+                state,
+                result=_result(
+                    COMMAND_ALREADY_PROCESSED,
+                    update_id=update_id,
+                    command_id=command_id,
+                    response_required=True,
+                ),
+                timestamp=timestamp,
+            )
+        try:
+            ledger = active.load_ledger(ledger_path)
+            record = None
+            outcome = STATUS_REPORT
+            changed = ledger
+            slot_change = pair_change = 0
+            if command != "STATUS":
+                record = _resolve(
+                    state, ledger, command=command, pair=pair, chat_id=chat_id,
+                    reply_message_id=reply_id,
                 )
-                outcome, slot_change, pair_change = ENTRY_ACCEPTED, -1, 1
-            elif command == "REJECT":
-                changed = lifecycle.commit_owner_terminal(
-                    ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
-                    transition_id=f"owner-reject-{command_id}", signal_id=record["signal_id"],
-                    terminal_state=active.REJECTED_BY_OWNER, timestamp=timestamp,
-                    reason="OWNER_REJECTION",
-                )
-                outcome = SIGNAL_REJECTED_BY_OWNER
-            else:
-                changed = lifecycle.commit_owner_terminal(
-                    ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
-                    transition_id=f"owner-close-{command_id}", signal_id=record["signal_id"],
-                    terminal_state=active.CLOSED_MANUAL, timestamp=timestamp,
-                    reason="OWNER_CONFIRMED_CLOSE",
-                )
-                outcome, slot_change, pair_change = POSITION_CLOSED, 1, -1
-        state["processed_updates"][str(update_id)] = command_id
-        state["processed_commands"][command_id] = {"outcome": outcome, "processed_at": timestamp}
-        state["last_update_id"] = max(state["last_update_id"], update_id)
-        result_record = changed["signals"].get(record["signal_id"]) if record is not None else None
-        return state, _result(
-            outcome, update_id=update_id, command_id=command_id, record=result_record,
-            mutated=changed["ledger_revision"] != ledger["ledger_revision"],
-            slot=slot_change, pair=pair_change,
+                if record is None:
+                    outcome = COMMAND_REJECTED_AMBIGUOUS
+                elif command == "ENTRY":
+                    changed = lifecycle.commit_owner_confirmed_entry(
+                        ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
+                        transition_id=f"owner-entry-{command_id}", signal_id=record["signal_id"],
+                        timestamp=timestamp,
+                    )
+                    outcome, slot_change, pair_change = ENTRY_ACCEPTED, -1, 1
+                elif command == "REJECT":
+                    changed = lifecycle.commit_owner_terminal(
+                        ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
+                        transition_id=f"owner-reject-{command_id}", signal_id=record["signal_id"],
+                        terminal_state=active.REJECTED_BY_OWNER, timestamp=timestamp,
+                        reason="OWNER_REJECTION",
+                    )
+                    outcome = SIGNAL_REJECTED_BY_OWNER
+                else:
+                    changed = lifecycle.commit_owner_terminal(
+                        ledger_path=ledger_path, expected_revision=ledger["ledger_revision"],
+                        transition_id=f"owner-close-{command_id}", signal_id=record["signal_id"],
+                        terminal_state=active.CLOSED_MANUAL, timestamp=timestamp,
+                        reason="OWNER_CONFIRMED_CLOSE",
+                    )
+                    outcome, slot_change, pair_change = POSITION_CLOSED, 1, -1
+            result_record = changed["signals"].get(record["signal_id"]) if record is not None else None
+            result = _result(
+                outcome, update_id=update_id, command_id=command_id, record=result_record,
+                mutated=changed["ledger_revision"] != ledger["ledger_revision"],
+                slot=slot_change, pair=pair_change, response_required=True,
+            )
+        except Exception:
+            result = _result(
+                COMMAND_REJECTED_INVALID, update_id=update_id,
+                command_id=command_id, response_required=True,
+            )
+        return _record_decision(
+            state,
+            result=result,
+            timestamp=timestamp,
         )
 
     try:
-        return control_state.mutate_state(control_state_path, timestamp=timestamp, mutation=apply)
+        result = control_state.mutate_state(
+            control_state_path, timestamp=timestamp, mutation=apply,
+        )
     except Exception:
-        return _result(COMMAND_REJECTED_INVALID, update_id=update_id, command_id=command_id)
+        result = _result(COMMAND_REJECTED_INVALID, update_id=update_id)
+    _LOGGER.info(
+        "telegram_owner_update_decision",
+        extra={
+            "update_id": result.update_id,
+            "outcome": result.outcome,
+            "response_required": result.response_required,
+        },
+    )
+    return result
+
+
+def record_response_success(
+    control_state_path: str | Path, *, update_id: int, outcome: str,
+    response_message_id: int, timestamp: str,
+) -> None:
+    """Attach a non-secret send receipt to an existing durable decision."""
+    if type(update_id) is not int or type(response_message_id) is not int:
+        raise ValueError("OWNER_CONTROL_RESPONSE_RECEIPT_INVALID")
+
+    def apply(state: dict[str, Any]):
+        decision = state["processed_updates"].get(str(update_id))
+        if not isinstance(decision, Mapping):
+            raise ValueError("OWNER_CONTROL_RESPONSE_DECISION_MISSING")
+        expected_key = hashlib.sha256(f"{update_id}\0{outcome}".encode()).hexdigest()
+        if (
+            decision.get("outcome") != outcome
+            or decision.get("response_idempotency_key") != expected_key
+        ):
+            raise ValueError("OWNER_CONTROL_RESPONSE_DECISION_MISMATCH")
+        existing = decision.get("response_message_id")
+        if existing is not None and existing != response_message_id:
+            raise ValueError("OWNER_CONTROL_RESPONSE_RECEIPT_COLLISION")
+        changed = dict(decision)
+        changed["response_message_id"] = response_message_id
+        changed["response_sent_at"] = timestamp
+        state["processed_updates"][str(update_id)] = changed
+        return state, None
+
+    control_state.mutate_state(
+        control_state_path, timestamp=timestamp, mutation=apply,
+    )

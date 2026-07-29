@@ -24,6 +24,7 @@ def poll_once(
             ledger_path=ledger_path, control_state_path=control_state_path,
             timestamp=timestamp,
         )
-        send_acknowledgement(update, outcome.acknowledgement)
+        if outcome.response_required:
+            send_acknowledgement(update, outcome.acknowledgement)
         results.append(outcome.to_dict())
     return results
