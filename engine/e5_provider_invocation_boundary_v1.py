@@ -54,6 +54,9 @@ E5_CLAUDE_ESCALATION_REVIEW_VERSION: Final = (
 E5_PROVIDER_INVOCATION_RESULT_VERSION: Final = (
     "e5-provider-invocation-result-v1"
 )
+E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION: Final = (
+    "e5-provider-accepted-response-execution-v1"
+)
 
 ACTIVE_PROVIDER_BINDING_SHA256: Final = (
     "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
@@ -1036,6 +1039,137 @@ class E5ProviderInvocationResultV1:
         return _canonical_json(_result_preimage(self))
 
 
+def _execution_preimage(
+    execution: "E5ProviderAcceptedResponseExecutionV1",
+) -> dict[str, object]:
+    return {
+        "execution_version": execution.execution_version,
+        "invocation_result": execution.invocation_result.to_mapping(),
+        "accepted_deepseek_review": (
+            None
+            if execution.accepted_deepseek_review is None
+            else execution.accepted_deepseek_review.to_mapping()
+        ),
+        "accepted_claude_review": (
+            None
+            if execution.accepted_claude_review is None
+            else execution.accepted_claude_review.to_mapping()
+        ),
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class E5ProviderAcceptedResponseExecutionV1:
+    execution_version: str
+    invocation_result: E5ProviderInvocationResultV1
+    accepted_deepseek_review: E5DeepSeekStructuredReviewV1 | None
+    accepted_claude_review: E5ClaudeEscalationReviewV1 | None
+    execution_sha256: str
+
+    def __post_init__(self) -> None:
+        try:
+            _require(
+                self.execution_version
+                == E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION
+            )
+            _require(type(self.invocation_result) is E5ProviderInvocationResultV1)
+            self.invocation_result.__post_init__()
+            _require(
+                not (
+                    self.accepted_deepseek_review is not None
+                    and self.accepted_claude_review is not None
+                )
+            )
+            result = self.invocation_result
+            if (
+                result.final_result_code
+                == PASS_DEEPSEEK_STRUCTURED_REVIEW_ACCEPTED
+            ):
+                _require(
+                    type(self.accepted_deepseek_review)
+                    is E5DeepSeekStructuredReviewV1
+                )
+                _require(self.accepted_claude_review is None)
+                review = self.accepted_deepseek_review
+                review.__post_init__()
+                _require(result.provider == DEEPSEEK)
+                _require(result.invocation_role == DEEPSEEK_TECHNICAL_REVIEW)
+                _require(result.route_sha256 is None)
+                _require(result.request_sha256 is not None)
+                _require(result.response_digest_sha256 is not None)
+                _require(review.payload_sha256 == result.payload_sha256)
+                _require(review.model_id == result.model_id)
+                _require(review.review_sha256 == result.accepted_response_sha256)
+            elif (
+                result.final_result_code
+                == PASS_CLAUDE_ESCALATION_REVIEW_ACCEPTED
+            ):
+                _require(self.accepted_deepseek_review is None)
+                _require(
+                    type(self.accepted_claude_review)
+                    is E5ClaudeEscalationReviewV1
+                )
+                review = self.accepted_claude_review
+                review.__post_init__()
+                _require(result.provider == ANTHROPIC)
+                _require(
+                    result.invocation_role
+                    in (
+                        CLAUDE_L1_ESCALATION_REVIEW,
+                        CLAUDE_L2_ESCALATION_REVIEW,
+                    )
+                )
+                _require(result.route_sha256 is not None)
+                _require(result.request_sha256 is not None)
+                _require(result.response_digest_sha256 is not None)
+                _require(review.provider_binding_sha256 == result.provider_binding_sha256)
+                _require(review.payload_sha256 == result.payload_sha256)
+                _require(review.route_sha256 == result.route_sha256)
+                _require(review.model_id == result.model_id)
+                _require(review.review_sha256 == result.accepted_response_sha256)
+            else:
+                _require(self.accepted_deepseek_review is None)
+                _require(self.accepted_claude_review is None)
+                _require(result.accepted_response_sha256 is None)
+            _require(_valid_sha256(self.execution_sha256))
+            _require(
+                self.execution_sha256
+                == _hash_mapping(_execution_preimage(self))
+            )
+        except Exception:
+            _fail()
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            **_execution_preimage(self),
+            "execution_sha256": self.execution_sha256,
+        }
+
+    def canonical_execution_json(self) -> str:
+        return _canonical_json(_execution_preimage(self))
+
+
+def _build_execution(
+    *,
+    invocation_result: E5ProviderInvocationResultV1,
+    accepted_deepseek_review: E5DeepSeekStructuredReviewV1 | None = None,
+    accepted_claude_review: E5ClaudeEscalationReviewV1 | None = None,
+) -> E5ProviderAcceptedResponseExecutionV1:
+    data: dict[str, object] = {
+        "execution_version": E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION,
+        "invocation_result": invocation_result,
+        "accepted_deepseek_review": accepted_deepseek_review,
+        "accepted_claude_review": accepted_claude_review,
+    }
+    temporary = object.__new__(E5ProviderAcceptedResponseExecutionV1)
+    for name, value in data.items():
+        object.__setattr__(temporary, name, value)
+    return E5ProviderAcceptedResponseExecutionV1(
+        **data,
+        execution_sha256=_hash_mapping(_execution_preimage(temporary)),
+    )
+
+
 def _build_result(
     *,
     payload_sha256: str,
@@ -1166,12 +1300,12 @@ def _validate_observation_identity(
     return observation, None
 
 
-def invoke_e5_deepseek_review_once_v1(
+def _execute_e5_deepseek_review_once_core_v1(
     *,
     payload: E5TechnicalReviewPayloadV1,
     token_preflight: E5TechnicalReviewTokenPreflightResultV1,
     transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
-) -> E5ProviderInvocationResultV1:
+) -> E5ProviderAcceptedResponseExecutionV1:
     try:
         verified_payload = _validate_active_payload(payload)
         preflight = _validate_deepseek_preflight(
@@ -1180,11 +1314,13 @@ def invoke_e5_deepseek_review_once_v1(
         )
         _require(callable(transport))
         if preflight.decision_code in (HOLD_INPUT_TOKEN_LIMIT, HOLD_OUTPUT_TOKEN_LIMIT):
-            return _deepseek_result(
-                payload=verified_payload,
-                request=None,
-                cause=HOLD_TOKEN_LIMIT,
-                final=HOLD_TOKEN_LIMIT,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=None,
+                    cause=HOLD_TOKEN_LIMIT,
+                    final=HOLD_TOKEN_LIMIT,
+                )
             )
         request = build_e5_deepseek_provider_request_v1(
             payload=verified_payload,
@@ -1193,86 +1329,130 @@ def invoke_e5_deepseek_review_once_v1(
         try:
             raw_observation = transport(request)
         except Exception:
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=HOLD_PROVIDER_UNAVAILABLE,
-                final=HOLD_PROVIDER_UNAVAILABLE,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=HOLD_PROVIDER_UNAVAILABLE,
+                    final=HOLD_PROVIDER_UNAVAILABLE,
+                )
             )
         observation, identity_failure = _validate_observation_identity(
             observation=raw_observation,
             request=request,
         )
         if identity_failure is not None:
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=identity_failure,
-                final=identity_failure,
-                response_digest=(
-                    raw_observation.response_digest_sha256
-                    if type(raw_observation) is E5ProviderAttemptObservationV1
-                    else None
-                ),
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=identity_failure,
+                    final=identity_failure,
+                    response_digest=(
+                        raw_observation.response_digest_sha256
+                        if type(raw_observation)
+                        is E5ProviderAttemptObservationV1
+                        else None
+                    ),
+                )
             )
         _require(observation is not None)
         if observation.transport_outcome != SUCCESS:
             cause = _TRANSPORT_FAILURE_MAP[observation.transport_outcome]
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=cause,
-                final=cause,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=cause,
+                    final=cause,
+                )
             )
         if (
             observation.measured_input_tokens > request.input_hard_limit_tokens
             or observation.measured_output_tokens > request.output_hard_limit_tokens
         ):
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=HOLD_TOKEN_LIMIT,
-                final=HOLD_TOKEN_LIMIT,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=HOLD_TOKEN_LIMIT,
+                    final=HOLD_TOKEN_LIMIT,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         mapping = _thaw_json_value(observation.response_mapping)
         _require(type(mapping) is dict)
         if mapping.get("model_id") != request.model_id:
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=HOLD_MODEL_BINDING,
-                final=HOLD_MODEL_BINDING,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=HOLD_MODEL_BINDING,
+                    final=HOLD_MODEL_BINDING,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         try:
             review = reconstruct_e5_deepseek_structured_review_v1(mapping)
         except Exception:
-            return _deepseek_result(
-                payload=verified_payload,
-                request=request,
-                cause=HOLD_INVALID_RESPONSE,
-                final=HOLD_INVALID_RESPONSE,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=HOLD_INVALID_RESPONSE,
+                    final=HOLD_INVALID_RESPONSE,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         if review.payload_sha256 != verified_payload.payload_sha256:
-            return _deepseek_result(
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=request,
+                    cause=HOLD_INVALID_RESPONSE,
+                    final=HOLD_INVALID_RESPONSE,
+                    response_digest=observation.response_digest_sha256,
+                )
+            )
+        return _build_execution(
+            invocation_result=_deepseek_result(
                 payload=verified_payload,
                 request=request,
-                cause=HOLD_INVALID_RESPONSE,
-                final=HOLD_INVALID_RESPONSE,
+                cause=None,
+                final=PASS_DEEPSEEK_STRUCTURED_REVIEW_ACCEPTED,
+                accepted=review.review_sha256,
                 response_digest=observation.response_digest_sha256,
-            )
-        return _deepseek_result(
-            payload=verified_payload,
-            request=request,
-            cause=None,
-            final=PASS_DEEPSEEK_STRUCTURED_REVIEW_ACCEPTED,
-            accepted=review.review_sha256,
-            response_digest=observation.response_digest_sha256,
+            ),
+            accepted_deepseek_review=review,
         )
     except Exception:
         _fail()
+
+
+def execute_e5_deepseek_review_once_v1(
+    *,
+    payload: E5TechnicalReviewPayloadV1,
+    token_preflight: E5TechnicalReviewTokenPreflightResultV1,
+    transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
+) -> E5ProviderAcceptedResponseExecutionV1:
+    return _execute_e5_deepseek_review_once_core_v1(
+        payload=payload,
+        token_preflight=token_preflight,
+        transport=transport,
+    )
+
+
+def invoke_e5_deepseek_review_once_v1(
+    *,
+    payload: E5TechnicalReviewPayloadV1,
+    token_preflight: E5TechnicalReviewTokenPreflightResultV1,
+    transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
+) -> E5ProviderInvocationResultV1:
+    return execute_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=token_preflight,
+        transport=transport,
+    ).invocation_result
 
 
 def _claude_provider_failure_result(
@@ -1293,7 +1473,7 @@ def _claude_provider_failure_result(
     )
 
 
-def invoke_e5_claude_review_once_v1(
+def _execute_e5_claude_review_once_core_v1(
     *,
     payload: E5TechnicalReviewPayloadV1,
     deepseek_review: E5DeepSeekStructuredReviewV1,
@@ -1301,7 +1481,7 @@ def invoke_e5_claude_review_once_v1(
     route_result: E5ClaudeReviewRouteResultV1,
     token_preflight: E5ClaudeTokenPreflightResultV1,
     transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
-) -> E5ProviderInvocationResultV1:
+) -> E5ProviderAcceptedResponseExecutionV1:
     try:
         verified_payload = _validate_active_payload(payload)
         review, adjudication, route = _validate_claude_lineage(
@@ -1321,31 +1501,37 @@ def invoke_e5_claude_review_once_v1(
         ):
             _require(route.route == L0)
             _require(preflight.decision_code == HOLD_CLAUDE_ROUTE_NOT_AUTHORIZED)
-            return _claude_result(
-                payload=verified_payload,
-                route=route,
-                request=None,
-                cause=None,
-                final=PASS_L0_NO_CLAUDE_REQUIRED,
+            return _build_execution(
+                invocation_result=_claude_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=None,
+                    cause=None,
+                    final=PASS_L0_NO_CLAUDE_REQUIRED,
+                )
             )
         if route.decision_code == BLOCK_DUPLICATE_LOGICAL_REVIEW:
-            return _claude_result(
-                payload=verified_payload,
-                route=route,
-                request=None,
-                cause=HOLD_ESCALATION_INCOMPLETE,
-                final=HOLD_ESCALATION_INCOMPLETE,
+            return _build_execution(
+                invocation_result=_claude_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=None,
+                    cause=HOLD_ESCALATION_INCOMPLETE,
+                    final=HOLD_ESCALATION_INCOMPLETE,
+                )
             )
         if route.decision_code in (
             BLOCK_SHARED_DAILY_REVIEW_CEILING,
             BLOCK_L2_DAILY_REVIEW_CEILING,
         ):
-            return _claude_result(
-                payload=verified_payload,
-                route=route,
-                request=None,
-                cause=HOLD_BUDGET_BLOCKED,
-                final=HOLD_BUDGET_BLOCKED,
+            return _build_execution(
+                invocation_result=_claude_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=None,
+                    cause=HOLD_BUDGET_BLOCKED,
+                    final=HOLD_BUDGET_BLOCKED,
+                )
             )
         _require(
             route.decision_code
@@ -1355,12 +1541,14 @@ def invoke_e5_claude_review_once_v1(
             )
         )
         if preflight.decision_code != PASS_CLAUDE_TOKEN_BUDGET:
-            return _claude_result(
-                payload=verified_payload,
-                route=route,
-                request=None,
-                cause=HOLD_TOKEN_LIMIT,
-                final=HOLD_TOKEN_LIMIT,
+            return _build_execution(
+                invocation_result=_claude_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=None,
+                    cause=HOLD_TOKEN_LIMIT,
+                    final=HOLD_TOKEN_LIMIT,
+                )
             )
         request = build_e5_claude_provider_request_v1(
             payload=verified_payload,
@@ -1372,76 +1560,91 @@ def invoke_e5_claude_review_once_v1(
         try:
             raw_observation = transport(request)
         except Exception:
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=HOLD_PROVIDER_UNAVAILABLE,
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_PROVIDER_UNAVAILABLE,
+                )
             )
         observation, identity_failure = _validate_observation_identity(
             observation=raw_observation,
             request=request,
         )
         if identity_failure is not None:
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=identity_failure,
-                response_digest=(
-                    raw_observation.response_digest_sha256
-                    if type(raw_observation) is E5ProviderAttemptObservationV1
-                    else None
-                ),
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=identity_failure,
+                    response_digest=(
+                        raw_observation.response_digest_sha256
+                        if type(raw_observation)
+                        is E5ProviderAttemptObservationV1
+                        else None
+                    ),
+                )
             )
         _require(observation is not None)
         if observation.transport_outcome != SUCCESS:
             cause = _TRANSPORT_FAILURE_MAP[observation.transport_outcome]
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=cause,
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=cause,
+                )
             )
         if observation.billed_cost_micro_usd > request.maximum_review_cost_micro_usd:
-            return _claude_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=HOLD_BUDGET_BLOCKED,
-                final=HOLD_BUDGET_BLOCKED,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_claude_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_BUDGET_BLOCKED,
+                    final=HOLD_BUDGET_BLOCKED,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         if (
             observation.measured_input_tokens > request.input_hard_limit_tokens
             or observation.measured_output_tokens > request.output_hard_limit_tokens
         ):
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=HOLD_TOKEN_LIMIT,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_TOKEN_LIMIT,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         mapping = _thaw_json_value(observation.response_mapping)
         _require(type(mapping) is dict)
         if mapping.get("model_id") != request.model_id:
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=HOLD_MODEL_BINDING,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_MODEL_BINDING,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         try:
             claude_review = reconstruct_e5_claude_escalation_review_v1(mapping)
         except Exception:
-            return _claude_provider_failure_result(
-                payload=verified_payload,
-                route=route,
-                request=request,
-                cause=HOLD_INVALID_RESPONSE,
-                response_digest=observation.response_digest_sha256,
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_INVALID_RESPONSE,
+                    response_digest=observation.response_digest_sha256,
+                )
             )
         if (
             claude_review.payload_sha256 != verified_payload.payload_sha256
@@ -1450,24 +1653,67 @@ def invoke_e5_claude_review_once_v1(
             or claude_review.provider_binding_sha256
             != verified_payload.provider_binding_sha256
         ):
-            return _claude_provider_failure_result(
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=request,
+                    cause=HOLD_INVALID_RESPONSE,
+                    response_digest=observation.response_digest_sha256,
+                )
+            )
+        return _build_execution(
+            invocation_result=_claude_result(
                 payload=verified_payload,
                 route=route,
                 request=request,
-                cause=HOLD_INVALID_RESPONSE,
+                cause=None,
+                final=PASS_CLAUDE_ESCALATION_REVIEW_ACCEPTED,
+                accepted=claude_review.review_sha256,
                 response_digest=observation.response_digest_sha256,
-            )
-        return _claude_result(
-            payload=verified_payload,
-            route=route,
-            request=request,
-            cause=None,
-            final=PASS_CLAUDE_ESCALATION_REVIEW_ACCEPTED,
-            accepted=claude_review.review_sha256,
-            response_digest=observation.response_digest_sha256,
+            ),
+            accepted_claude_review=claude_review,
         )
     except Exception:
         _fail()
+
+
+def execute_e5_claude_review_once_v1(
+    *,
+    payload: E5TechnicalReviewPayloadV1,
+    deepseek_review: E5DeepSeekStructuredReviewV1,
+    deepseek_adjudication: E5DeepSeekTechnicalReviewAdjudicationV1,
+    route_result: E5ClaudeReviewRouteResultV1,
+    token_preflight: E5ClaudeTokenPreflightResultV1,
+    transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
+) -> E5ProviderAcceptedResponseExecutionV1:
+    return _execute_e5_claude_review_once_core_v1(
+        payload=payload,
+        deepseek_review=deepseek_review,
+        deepseek_adjudication=deepseek_adjudication,
+        route_result=route_result,
+        token_preflight=token_preflight,
+        transport=transport,
+    )
+
+
+def invoke_e5_claude_review_once_v1(
+    *,
+    payload: E5TechnicalReviewPayloadV1,
+    deepseek_review: E5DeepSeekStructuredReviewV1,
+    deepseek_adjudication: E5DeepSeekTechnicalReviewAdjudicationV1,
+    route_result: E5ClaudeReviewRouteResultV1,
+    token_preflight: E5ClaudeTokenPreflightResultV1,
+    transport: Callable[[E5ProviderRequestV1], E5ProviderAttemptObservationV1],
+) -> E5ProviderInvocationResultV1:
+    return execute_e5_claude_review_once_v1(
+        payload=payload,
+        deepseek_review=deepseek_review,
+        deepseek_adjudication=deepseek_adjudication,
+        route_result=route_result,
+        token_preflight=token_preflight,
+        transport=transport,
+    ).invocation_result
 
 
 __all__ = (
@@ -1475,6 +1721,7 @@ __all__ = (
     "E5_PROVIDER_ATTEMPT_OBSERVATION_VERSION",
     "E5_CLAUDE_ESCALATION_REVIEW_VERSION",
     "E5_PROVIDER_INVOCATION_RESULT_VERSION",
+    "E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION",
     "ACTIVE_PROVIDER_BINDING_SHA256",
     "DEEPSEEK",
     "ANTHROPIC",
@@ -1516,10 +1763,13 @@ __all__ = (
     "E5ProviderAttemptObservationV1",
     "E5ClaudeEscalationReviewV1",
     "E5ProviderInvocationResultV1",
+    "E5ProviderAcceptedResponseExecutionV1",
     "build_e5_deepseek_provider_request_v1",
     "build_e5_claude_provider_request_v1",
     "build_e5_provider_attempt_observation_v1",
     "reconstruct_e5_claude_escalation_review_v1",
+    "execute_e5_deepseek_review_once_v1",
+    "execute_e5_claude_review_once_v1",
     "invoke_e5_deepseek_review_once_v1",
     "invoke_e5_claude_review_once_v1",
 )

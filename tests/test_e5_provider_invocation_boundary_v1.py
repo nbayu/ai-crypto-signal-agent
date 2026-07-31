@@ -103,6 +103,13 @@ RESULT_FIELDS = (
     "stale_result_reuse_allowed",
     "result_sha256",
 )
+EXECUTION_FIELDS = (
+    "execution_version",
+    "invocation_result",
+    "accepted_deepseek_review",
+    "accepted_claude_review",
+    "execution_sha256",
+)
 
 
 FAKE_TRANSPORT_CALL_COUNT = 0
@@ -292,6 +299,9 @@ def test_exact_versions_providers_roles_codes_and_default():
     assert subject.E5_PROVIDER_INVOCATION_RESULT_VERSION == (
         "e5-provider-invocation-result-v1"
     )
+    assert subject.E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION == (
+        "e5-provider-accepted-response-execution-v1"
+    )
     assert subject.E5_PROVIDERS == ("DEEPSEEK", "ANTHROPIC")
     assert subject.PROVIDER_COUNT == 2
     assert subject.E5_INVOCATION_ROLES == (
@@ -339,6 +349,7 @@ def test_exact_versions_providers_roles_codes_and_default():
         (subject.E5ProviderAttemptObservationV1, OBSERVATION_FIELDS),
         (subject.E5ClaudeEscalationReviewV1, CLAUDE_REVIEW_FIELDS),
         (subject.E5ProviderInvocationResultV1, RESULT_FIELDS),
+        (subject.E5ProviderAcceptedResponseExecutionV1, EXECUTION_FIELDS),
     ),
 )
 def test_exact_frozen_slotted_contract_fields(contract, expected_fields):
@@ -1189,6 +1200,228 @@ def test_six_real_v2_invocation_chains(
     assert result.publication_allowed is False
 
 
+def test_deepseek_execution_envelope_exposes_only_validated_review(tmp_path):
+    payload = _payload(tmp_path, name="execution-deep-success")
+    review, _ = _review_and_adjudication(payload)
+    transport, calls = _fake_transport(response_mapping=review.to_mapping())
+    execution = subject.execute_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+        transport=transport,
+    )
+    assert len(calls) == 1
+    assert execution.accepted_deepseek_review == review
+    assert execution.accepted_claude_review is None
+    assert execution.invocation_result.accepted_response_sha256 == (
+        review.review_sha256
+    )
+    assert tuple(execution.to_mapping()) == EXECUTION_FIELDS
+    assert _canonical_hash(json.loads(execution.canonical_execution_json())) == (
+        execution.execution_sha256
+    )
+    with pytest.raises(FrozenInstanceError):
+        execution.accepted_deepseek_review = None
+
+
+@pytest.mark.parametrize(
+    ("outcome", "raises"),
+    (
+        ("TIMEOUT", False),
+        ("MALFORMED_OR_SCHEMA_INVALID_RESPONSE", False),
+        ("SUCCESS", True),
+    ),
+)
+def test_deepseek_execution_failures_expose_no_review_once(
+    tmp_path,
+    outcome,
+    raises,
+):
+    payload = _payload(tmp_path, name=f"execution-deep-fail-{outcome}-{raises}")
+    transport, calls = _fake_transport(outcome=outcome, raises=raises)
+    execution = subject.execute_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+        transport=transport,
+    )
+    assert len(calls) == 1
+    assert execution.accepted_deepseek_review is None
+    assert execution.accepted_claude_review is None
+    assert execution.invocation_result.retry_count == 0
+
+
+@pytest.mark.parametrize("decision", ("CAUTION", "HOLD"))
+def test_claude_execution_envelope_exposes_exact_opus_or_fable_review(
+    tmp_path,
+    decision,
+):
+    chain = _route_chain(tmp_path, decision, name=f"execution-{decision}")
+    expected = _claude_review(chain[0], chain[3])
+    transport, calls = _fake_transport(response_mapping=expected.to_mapping())
+    execution = subject.execute_e5_claude_review_once_v1(
+        payload=chain[0],
+        deepseek_review=chain[1],
+        deepseek_adjudication=chain[2],
+        route_result=chain[3],
+        token_preflight=chain[4],
+        transport=transport,
+    )
+    assert len(calls) == 1
+    assert execution.accepted_deepseek_review is None
+    assert execution.accepted_claude_review == expected
+    assert execution.invocation_result.accepted_response_sha256 == (
+        expected.review_sha256
+    )
+
+
+def test_l0_and_blocked_execution_envelopes_expose_no_review_or_call(tmp_path):
+    clear = _route_chain(tmp_path, "CLEAR", name="execution-l0")
+    transport, calls = _fake_transport(raises=True)
+    l0 = subject.execute_e5_claude_review_once_v1(
+        payload=clear[0],
+        deepseek_review=clear[1],
+        deepseek_adjudication=clear[2],
+        route_result=clear[3],
+        token_preflight=clear[4],
+        transport=transport,
+    )
+    assert calls == []
+    assert l0.invocation_result.final_result_code == "PASS_L0_NO_CLAUDE_REQUIRED"
+    assert l0.accepted_deepseek_review is None
+    assert l0.accepted_claude_review is None
+
+    payload = _payload(tmp_path, name="execution-duplicate")
+    review, adjudication = _review_and_adjudication(payload, "CAUTION")
+    route = router.route_e5_claude_review_v1(
+        payload=payload,
+        deepseek_review=review,
+        deepseek_adjudication=adjudication,
+        daily_usage=_usage(l1=(payload.payload_sha256,)),
+    )
+    preflight = router.preflight_e5_claude_review_v1(
+        route_result=route,
+        measured_input_tokens=0,
+        requested_output_tokens=0,
+    )
+    blocked = subject.execute_e5_claude_review_once_v1(
+        payload=payload,
+        deepseek_review=review,
+        deepseek_adjudication=adjudication,
+        route_result=route,
+        token_preflight=preflight,
+        transport=transport,
+    )
+    assert calls == []
+    assert blocked.invocation_result.final_result_code == (
+        "HOLD_ESCALATION_INCOMPLETE"
+    )
+    assert blocked.accepted_deepseek_review is None
+    assert blocked.accepted_claude_review is None
+
+
+@pytest.mark.parametrize("decision", ("CAUTION", "HOLD"))
+def test_claude_execution_failure_exposes_no_review_and_zero_retry(
+    tmp_path,
+    decision,
+):
+    chain = _route_chain(tmp_path, decision, name=f"execution-fail-{decision}")
+    transport, calls = _fake_transport(outcome="TIMEOUT")
+    execution = subject.execute_e5_claude_review_once_v1(
+        payload=chain[0],
+        deepseek_review=chain[1],
+        deepseek_adjudication=chain[2],
+        route_result=chain[3],
+        token_preflight=chain[4],
+        transport=transport,
+    )
+    assert len(calls) == 1
+    assert execution.accepted_deepseek_review is None
+    assert execution.accepted_claude_review is None
+    assert execution.invocation_result.retry_count == 0
+
+
+def test_execution_envelope_rejects_cross_lineage_and_mutual_reviews(tmp_path):
+    first = _payload(tmp_path, name="execution-lineage-first")
+    second = _payload(tmp_path, mode="SWING", side="SHORT", name="execution-lineage-second")
+    first_review, _ = _review_and_adjudication(first)
+    second_review, _ = _review_and_adjudication(second)
+    transport, _ = _fake_transport(response_mapping=first_review.to_mapping())
+    execution = subject.execute_e5_deepseek_review_once_v1(
+        payload=first,
+        token_preflight=_deepseek_preflight(first),
+        transport=transport,
+    )
+    _assert_invalid(
+        lambda: replace(execution, accepted_deepseek_review=second_review)
+    )
+    chain = _route_chain(tmp_path, name="execution-mutual")
+    claude = _claude_review(chain[0], chain[3])
+    _assert_invalid(lambda: replace(execution, accepted_claude_review=claude))
+    _assert_invalid(lambda: replace(execution, execution_sha256="0" * 64))
+
+
+def test_execute_and_invoke_deepseek_paths_are_result_compatible(tmp_path):
+    payload = _payload(tmp_path, name="execution-wrapper-deep")
+    review, _ = _review_and_adjudication(payload)
+    first_transport, first_calls = _fake_transport(
+        response_mapping=review.to_mapping()
+    )
+    second_transport, second_calls = _fake_transport(
+        response_mapping=review.to_mapping()
+    )
+    execution = subject.execute_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+        transport=first_transport,
+    )
+    result = subject.invoke_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+        transport=second_transport,
+    )
+    assert len(first_calls) == len(second_calls) == 1
+    assert result == execution.invocation_result
+
+
+def test_execute_and_invoke_claude_paths_are_result_compatible(tmp_path):
+    chain = _route_chain(tmp_path, name="execution-wrapper-claude")
+    response = _claude_review_mapping(chain[0], chain[3])
+    first_transport, first_calls = _fake_transport(response_mapping=response)
+    second_transport, second_calls = _fake_transport(response_mapping=response)
+    execution = subject.execute_e5_claude_review_once_v1(
+        payload=chain[0],
+        deepseek_review=chain[1],
+        deepseek_adjudication=chain[2],
+        route_result=chain[3],
+        token_preflight=chain[4],
+        transport=first_transport,
+    )
+    result = subject.invoke_e5_claude_review_once_v1(
+        payload=chain[0],
+        deepseek_review=chain[1],
+        deepseek_adjudication=chain[2],
+        route_result=chain[3],
+        token_preflight=chain[4],
+        transport=second_transport,
+    )
+    assert len(first_calls) == len(second_calls) == 1
+    assert result == execution.invocation_result
+
+
+def test_execution_envelope_exposes_no_raw_transport_or_secret_fields():
+    assert {
+        "transport_observation",
+        "response_mapping",
+        "exception",
+        "exception_text",
+        "credential",
+        "api_key",
+        "authorization",
+        "provider_endpoint",
+        "cache",
+        "registry",
+    }.isdisjoint(EXECUTION_FIELDS)
+
+
 def test_result_tampering_and_bool_as_int_fail_closed(tmp_path):
     payload = _payload(tmp_path)
     review, _ = _review_and_adjudication(payload)
@@ -1270,6 +1503,7 @@ def test_no_publication_or_production_authority_in_public_contracts():
         OBSERVATION_FIELDS,
         CLAUDE_REVIEW_FIELDS,
         RESULT_FIELDS,
+        EXECUTION_FIELDS,
     )
     assert {
         "api_key",
@@ -1287,6 +1521,8 @@ def test_no_publication_or_production_authority_in_public_contracts():
         for function in (
             subject.build_e5_deepseek_provider_request_v1,
             subject.build_e5_claude_provider_request_v1,
+            subject.execute_e5_deepseek_review_once_v1,
+            subject.execute_e5_claude_review_once_v1,
             subject.invoke_e5_deepseek_review_once_v1,
             subject.invoke_e5_claude_review_once_v1,
         )
@@ -1295,4 +1531,4 @@ def test_no_publication_or_production_authority_in_public_contracts():
 
 
 def test_injected_fake_transport_call_count_is_exact():
-    assert FAKE_TRANSPORT_CALL_COUNT == 44
+    assert FAKE_TRANSPORT_CALL_COUNT == 57
