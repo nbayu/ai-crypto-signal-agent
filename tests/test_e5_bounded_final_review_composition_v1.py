@@ -965,3 +965,172 @@ def test_no_provider_publication_cache_secret_or_production_reachability():
 def test_injected_fake_transport_counts_are_exact():
     assert INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT == 69
     assert INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT == 23
+
+
+PREPARED_STAGE_FIELDS = (
+    "prepared_stage_version",
+    "provider_binding_sha256",
+    "payload",
+    "payload_sha256",
+    "deepseek_token_preflight",
+    "deepseek_invocation_result",
+    "accepted_deepseek_review",
+    "deepseek_adjudication",
+    "claude_route_result",
+    "usage_before",
+    "usage_after",
+    "pre_claude_outcome_code",
+    "deepseek_provider_attempt_count",
+    "retry_count",
+    "prepared_stage_sha256",
+)
+
+
+def _prepare_and_resume(tmp_path, decision, *, name):
+    payload = _payload(tmp_path, name=name)
+    deep_transport, claude_transport, deep_calls, claude_calls = _transports(
+        payload,
+        decision,
+    )
+    stage = subject.prepare_e5_bounded_final_review_v1(
+        payload=payload,
+        deterministic_hard_gates_passed=True,
+        pre_review_score=80,
+        mode_score_floor=70,
+        daily_usage=_usage(),
+        deepseek_measured_input_tokens=100,
+        deepseek_requested_output_tokens=100,
+        deepseek_transport=deep_transport,
+    )
+    allowed = decision in ("CAUTION", "HOLD")
+    result = subject.resume_e5_bounded_final_review_v1(
+        prepared_stage=stage,
+        confirmed_usage_after_sha256=(
+            stage.usage_after.usage_sha256 if allowed else None
+        ),
+        claude_measured_input_tokens=100 if allowed else None,
+        claude_requested_output_tokens=100 if allowed else None,
+        claude_transport=claude_transport,
+    )
+    return payload, stage, result, deep_calls, claude_calls
+
+
+def test_prepared_stage_exact_contract_mapping_hash_and_reconstruction(tmp_path):
+    _, stage, _, deep_calls, claude_calls = _prepare_and_resume(
+        tmp_path,
+        "CAUTION",
+        name="prepared-contract",
+    )
+    assert subject.E5_BOUNDED_FINAL_REVIEW_PREPARED_STAGE_VERSION == (
+        "e5-bounded-final-review-prepared-stage-v1"
+    )
+    assert subject.PREPARED_STAGE_FIELD_COUNT == 15
+    assert subject.PRE_CLAUDE_OUTCOME_CODE_COUNT == 7
+    assert subject.E5_PRE_CLAUDE_OUTCOME_CODES == (
+        "PRE_CLAUDE_BLOCK_DEEPSEEK_TOKEN_PREFLIGHT",
+        "PRE_CLAUDE_BLOCK_DEEPSEEK_INVOCATION",
+        "PRE_CLAUDE_BLOCK_D6_DETERMINISTIC_POLICY",
+        "PRE_CLAUDE_BLOCK_D7_CLAUDE_ROUTING",
+        "PRE_CLAUDE_L0_NO_CLAUDE",
+        "PRE_CLAUDE_L1_DURABLE_RESERVATION_REQUIRED",
+        "PRE_CLAUDE_L2_DURABLE_RESERVATION_REQUIRED",
+    )
+    assert tuple(
+        field.name
+        for field in fields(subject.E5BoundedFinalReviewPreparedStageV1)
+    ) == PREPARED_STAGE_FIELDS
+    assert subject.E5BoundedFinalReviewPreparedStageV1.__dataclass_params__.frozen
+    assert "__dict__" not in subject.E5BoundedFinalReviewPreparedStageV1.__slots__
+    assert tuple(stage.to_mapping()) == PREPARED_STAGE_FIELDS
+    assert _canonical_hash(json.loads(stage.canonical_prepared_stage_json())) == (
+        stage.prepared_stage_sha256
+    )
+    assert (
+        subject.reconstruct_e5_bounded_final_review_prepared_stage_v1(
+            stage.to_mapping()
+        )
+        == stage
+    )
+    assert len(deep_calls) == len(claude_calls) == 1
+    with pytest.raises(FrozenInstanceError):
+        stage.retry_count = 1
+
+
+@pytest.mark.parametrize(
+    ("decision", "pre_code", "claude_count"),
+    (
+        ("CLEAR", "PRE_CLAUDE_L0_NO_CLAUDE", 0),
+        ("CAUTION", "PRE_CLAUDE_L1_DURABLE_RESERVATION_REQUIRED", 1),
+        ("HOLD", "PRE_CLAUDE_L2_DURABLE_RESERVATION_REQUIRED", 1),
+    ),
+)
+def test_prepare_resume_single_attempt_and_compose_hash_parity(
+    tmp_path,
+    decision,
+    pre_code,
+    claude_count,
+):
+    payload, stage, staged, deep_calls, claude_calls = _prepare_and_resume(
+        tmp_path,
+        decision,
+        name=f"staged-{decision}",
+    )
+    assert stage.pre_claude_outcome_code == pre_code
+    assert len(deep_calls) == 1
+    assert len(claude_calls) == claude_count
+    deep_transport, claude_transport, wrapper_deep, wrapper_claude = _transports(
+        payload,
+        decision,
+    )
+    wrapped = subject.compose_e5_bounded_final_review_v1(
+        payload=payload,
+        deterministic_hard_gates_passed=True,
+        pre_review_score=80,
+        mode_score_floor=70,
+        daily_usage=_usage(),
+        deepseek_measured_input_tokens=100,
+        deepseek_requested_output_tokens=100,
+        deepseek_transport=deep_transport,
+        claude_measured_input_tokens=100 if claude_count else None,
+        claude_requested_output_tokens=100 if claude_count else None,
+        claude_transport=claude_transport,
+    )
+    assert staged.to_mapping() == wrapped.to_mapping()
+    assert staged.composition_sha256 == wrapped.composition_sha256
+    assert len(wrapper_deep) == 1
+    assert len(wrapper_claude) == claude_count
+
+
+def test_resume_confirmation_and_prepared_hash_fail_closed(tmp_path):
+    payload = _payload(tmp_path, name="resume-confirmation")
+    deep_transport, claude_transport, _, claude_calls = _transports(
+        payload,
+        "CAUTION",
+    )
+    stage = subject.prepare_e5_bounded_final_review_v1(
+        payload=payload,
+        deterministic_hard_gates_passed=True,
+        pre_review_score=80,
+        mode_score_floor=70,
+        daily_usage=_usage(),
+        deepseek_measured_input_tokens=100,
+        deepseek_requested_output_tokens=100,
+        deepseek_transport=deep_transport,
+    )
+    _assert_invalid(
+        lambda: subject.resume_e5_bounded_final_review_v1(
+            prepared_stage=stage,
+            confirmed_usage_after_sha256="0" * 64,
+            claude_measured_input_tokens=100,
+            claude_requested_output_tokens=100,
+            claude_transport=claude_transport,
+        )
+    )
+    mapping = stage.to_mapping()
+    mapping["prepared_stage_sha256"] = "0" * 64
+    _assert_invalid(
+        lambda: subject.reconstruct_e5_bounded_final_review_prepared_stage_v1(
+            mapping
+        )
+    )
+    assert claude_calls == []
