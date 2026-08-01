@@ -22,9 +22,9 @@ from engine.e5_deepseek_technical_review_v1 import (
     E5DeepSeekTechnicalReviewAdjudicationV1,
 )
 from engine.e5_technical_review_payload_v1 import (
-    E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION,
     E5TechnicalReviewPayloadV1,
-    get_owner_frozen_e5_provider_model_price_binding_v2,
+    get_owner_frozen_e5_provider_model_price_binding_v3,
 )
 
 
@@ -33,7 +33,7 @@ E5_CLAUDE_DAILY_USAGE_VERSION: Final = "e5-claude-daily-usage-v1"
 E5_CLAUDE_TOKEN_PREFLIGHT_VERSION: Final = "e5-claude-token-preflight-v1"
 
 ACTIVE_PROVIDER_BINDING_SHA256: Final = (
-    "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
 )
 
 L0: Final = "L0"
@@ -138,9 +138,9 @@ def _valid_sha256(value: object) -> bool:
 
 
 def _active_binding():
-    binding = get_owner_frozen_e5_provider_model_price_binding_v2()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
     _require(
-        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION
+        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION
     )
     _require(binding.binding_sha256 == ACTIVE_PROVIDER_BINDING_SHA256)
     _require(binding.claude_l1_model_id == CLAUDE_L1_MODEL_ID)

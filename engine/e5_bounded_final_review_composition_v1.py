@@ -56,13 +56,13 @@ from engine.e5_provider_invocation_boundary_v1 import (
     execute_e5_deepseek_review_once_v1,
 )
 from engine.e5_technical_review_payload_v1 import (
-    E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION,
     HOLD_INPUT_TOKEN_LIMIT,
     HOLD_OUTPUT_TOKEN_LIMIT,
     PASS_TOKEN_BUDGET,
     E5TechnicalReviewPayloadV1,
     E5TechnicalReviewTokenPreflightResultV1,
-    get_owner_frozen_e5_provider_model_price_binding_v2,
+    get_owner_frozen_e5_provider_model_price_binding_v3,
     preflight_e5_technical_review_payload_v1,
     reconstruct_e5_technical_review_payload_v1,
 )
@@ -195,9 +195,9 @@ def _valid_sha256(value: object) -> bool:
 
 
 def _active_binding():
-    binding = get_owner_frozen_e5_provider_model_price_binding_v2()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
     _require(
-        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION
+        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION
     )
     _require(binding.binding_sha256 == ACTIVE_PROVIDER_BINDING_SHA256)
     return binding

@@ -33,14 +33,14 @@ from engine.e5_deepseek_technical_review_v1 import (
     reconstruct_e5_deepseek_structured_review_v1,
 )
 from engine.e5_technical_review_payload_v1 import (
-    E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION,
     E5_TECHNICAL_REVIEW_EVIDENCE_FIELDS,
     HOLD_INPUT_TOKEN_LIMIT,
     HOLD_OUTPUT_TOKEN_LIMIT,
     PASS_TOKEN_BUDGET,
     E5TechnicalReviewPayloadV1,
     E5TechnicalReviewTokenPreflightResultV1,
-    get_owner_frozen_e5_provider_model_price_binding_v2,
+    get_owner_frozen_e5_provider_model_price_binding_v3,
 )
 
 
@@ -59,7 +59,7 @@ E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION: Final = (
 )
 
 ACTIVE_PROVIDER_BINDING_SHA256: Final = (
-    "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
 )
 
 DEEPSEEK: Final = "DEEPSEEK"
@@ -206,9 +206,9 @@ def _valid_sha256(value: object) -> bool:
 
 
 def _active_binding():
-    binding = get_owner_frozen_e5_provider_model_price_binding_v2()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
     _require(
-        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION
+        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION
     )
     _require(binding.binding_sha256 == ACTIVE_PROVIDER_BINDING_SHA256)
     _require(binding.deepseek_model_id == "deepseek-v4-pro")
@@ -216,6 +216,7 @@ def _active_binding():
     _require(binding.deepseek_output_hard_limit_tokens == 500)
     _require(binding.deepseek_provider_attempts == 1)
     _require(binding.deepseek_retry_count == 0)
+    _require(binding.deepseek_timeout_seconds == 60)
     _require(binding.claude_l1_model_id == "claude-opus-5")
     _require(binding.claude_l1_input_hard_limit_tokens == 4000)
     _require(binding.claude_l1_output_hard_limit_tokens == 500)
@@ -319,7 +320,7 @@ def _role_profile(invocation_role: str) -> tuple[object, ...]:
             binding.deepseek_model_id,
             binding.deepseek_input_hard_limit_tokens,
             binding.deepseek_output_hard_limit_tokens,
-            None,
+            binding.deepseek_timeout_seconds,
             binding.deepseek_provider_attempts,
             binding.deepseek_retry_count,
             0,

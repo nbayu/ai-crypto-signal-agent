@@ -24,6 +24,12 @@ from test_e5_technical_review_payload_v1 import (
 
 
 TIMESTAMP = "2026-07-30T12:00:00Z"
+ACTIVE_BINDING_V3_SHA256 = (
+    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
+)
+HISTORICAL_BINDING_V2_SHA256 = (
+    "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+)
 RESULT_FIELDS = (
     "final_gate_version",
     "provider_binding_sha256",
@@ -194,9 +200,12 @@ def test_clear_l0_is_python_final_pass_only(tmp_path):
     assert result.deepseek_review_decision == "CLEAR"
     assert result.claude_route == "L0"
     assert len(deep_calls) == 1 and claude_calls == []
-    assert result.provider_binding_sha256 == (
-        "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+    assert payload.provider_binding_sha256 == ACTIVE_BINDING_V3_SHA256
+    assert durable.provider_binding_sha256 == ACTIVE_BINDING_V3_SHA256
+    assert durable.final_composition.provider_binding_sha256 == (
+        ACTIVE_BINDING_V3_SHA256
     )
+    assert result.provider_binding_sha256 == ACTIVE_BINDING_V3_SHA256
 
 
 def test_caution_l1_requires_committed_reservation_and_passes(tmp_path):
@@ -319,6 +328,28 @@ def test_cross_payload_lineage_fails_closed(tmp_path):
     )
     result = _gate(chain, inputs, other_payload, other_durable)
     assert result.final_gate_decision_code == subject.BLOCK_CROSS_LINEAGE
+
+
+@pytest.mark.parametrize("target", ("durable", "final_composition"))
+def test_mixed_v2_v3_provider_binding_lineage_fails_closed(tmp_path, target):
+    chain, inputs, payload, durable, _, _ = _evidence(
+        tmp_path,
+        name=f"mixed-binding-{target}",
+    )
+    assert payload.provider_binding_sha256 == ACTIVE_BINDING_V3_SHA256
+    if target == "durable":
+        object.__setattr__(
+            durable,
+            "provider_binding_sha256",
+            HISTORICAL_BINDING_V2_SHA256,
+        )
+    else:
+        object.__setattr__(
+            durable.final_composition,
+            "provider_binding_sha256",
+            HISTORICAL_BINDING_V2_SHA256,
+        )
+    _assert_invalid(lambda: _gate(chain, inputs, payload, durable))
 
 
 def test_nonactionable_e3_has_dedicated_block(tmp_path):

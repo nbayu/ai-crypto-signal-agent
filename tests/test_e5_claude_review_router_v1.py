@@ -15,6 +15,7 @@ from engine.e5_technical_review_payload_v1 import (
     E5_TECHNICAL_REVIEW_EVIDENCE_FIELDS,
     get_owner_frozen_e5_provider_model_price_binding_v1,
     get_owner_frozen_e5_provider_model_price_binding_v2,
+    get_owner_frozen_e5_provider_model_price_binding_v3,
 )
 from test_e5_technical_review_payload_v1 import (
     _bundle as _payload_bundle,
@@ -24,7 +25,7 @@ from test_e5_technical_review_payload_v1 import (
 
 UTC_DAY = "2026-07-30"
 ACTIVE_BINDING_SHA256 = (
-    "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
 )
 MODE_SIDE_DECISION = (
     ("SWING", "LONG", "CLEAR", "L0"),
@@ -226,9 +227,10 @@ def test_exact_versions_routes_decision_codes_and_cost_authority():
     assert 6 * 32500 + 3 * 100000 == 495000
 
 
-def test_active_binding_is_exact_v2_opus_and_fable_authority():
-    binding = get_owner_frozen_e5_provider_model_price_binding_v2()
-    assert binding.binding_version == "e5-provider-model-price-binding-v2"
+def test_active_binding_is_exact_v3_with_unchanged_v2_claude_policy():
+    v2 = get_owner_frozen_e5_provider_model_price_binding_v2()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+    assert binding.binding_version == "e5-provider-model-price-binding-v3"
     assert binding.binding_sha256 == ACTIVE_BINDING_SHA256
     assert (
         binding.claude_l1_model_id,
@@ -248,6 +250,32 @@ def test_active_binding_is_exact_v2_opus_and_fable_authority():
         binding.claude_l2_retry_count,
         binding.claude_l2_max_cost_micro_usd,
     ) == ("claude-fable-5", 6000, 800, 20, 1, 0, 100000)
+    claude_policy_fields = (
+        "claude_l1_model_id",
+        "claude_l1_input_hard_limit_tokens",
+        "claude_l1_output_hard_limit_tokens",
+        "claude_l1_timeout_seconds",
+        "claude_l1_provider_attempts",
+        "claude_l1_retry_count",
+        "claude_l1_base_input_usd_per_mtok",
+        "claude_l1_output_usd_per_mtok",
+        "claude_l1_max_cost_micro_usd",
+        "claude_l2_model_id",
+        "claude_l2_input_hard_limit_tokens",
+        "claude_l2_output_hard_limit_tokens",
+        "claude_l2_timeout_seconds",
+        "claude_l2_provider_attempts",
+        "claude_l2_retry_count",
+        "claude_l2_base_input_usd_per_mtok",
+        "claude_l2_output_usd_per_mtok",
+        "claude_l2_max_cost_micro_usd",
+        "shared_l1_l2_daily_logical_review_ceiling",
+        "l2_daily_logical_review_ceiling",
+        "maximum_daily_cost_micro_usd",
+    )
+    assert tuple(getattr(binding, field) for field in claude_policy_fields) == tuple(
+        getattr(v2, field) for field in claude_policy_fields
+    )
     assert binding.latest_alias_allowed is False
     assert binding.cross_provider_substitution_allowed is False
     assert "claude-sonnet-5" != subject.CLAUDE_L1_MODEL_ID

@@ -371,6 +371,7 @@ def test_deepseek_request_exact_authority_determinism_and_redaction(tmp_path):
         token_preflight=preflight,
     )
     assert first == second
+    assert first.request_version == subject.E5_PROVIDER_REQUEST_VERSION
     assert first.provider_binding_sha256 == ACTIVE_BINDING_SHA256
     assert (
         first.provider,
@@ -390,7 +391,7 @@ def test_deepseek_request_exact_authority_determinism_and_redaction(tmp_path):
         "deepseek-v4-pro",
         4000,
         500,
-        None,
+        60,
         1,
         0,
         0,
@@ -402,9 +403,17 @@ def test_deepseek_request_exact_authority_determinism_and_redaction(tmp_path):
         for field in ("api_key", "authorization", "credential", "secret")
     )
     assert tuple(first.to_mapping()) == REQUEST_FIELDS
+    assert first.to_mapping()["timeout_seconds"] == 60
+    request_preimage = first.to_mapping()
+    request_preimage.pop("request_sha256")
+    assert request_preimage["timeout_seconds"] == 60
     assert _canonical_hash(json.loads(first.canonical_request_json())) == (
         first.request_sha256
     )
+    assert _canonical_hash(request_preimage) == first.request_sha256
+    altered_timeout_preimage = dict(request_preimage)
+    altered_timeout_preimage["timeout_seconds"] = 61
+    assert _canonical_hash(altered_timeout_preimage) != first.request_sha256
     with pytest.raises(FrozenInstanceError):
         first.model_id = "other"
 
@@ -520,6 +529,11 @@ def test_l0_and_blocked_routes_cannot_build_claude_request(tmp_path):
     ("changes"),
     (
         {"model_id": "deepseek-v4-pro-latest"},
+        {"timeout_seconds": None},
+        {"timeout_seconds": True},
+        {"timeout_seconds": 0},
+        {"timeout_seconds": -1},
+        {"timeout_seconds": 61},
         {"provider_attempts": True},
         {"retry_count": 1},
         {"canonical_input_json": '{"api_key":"forbidden"}'},
