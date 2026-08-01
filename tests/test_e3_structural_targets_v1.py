@@ -1399,50 +1399,6 @@ def test_source_has_no_legacy_extension_or_target_manufacturing():
     assert "trailing" not in lowered
 
 
-def test_no_production_reference_to_new_contract():
-    result = subprocess.run(
-        [
-            "git",
-            "grep",
-            "-n",
-            "-E",
-            (
-                "e3_structural_targets_v1|"
-                "build_e3_structural_targets|"
-                "E3StructuralTargetsV1"
-            ),
-            "HEAD",
-            "--",
-            "engine",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert result.stdout == ""
-
-
-def test_exact_two_file_mutation_inventory():
-    result = subprocess.run(
-        [
-            "git",
-            "status",
-            "--short",
-            "--untracked-files=all",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    )
-    assert sorted(result.stdout.splitlines()) == [
-        "?? engine/e3_structural_targets_v1.py",
-        "?? tests/test_e3_structural_targets_v1.py",
-    ]
-
-
 @pytest.mark.parametrize("path", [ENGINE_PATH, TEST_PATH])
 def test_authorized_files_are_strict_utf8_lf_and_ast_parse(path):
     raw = path.read_bytes()

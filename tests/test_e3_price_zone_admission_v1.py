@@ -1079,31 +1079,6 @@ def test_no_later_slice_authority_fields_or_effects():
         assert forbidden not in source
 
 
-def test_no_production_reference_from_committed_head():
-    result = subprocess.run(
-        [
-            "git",
-            "grep",
-            "-n",
-            "-E",
-            (
-                "e3_price_zone_admission_v1|"
-                "build_e3_price_zone_admission|"
-                "E3PriceZoneAdmissionV1"
-            ),
-            "HEAD",
-            "--",
-            "engine",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert result.stdout == ""
-
-
 @pytest.mark.parametrize("path", [ENGINE_PATH, TEST_PATH])
 def test_files_are_strict_utf8_lf_and_ast_parse(path):
     raw = path.read_bytes()

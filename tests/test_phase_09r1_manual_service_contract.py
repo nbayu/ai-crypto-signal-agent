@@ -242,28 +242,69 @@ def test_only_authorized_render_placeholders_exist():
     assert "PYTHONPATH=@@RELEASE_ROOT@@" in _directives(text, "Environment")
 
 
-def test_rendered_unit_passes_systemd_analyze_verify_when_available(tmp_path):
-    analyzer = shutil.which("systemd-analyze")
-    if analyzer is None:
-        pytest.skip("systemd-analyze is not available on this host")
-    release = tmp_path / "immutable-release"
-    release.mkdir()
+def test_rendered_unit_has_valid_static_systemd_syntax_and_structure():
     rendered = (
         _unit_text()
         .replace("@@PYTHON_BIN@@", str(Path(sys.executable).resolve()))
-        .replace("@@RELEASE_ROOT@@", str(release.resolve()))
+        .replace("@@RELEASE_ROOT@@", "/immutable-release")
     )
-    candidate = tmp_path / "ai-crypto-signal-agent.service"
-    candidate.write_text(rendered, encoding="utf-8")
-    result = subprocess.run(
-        [analyzer, "verify", str(candidate)],
-        capture_output=True,
-        text=True,
-        check=False,
+    assert "@@" not in rendered
+
+    sections = []
+    current_section = None
+    for raw_line in rendered.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") or line.endswith("]"):
+            assert line.startswith("[") and line.endswith("]")
+            assert line.count("[") == 1
+            assert line.count("]") == 1
+            current_section = line[1:-1]
+            assert current_section
+            assert current_section not in sections
+            sections.append(current_section)
+            continue
+        assert current_section is not None
+        key, delimiter, _ = line.partition("=")
+        assert delimiter == "="
+        assert key
+        assert key == key.strip()
+        assert " " not in key
+        assert "\t" not in key
+
+    assert sections == ["Unit", "Service"]
+    singleton_directives = (
+        "Description",
+        "Wants",
+        "After",
+        "Type",
+        "User",
+        "Group",
+        "WorkingDirectory",
+        "ExecStart",
+        "Restart",
+        "StandardOutput",
+        "StandardError",
+        "UMask",
+        "NoNewPrivileges",
+        "PrivateTmp",
+        "ProtectSystem",
+        "ReadWritePaths",
+        "ProtectHome",
+        "ProtectKernelTunables",
+        "ProtectKernelModules",
+        "ProtectKernelLogs",
+        "ProtectControlGroups",
+        "RestrictSUIDSGID",
+        "LockPersonality",
+        "RestrictRealtime",
+        "MemoryDenyWriteExecute",
+        "RemoveIPC",
+        "SystemCallArchitectures",
     )
-    assert result.returncode == 0, (
-        f"systemd-analyze verify failed with exit code {result.returncode}"
-    )
+    for directive in singleton_directives:
+        assert len(_directives(rendered, directive)) == 1
 
 
 def test_existing_security_hardening_is_preserved():

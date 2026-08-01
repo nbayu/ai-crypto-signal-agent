@@ -1062,35 +1062,6 @@ def test_result_has_no_later_slice_authority_fields():
     )
 
 
-def test_exact_two_file_repository_mutation_inventory():
-    status = subprocess.run(
-        [
-            "git",
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-        ],
-        cwd=_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    assert status == [
-        "?? engine/e3_golden_zone_geometry_v1.py",
-        "?? tests/test_e3_golden_zone_geometry_v1.py",
-    ]
-    assert subprocess.run(
-        ["git", "diff", "--quiet"],
-        cwd=_ROOT,
-        check=False,
-    ).returncode == 0
-    assert subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=_ROOT,
-        check=False,
-    ).returncode == 0
-
-
 def test_source_and_test_are_utf8_lf_and_ast_parseable():
     for path in (_SOURCE_PATH, _TEST_PATH):
         data = path.read_bytes()

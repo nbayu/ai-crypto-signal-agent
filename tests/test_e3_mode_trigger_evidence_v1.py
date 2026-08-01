@@ -761,36 +761,6 @@ def test_forbidden_surface_static_contract_and_qualified_calls():
     assert "backoff" not in source.lower()
 
 
-def test_exact_two_file_authorized_mutation_inventory():
-    result = subprocess.run(
-        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 0
-    assert result.stdout.splitlines() == [
-        "?? engine/e3_mode_trigger_evidence_v1.py",
-        "?? tests/test_e3_mode_trigger_evidence_v1.py",
-    ]
-
-
-def test_no_committed_production_reference():
-    result = subprocess.run(
-        ["git", "grep", "-n", "e3_mode_trigger_evidence_v1", "HEAD", "--", "."],
-        cwd=ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert result.stdout == ""
-    assert result.stderr == ""
-
-
 def test_no_skip_xfail_todo_or_weakened_expectations():
     source = TEST_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)

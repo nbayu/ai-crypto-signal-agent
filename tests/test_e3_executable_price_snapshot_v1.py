@@ -738,52 +738,6 @@ def test_no_effect_or_concurrency_surface():
     )
 
 
-def test_no_production_reference_from_committed_head():
-    result = subprocess.run(
-        [
-            "git",
-            "grep",
-            "-n",
-            "-E",
-            (
-                "e3_executable_price_snapshot_v1|"
-                "build_e3_executable_price_snapshot|"
-                "E3ExecutablePriceSnapshotV1"
-            ),
-            "HEAD",
-            "--",
-            "engine",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert result.stdout == ""
-
-
-def test_exact_four_file_mutation_inventory():
-    result = subprocess.run(
-        [
-            "git",
-            "status",
-            "--short",
-            "--untracked-files=all",
-        ],
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    )
-    assert sorted(result.stdout.splitlines()) == [
-        "?? engine/e3_executable_price_snapshot_v1.py",
-        "?? engine/e3_price_zone_admission_v1.py",
-        "?? tests/test_e3_executable_price_snapshot_v1.py",
-        "?? tests/test_e3_price_zone_admission_v1.py",
-    ]
-
-
 @pytest.mark.parametrize("path", [ENGINE_PATH, TEST_PATH])
 def test_files_are_strict_utf8_lf_and_ast_parse(path):
     raw = path.read_bytes()

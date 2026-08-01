@@ -305,6 +305,15 @@ esac
 
     health = tmp_path / "ai-crypto-signal-agent-health"
     health_text = _text(BIN / "ai-crypto-signal-agent-health")
+    assert health_text.count("root:root:600") == 1
+    fixture_owner = runtime.owner()
+    fixture_group = runtime.group()
+    fixture_env_metadata_identity = f"{fixture_owner}:{fixture_group}:600"
+    health_text = health_text.replace(
+        "root:root:600",
+        fixture_env_metadata_identity,
+        1,
+    )
     health_text = health_text.replace(
         'readonly SERVICE_USER="ai-crypto-signal-agent"',
         f'readonly SERVICE_USER="{runtime.owner()}"',
@@ -484,12 +493,65 @@ def _make_inert_wrapper_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]
     return wrapper, credentials, lock_path, invocation_record
 
 
+def _make_host_independent_install_scripts(
+    tmp_path: Path,
+) -> tuple[Path, Path]:
+    installer_path = BIN / "ai-crypto-signal-agent-install"
+    rollback_path = BIN / "ai-crypto-signal-agent-rollback"
+    assert hashlib.sha256(installer_path.read_bytes()).hexdigest() == (
+        "672b8c761564f593b88c10d62fea27f91abdc929ef17eef0a458b2431725a1ac"
+    )
+    assert hashlib.sha256(rollback_path.read_bytes()).hexdigest() == (
+        "ee7aca204a601c88960808e0d795eab05abcfd338de82daa9dd443ce4dd3f40a"
+    )
+
+    installer_text = _text(installer_path)
+    rollback_text = _text(rollback_path)
+    assert installer_text.count("-o root -g root") == 3
+    assert installer_text.count("chown root:root") == 2
+    assert installer_text.count(
+        "-o ai-crypto-signal-agent -g ai-crypto-signal-agent"
+    ) == 3
+    assert rollback_text.count("-o root -g root") == 2
+
+    fixture_owner = tmp_path.owner()
+    fixture_group = tmp_path.group()
+    synthetic_owner_group = f"-o {fixture_owner} -g {fixture_group}"
+    synthetic_installer_text = installer_text.replace(
+        "-o root -g root",
+        synthetic_owner_group,
+    ).replace(
+        "chown root:root",
+        f"chown {fixture_owner}:{fixture_group}",
+    ).replace(
+        "-o ai-crypto-signal-agent -g ai-crypto-signal-agent",
+        synthetic_owner_group,
+    )
+    synthetic_rollback_text = rollback_text.replace(
+        "-o root -g root",
+        synthetic_owner_group,
+    )
+
+    synthetic_bin = tmp_path / "host-independent-bin"
+    synthetic_bin.mkdir()
+    synthetic_installer = synthetic_bin / installer_path.name
+    synthetic_rollback = synthetic_bin / rollback_path.name
+    synthetic_installer.write_text(synthetic_installer_text, encoding="utf-8")
+    synthetic_rollback.write_text(synthetic_rollback_text, encoding="utf-8")
+    synthetic_installer.chmod(0o755)
+    synthetic_rollback.chmod(0o755)
+    return synthetic_installer, synthetic_rollback
+
+
 def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
+    synthetic_installer, synthetic_rollback = (
+        _make_host_independent_install_scripts(tmp_path)
+    )
     release = _make_release(tmp_path)
     destdir = tmp_path / "host"
     subprocess.run(
         [
-            str(BIN / "ai-crypto-signal-agent-install"),
+            str(synthetic_installer),
             "--release-root",
             str(release),
             "--destdir",
@@ -544,7 +606,7 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
 
     subprocess.run(
         [
-            str(BIN / "ai-crypto-signal-agent-install"),
+            str(synthetic_installer),
             "--release-root",
             str(release),
             "--destdir",
@@ -579,7 +641,7 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
     )
     subprocess.run(
         [
-            str(BIN / "ai-crypto-signal-agent-rollback"),
+            str(synthetic_rollback),
             "--backup-root",
             str(backup),
             "--destdir",
@@ -597,11 +659,12 @@ def test_install_and_rollback_dry_fixture(tmp_path: Path) -> None:
 
 
 def test_installation_does_not_create_kill_switch(tmp_path: Path) -> None:
+    synthetic_installer, _ = _make_host_independent_install_scripts(tmp_path)
     release = _make_release(tmp_path)
     destdir = tmp_path / "host"
     subprocess.run(
         [
-            str(BIN / "ai-crypto-signal-agent-install"),
+            str(synthetic_installer),
             "--release-root",
             str(release),
             "--destdir",

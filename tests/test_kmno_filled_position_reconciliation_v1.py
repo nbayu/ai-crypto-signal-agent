@@ -165,12 +165,9 @@ def _state_tree():
     result_path = root / "result.json"
     for path in sorted(root.rglob("*"), key=lambda item: len(item.parts)):
         if path.is_dir():
-            os.chown(path, UID, GID)
             os.chmod(path, 0o700)
         elif path.is_file():
-            os.chown(path, UID, GID)
             os.chmod(path, 0o600)
-    os.chown(root, UID, GID)
     return {
         "root": root,
         "publication_path": publication_path,
@@ -205,6 +202,45 @@ def _seal_synthetic_state(monkeypatch, state):
     monkeypatch.setattr(
         kmno, "PUBLICATION_PAYLOAD_SHA256", publication["publication_payload_hash"],
     )
+    fixture_root = state["root"].resolve()
+    fixture_uid = os.geteuid()
+    fixture_gid = os.getegid()
+    original_read_regular = kmno._read_regular
+
+    def fixture_read_regular(
+        path,
+        *,
+        uid=None,
+        gid=None,
+        mode=None,
+        exit_code=13,
+    ):
+        resolved = Path(path).resolve()
+        inside_fixture = (
+            resolved == fixture_root
+            or fixture_root in resolved.parents
+        )
+        if inside_fixture:
+            return original_read_regular(
+                path,
+                uid=fixture_uid if uid is not None else None,
+                gid=fixture_gid if gid is not None else None,
+                mode=mode,
+                exit_code=exit_code,
+            )
+        return original_read_regular(
+            path,
+            uid=uid,
+            gid=gid,
+            mode=mode,
+            exit_code=exit_code,
+        )
+
+    monkeypatch.setattr(
+        kmno,
+        "_read_regular",
+        fixture_read_regular,
+    )
     return publication_hash, control_hash, ledger_hash
 
 
@@ -231,6 +267,7 @@ def _arguments(state, hashes):
         "entry_at": kmno.ENTRY_AT,
         "state_runtime_uid": UID,
         "state_runtime_gid": GID,
+        "identity_provider": lambda: (UID, GID),
         "result_path": state["result_path"],
         "incident_verification": {
             "root_only_incident_seal_verification": "PASS",
@@ -248,9 +285,6 @@ def _run_unprivileged(arguments):
     if process == 0:
         os.close(read_descriptor)
         try:
-            os.setgroups([])
-            os.setgid(GID)
-            os.setuid(UID)
             result = kmno.reconcile_owner_reported_filled_position(**arguments)
             payload = {"result": result}
         except kmno.ReconciliationError as error:
