@@ -343,8 +343,11 @@ def test_exact_versions_providers_roles_codes_and_default():
         "UNSUPPORTED_MODEL",
         "MALFORMED_OR_SCHEMA_INVALID_RESPONSE",
         "TOKEN_LIMIT_EXCEEDED",
+        "BUDGET_BLOCKED",
     )
-    assert subject.TRANSPORT_OUTCOME_CODE_COUNT == 7
+    assert subject.TRANSPORT_OUTCOME_CODE_COUNT == 8
+    assert subject.BUDGET_BLOCKED == "BUDGET_BLOCKED"
+    assert "BUDGET_BLOCKED" in subject.__all__
     assert subject.MAXIMUM_PROVIDER_ATTEMPTS == 1
     assert subject.RETRY_COUNT == 0
     assert subject.PROVIDER_FAILURE_DEFAULT == "FAIL_CLOSED_NO_PUBLICATION"
@@ -721,6 +724,80 @@ def test_observation_success_and_failure_shape_and_bool_validation(tmp_path):
     )
 
 
+def test_budget_blocked_observation_is_failure_only_and_request_bound(tmp_path):
+    payload = _payload(tmp_path)
+    review, _ = _review_and_adjudication(payload)
+    request = subject.build_e5_deepseek_provider_request_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+    )
+    observation = subject.build_e5_provider_attempt_observation_v1(
+        request=request,
+        transport_outcome="BUDGET_BLOCKED",
+        response_mapping=None,
+        measured_input_tokens=0,
+        measured_output_tokens=0,
+        billed_cost_micro_usd=0,
+    )
+    assert observation.observation_version == (
+        "e5-provider-attempt-observation-v1"
+    )
+    assert observation.attempt_number == 1
+    assert observation.transport_outcome == "BUDGET_BLOCKED"
+    assert observation.request_sha256 == request.request_sha256
+    assert request.provider_binding_sha256 == ACTIVE_BINDING_SHA256
+    assert observation.response_mapping is None
+    assert observation.response_digest_sha256 is None
+    assert tuple(observation.to_mapping()) == OBSERVATION_FIELDS
+    assert _canonical_hash(json.loads(observation.canonical_observation_json())) == (
+        observation.observation_sha256
+    )
+    _assert_invalid(
+        lambda: subject.build_e5_provider_attempt_observation_v1(
+            request=request,
+            transport_outcome="BUDGET_BLOCKED",
+            response_mapping=review.to_mapping(),
+            measured_input_tokens=0,
+            measured_output_tokens=0,
+            billed_cost_micro_usd=0,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    (
+        "SUCCESS",
+        "TIMEOUT",
+        "TEMPORARILY_UNAVAILABLE",
+        "AUTHENTICATION_OR_PERMISSION_FAILURE",
+        "UNSUPPORTED_MODEL",
+        "MALFORMED_OR_SCHEMA_INVALID_RESPONSE",
+        "TOKEN_LIMIT_EXCEEDED",
+    ),
+)
+def test_historical_seven_transport_outcomes_remain_valid(tmp_path, outcome):
+    payload = _payload(tmp_path, name=f"historical-outcome-{outcome}")
+    review, _ = _review_and_adjudication(payload)
+    request = subject.build_e5_deepseek_provider_request_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+    )
+    observation = subject.build_e5_provider_attempt_observation_v1(
+        request=request,
+        transport_outcome=outcome,
+        response_mapping=(review.to_mapping() if outcome == "SUCCESS" else None),
+        measured_input_tokens=1,
+        measured_output_tokens=1,
+        billed_cost_micro_usd=0,
+    )
+    assert observation.transport_outcome == outcome
+    assert observation.observation_version == (
+        "e5-provider-attempt-observation-v1"
+    )
+    assert tuple(observation.to_mapping()) == OBSERVATION_FIELDS
+
+
 def test_claude_review_l1_and_l2_reconstruct_deterministically(tmp_path):
     for decision in ("CAUTION", "HOLD"):
         chain = _route_chain(tmp_path, decision, name=f"review-{decision}")
@@ -830,6 +907,7 @@ def test_deepseek_failed_preflight_holds_without_transport_call(tmp_path):
         ("UNSUPPORTED_MODEL", "HOLD_MODEL_BINDING"),
         ("MALFORMED_OR_SCHEMA_INVALID_RESPONSE", "HOLD_INVALID_RESPONSE"),
         ("TOKEN_LIMIT_EXCEEDED", "HOLD_TOKEN_LIMIT"),
+        ("BUDGET_BLOCKED", "HOLD_BUDGET_BLOCKED"),
     ),
 )
 def test_deepseek_exact_d8_transport_failure_matrix(tmp_path, outcome, expected):
@@ -1148,6 +1226,8 @@ def test_failed_claude_token_preflight_holds_without_call(tmp_path):
             "HOLD_INVALID_RESPONSE",
         ),
         ("CAUTION", "TOKEN_LIMIT_EXCEEDED", "HOLD_TOKEN_LIMIT"),
+        ("CAUTION", "BUDGET_BLOCKED", "HOLD_BUDGET_BLOCKED"),
+        ("HOLD", "BUDGET_BLOCKED", "HOLD_BUDGET_BLOCKED"),
     ),
 )
 def test_claude_provider_failures_end_escalation_incomplete_once(
@@ -1709,4 +1789,4 @@ def test_no_publication_or_production_authority_in_public_contracts():
 
 
 def test_injected_fake_transport_call_count_is_exact():
-    assert FAKE_TRANSPORT_CALL_COUNT == 57
+    assert FAKE_TRANSPORT_CALL_COUNT == 60
