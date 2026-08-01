@@ -110,6 +110,11 @@ EXECUTION_FIELDS = (
     "accepted_claude_review",
     "execution_sha256",
 )
+PRENETWORK_FAILURE_FIELDS = (
+    "failure_version",
+    "failure_classification",
+    "safe_detail_code",
+)
 
 
 FAKE_TRANSPORT_CALL_COUNT = 0
@@ -302,6 +307,9 @@ def test_exact_versions_providers_roles_codes_and_default():
     assert subject.E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION == (
         "e5-provider-accepted-response-execution-v1"
     )
+    assert subject.E5_PROVIDER_PRE_NETWORK_FAILURE_V1_VERSION == (
+        "e5-provider-pre-network-failure-v1"
+    )
     assert subject.E5_PROVIDERS == ("DEEPSEEK", "ANTHROPIC")
     assert subject.PROVIDER_COUNT == 2
     assert subject.E5_INVOCATION_ROLES == (
@@ -350,6 +358,7 @@ def test_exact_versions_providers_roles_codes_and_default():
         (subject.E5ClaudeEscalationReviewV1, CLAUDE_REVIEW_FIELDS),
         (subject.E5ProviderInvocationResultV1, RESULT_FIELDS),
         (subject.E5ProviderAcceptedResponseExecutionV1, EXECUTION_FIELDS),
+        (subject.E5ProviderPreNetworkFailureV1, PRENETWORK_FAILURE_FIELDS),
     ),
 )
 def test_exact_frozen_slotted_contract_fields(contract, expected_fields):
@@ -357,6 +366,72 @@ def test_exact_frozen_slotted_contract_fields(contract, expected_fields):
     assert contract.__dataclass_params__.frozen is True
     assert "__dict__" not in contract.__slots__
     assert tuple(field.name for field in fields(contract)) == expected_fields
+
+
+@pytest.mark.parametrize(
+    ("classification", "detail"),
+    (
+        ("HOLD_PROVIDER_CONFIGURATION", "RUNTIME_CONFIGURATION_INVALID"),
+        ("HOLD_PROVIDER_CONFIGURATION", "CREDENTIAL_MISSING"),
+        ("HOLD_PROVIDER_CONFIGURATION", "CREDENTIAL_EMPTY"),
+        ("HOLD_PROVIDER_CONFIGURATION", "REQUEST_CONTRACT_INVALID"),
+        ("HOLD_PROVIDER_CONFIGURATION", "REQUEST_SERIALIZATION_FAILED"),
+        ("HOLD_PROVIDER_CONFIGURATION", "HTTP_CLIENT_CONFIGURATION_INVALID"),
+        (
+            "HOLD_PROVIDER_UNAVAILABLE",
+            "HTTP_CLIENT_TEMPORARILY_UNAVAILABLE_BEFORE_SEND",
+        ),
+        ("HOLD_PROVIDER_UNAVAILABLE", "PRE_SEND_CLIENT_FAILURE"),
+    ),
+)
+def test_typed_pre_network_failure_exact_closed_contract(classification, detail):
+    failure = subject.E5ProviderPreNetworkFailureV1(
+        failure_version="e5-provider-pre-network-failure-v1",
+        failure_classification=classification,
+        safe_detail_code=detail,
+    )
+    assert tuple(field.name for field in fields(failure)) == (
+        PRENETWORK_FAILURE_FIELDS
+    )
+    assert failure.failure_classification == classification
+    assert failure.safe_detail_code == detail
+    with pytest.raises(FrozenInstanceError):
+        failure.safe_detail_code = "PRE_SEND_CLIENT_FAILURE"
+
+
+@pytest.mark.parametrize(
+    ("classification", "detail"),
+    (
+        ("HOLD_PROVIDER_UNAVAILABLE", "CREDENTIAL_MISSING"),
+        ("HOLD_PROVIDER_CONFIGURATION", "PRE_SEND_CLIENT_FAILURE"),
+        ("HOLD_PROVIDER_TIMEOUT", "PRE_SEND_CLIENT_FAILURE"),
+        ("HOLD_PROVIDER_CONFIGURATION", "raw provider exception"),
+        ("HOLD_PROVIDER_CONFIGURATION", ""),
+        ("HOLD_PROVIDER_CONFIGURATION", None),
+        (True, "CREDENTIAL_MISSING"),
+    ),
+)
+def test_typed_pre_network_failure_rejects_mismatched_or_arbitrary_detail(
+    classification,
+    detail,
+):
+    _assert_invalid(
+        lambda: subject.E5ProviderPreNetworkFailureV1(
+            failure_version="e5-provider-pre-network-failure-v1",
+            failure_classification=classification,
+            safe_detail_code=detail,
+        )
+    )
+
+
+def test_typed_pre_network_failure_rejects_wrong_version():
+    _assert_invalid(
+        lambda: subject.E5ProviderPreNetworkFailureV1(
+            failure_version="e5-provider-pre-network-failure-v2",
+            failure_classification="HOLD_PROVIDER_CONFIGURATION",
+            safe_detail_code="CREDENTIAL_MISSING",
+        )
+    )
 
 
 def test_deepseek_request_exact_authority_determinism_and_redaction(tmp_path):
@@ -783,6 +858,52 @@ def test_deepseek_unexpected_transport_exception_maps_unavailable_once(tmp_path)
     assert result.retry_count == 0
 
 
+@pytest.mark.parametrize(
+    ("classification", "detail", "expected"),
+    (
+        (
+            "HOLD_PROVIDER_CONFIGURATION",
+            "CREDENTIAL_MISSING",
+            "HOLD_PROVIDER_CONFIGURATION",
+        ),
+        (
+            "HOLD_PROVIDER_UNAVAILABLE",
+            "PRE_SEND_CLIENT_FAILURE",
+            "HOLD_PROVIDER_UNAVAILABLE",
+        ),
+    ),
+)
+def test_deepseek_typed_pre_network_failure_is_zero_attempt_without_observation(
+    tmp_path,
+    classification,
+    detail,
+    expected,
+):
+    payload = _payload(tmp_path, name=f"typed-deepseek-{detail}")
+
+    def transport(_request):
+        raise subject.E5ProviderPreNetworkFailureV1(
+            failure_version="e5-provider-pre-network-failure-v1",
+            failure_classification=classification,
+            safe_detail_code=detail,
+        )
+
+    execution = subject.execute_e5_deepseek_review_once_v1(
+        payload=payload,
+        token_preflight=_deepseek_preflight(payload),
+        transport=transport,
+    )
+    result = execution.invocation_result
+    assert result.underlying_failure_code == expected
+    assert result.final_result_code == expected
+    assert result.provider_attempt_count == 0
+    assert result.transport_invoked is False
+    assert result.request_sha256 is None
+    assert result.retry_count == 0
+    assert execution.accepted_deepseek_review is None
+    assert execution.accepted_claude_review is None
+
+
 def test_valid_deepseek_response_succeeds_once_with_no_authority(tmp_path):
     payload = _payload(tmp_path)
     review, _ = _review_and_adjudication(payload)
@@ -1052,6 +1173,49 @@ def test_claude_unexpected_exception_ends_escalation_incomplete_once(tmp_path):
     assert result.underlying_failure_code == "HOLD_PROVIDER_UNAVAILABLE"
     assert result.final_result_code == "HOLD_ESCALATION_INCOMPLETE"
     assert result.retry_count == 0
+
+
+@pytest.mark.parametrize(
+    ("classification", "detail"),
+    (
+        ("HOLD_PROVIDER_CONFIGURATION", "CREDENTIAL_EMPTY"),
+        (
+            "HOLD_PROVIDER_UNAVAILABLE",
+            "HTTP_CLIENT_TEMPORARILY_UNAVAILABLE_BEFORE_SEND",
+        ),
+    ),
+)
+def test_claude_typed_pre_network_failure_is_zero_attempt_and_incomplete(
+    tmp_path,
+    classification,
+    detail,
+):
+    chain = _route_chain(tmp_path, name=f"typed-claude-{detail}")
+
+    def transport(_request):
+        raise subject.E5ProviderPreNetworkFailureV1(
+            failure_version="e5-provider-pre-network-failure-v1",
+            failure_classification=classification,
+            safe_detail_code=detail,
+        )
+
+    execution = subject.execute_e5_claude_review_once_v1(
+        payload=chain[0],
+        deepseek_review=chain[1],
+        deepseek_adjudication=chain[2],
+        route_result=chain[3],
+        token_preflight=chain[4],
+        transport=transport,
+    )
+    result = execution.invocation_result
+    assert result.underlying_failure_code == classification
+    assert result.final_result_code == "HOLD_ESCALATION_INCOMPLETE"
+    assert result.provider_attempt_count == 0
+    assert result.transport_invoked is False
+    assert result.request_sha256 is None
+    assert result.retry_count == 0
+    assert execution.accepted_deepseek_review is None
+    assert execution.accepted_claude_review is None
 
 
 @pytest.mark.parametrize("decision", ("CAUTION", "HOLD"))

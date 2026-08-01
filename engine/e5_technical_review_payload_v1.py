@@ -44,6 +44,12 @@ E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION: Final = (
 E5_PROVIDER_MODEL_PRICE_BINDING_V3_SHA256: Final = (
     "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
 )
+E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION: Final = (
+    "e5-provider-model-price-binding-v4"
+)
+E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256: Final = (
+    "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
+)
 E5_TECHNICAL_REVIEW_PAYLOAD_VERSION: Final = (
     "e5-technical-review-payload-v1"
 )
@@ -160,6 +166,28 @@ _FROZEN_BINDING_V3_VALUES: Final = {
     **_FROZEN_BINDING_V2_VALUES,
     "binding_version": E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION,
     "deepseek_timeout_seconds": 60,
+}
+
+_FROZEN_BINDING_V4_VALUES: Final = {
+    **_FROZEN_BINDING_V3_VALUES,
+    "binding_version": E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+    "deepseek_thinking_mode": "disabled",
+    "deepseek_reasoning_effort": "none",
+    "claude_l1_thinking_mode": "disabled",
+    "claude_l1_effort": "high",
+    "claude_l2_thinking_mode": "always_on_adaptive",
+    "claude_l2_effort": "high",
+    "billed_cost_semantics": (
+        "LOCALLY_DERIVED_DETERMINISTIC_COST_USING_VALIDATED_PROVIDER_USAGE_"
+        "AND_OWNER_FROZEN_BINDING_PRICES"
+    ),
+    "claude_cache_input_cost_policy": (
+        "CACHE_NOT_REQUESTED_REQUIRE_CACHE_CREATION_AND_CACHE_READ_COUNTS_"
+        "BOTH_ZERO_UNTIL_DISTINCT_CACHE_PRICES_ARE_OWNER_FROZEN"
+    ),
+    "provider_output_limit_activation_status": (
+        "NON_PRODUCTION_CANARY_CANDIDATES_NOT_PRODUCTION_PROVEN"
+    ),
 }
 
 _PAYLOAD_MAPPING_KEYS: Final = {
@@ -490,6 +518,41 @@ class E5ProviderModelPriceBindingV3(E5ProviderModelPriceBindingV2):
             _fail()
 
 
+@dataclass(frozen=True, slots=True)
+class E5ProviderModelPriceBindingV4(E5ProviderModelPriceBindingV3):
+    deepseek_thinking_mode: str
+    deepseek_reasoning_effort: str
+    claude_l1_thinking_mode: str
+    claude_l1_effort: str
+    claude_l2_thinking_mode: str
+    claude_l2_effort: str
+    billed_cost_semantics: str
+    claude_cache_input_cost_policy: str
+    provider_output_limit_activation_status: str
+
+    def __post_init__(self) -> None:
+        try:
+            _validate_frozen_binding(self, _FROZEN_BINDING_V4_VALUES)
+            for name in (
+                "deepseek_thinking_mode",
+                "deepseek_reasoning_effort",
+                "claude_l1_thinking_mode",
+                "claude_l1_effort",
+                "claude_l2_thinking_mode",
+                "claude_l2_effort",
+                "billed_cost_semantics",
+                "claude_cache_input_cost_policy",
+                "provider_output_limit_activation_status",
+            ):
+                _require(type(getattr(self, name)) is str)
+            _require(
+                self.binding_sha256
+                == E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256
+            )
+        except Exception:
+            _fail()
+
+
 def get_owner_frozen_e5_provider_model_price_binding_v1(
 ) -> E5ProviderModelPriceBindingV1:
     preimage = dict(_FROZEN_BINDING_VALUES)
@@ -517,10 +580,20 @@ def get_owner_frozen_e5_provider_model_price_binding_v3(
     )
 
 
+def get_owner_frozen_e5_provider_model_price_binding_v4(
+) -> E5ProviderModelPriceBindingV4:
+    preimage = dict(_FROZEN_BINDING_V4_VALUES)
+    return E5ProviderModelPriceBindingV4(
+        **preimage,
+        binding_sha256=_hash_mapping(preimage),
+    )
+
+
 E5_REGISTERED_PROVIDER_MODEL_PRICE_BINDING_SHA256S: Final = (
     get_owner_frozen_e5_provider_model_price_binding_v1().binding_sha256,
     get_owner_frozen_e5_provider_model_price_binding_v2().binding_sha256,
     get_owner_frozen_e5_provider_model_price_binding_v3().binding_sha256,
+    get_owner_frozen_e5_provider_model_price_binding_v4().binding_sha256,
 )
 
 
@@ -926,7 +999,7 @@ def build_e5_technical_review_payload_v1(
         _require(risk.event_snapshot_id in risk.evidence_refs)
 
         evaluator_payload = candidate.payload_copy()
-        binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+        binding = get_owner_frozen_e5_provider_model_price_binding_v4()
         latest_event = thesis_history.events[-1]
         mappings: dict[str, tuple[tuple[str, object], ...]] = {
             "executable_price": _freeze_mapping(
@@ -1163,7 +1236,7 @@ class E5TechnicalReviewTokenPreflightResultV1:
                 == E5_TECHNICAL_REVIEW_TOKEN_PREFLIGHT_VERSION
             )
             _require(_valid_sha256(self.payload_sha256))
-            binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+            binding = get_owner_frozen_e5_provider_model_price_binding_v4()
             _require(self.model_id == binding.deepseek_model_id)
             for value in (
                 self.measured_input_tokens,
@@ -1216,7 +1289,7 @@ def preflight_e5_technical_review_payload_v1(
     try:
         _require(type(payload) is E5TechnicalReviewPayloadV1)
         payload.__post_init__()
-        binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+        binding = get_owner_frozen_e5_provider_model_price_binding_v4()
         _require(payload.provider_binding_sha256 == binding.binding_sha256)
         _require(type(measured_input_tokens) is int and measured_input_tokens >= 0)
         _require(type(requested_output_tokens) is int and requested_output_tokens >= 0)
@@ -1256,6 +1329,8 @@ __all__ = (
     "E5_PROVIDER_MODEL_PRICE_BINDING_V2_VERSION",
     "E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION",
     "E5_PROVIDER_MODEL_PRICE_BINDING_V3_SHA256",
+    "E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION",
+    "E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256",
     "E5_TECHNICAL_REVIEW_PAYLOAD_VERSION",
     "E5_TECHNICAL_REVIEW_TOKEN_PREFLIGHT_VERSION",
     "E5_TECHNICAL_REVIEW_EVIDENCE_FIELDS",
@@ -1267,11 +1342,13 @@ __all__ = (
     "E5ProviderModelPriceBindingV1",
     "E5ProviderModelPriceBindingV2",
     "E5ProviderModelPriceBindingV3",
+    "E5ProviderModelPriceBindingV4",
     "E5TechnicalReviewPayloadV1",
     "E5TechnicalReviewTokenPreflightResultV1",
     "get_owner_frozen_e5_provider_model_price_binding_v1",
     "get_owner_frozen_e5_provider_model_price_binding_v2",
     "get_owner_frozen_e5_provider_model_price_binding_v3",
+    "get_owner_frozen_e5_provider_model_price_binding_v4",
     "build_e5_technical_review_payload_v1",
     "reconstruct_e5_technical_review_payload_v1",
     "preflight_e5_technical_review_payload_v1",

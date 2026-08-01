@@ -12,7 +12,7 @@ import unicodedata
 from engine.e5_technical_review_payload_v1 import (
     E5_TECHNICAL_REVIEW_EVIDENCE_FIELDS,
     E5TechnicalReviewPayloadV1,
-    get_owner_frozen_e5_provider_model_price_binding_v3,
+    get_owner_frozen_e5_provider_model_price_binding_v4,
 )
 
 
@@ -124,7 +124,7 @@ def _valid_sha256(value: object) -> bool:
 def _validate_payload(value: object) -> E5TechnicalReviewPayloadV1:
     _require(type(value) is E5TechnicalReviewPayloadV1)
     value.__post_init__()
-    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v4()
     _require(value.provider_binding_sha256 == binding.binding_sha256)
     return value
 
@@ -209,7 +209,7 @@ class E5DeepSeekStructuredReviewV1:
                 self.review_version == E5_DEEPSEEK_STRUCTURED_REVIEW_VERSION
             )
             _require(_valid_sha256(self.payload_sha256))
-            binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+            binding = get_owner_frozen_e5_provider_model_price_binding_v4()
             _require(type(self.model_id) is str)
             _require(self.model_id == binding.deepseek_model_id)
             _require(not self.model_id.casefold().endswith("latest"))
@@ -242,7 +242,7 @@ def build_e5_deepseek_structured_review_v1(
 ) -> E5DeepSeekStructuredReviewV1:
     try:
         verified_payload = _validate_payload(payload)
-        binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+        binding = get_owner_frozen_e5_provider_model_price_binding_v4()
         _require(type(model_id) is str and model_id == binding.deepseek_model_id)
         data: dict[str, object] = {
             "review_version": E5_DEEPSEEK_STRUCTURED_REVIEW_VERSION,
@@ -353,7 +353,7 @@ class E5DeepSeekTechnicalReviewAdjudicationV1:
                 == E5_DEEPSEEK_TECHNICAL_REVIEW_POLICY_VERSION
             )
             _require(_valid_sha256(self.payload_sha256))
-            binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+            binding = get_owner_frozen_e5_provider_model_price_binding_v4()
             _require(type(self.model_id) is str)
             _require(self.model_id == binding.deepseek_model_id)
             _validate_reason_codes(self.review_decision, self.reason_codes)
@@ -423,7 +423,7 @@ def adjudicate_e5_deepseek_technical_review_v1(
         verified_payload = _validate_payload(payload)
         _require(type(review) is E5DeepSeekStructuredReviewV1)
         review.__post_init__()
-        binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+        binding = get_owner_frozen_e5_provider_model_price_binding_v4()
         _require(review.payload_sha256 == verified_payload.payload_sha256)
         _require(review.model_id == binding.deepseek_model_id)
         _require(type(deterministic_hard_gates_passed) is bool)

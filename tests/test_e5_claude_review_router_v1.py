@@ -16,6 +16,7 @@ from engine.e5_technical_review_payload_v1 import (
     get_owner_frozen_e5_provider_model_price_binding_v1,
     get_owner_frozen_e5_provider_model_price_binding_v2,
     get_owner_frozen_e5_provider_model_price_binding_v3,
+    get_owner_frozen_e5_provider_model_price_binding_v4,
 )
 from test_e5_technical_review_payload_v1 import (
     _bundle as _payload_bundle,
@@ -25,7 +26,7 @@ from test_e5_technical_review_payload_v1 import (
 
 UTC_DAY = "2026-07-30"
 ACTIVE_BINDING_SHA256 = (
-    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
+    "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
 )
 MODE_SIDE_DECISION = (
     ("SWING", "LONG", "CLEAR", "L0"),
@@ -227,10 +228,11 @@ def test_exact_versions_routes_decision_codes_and_cost_authority():
     assert 6 * 32500 + 3 * 100000 == 495000
 
 
-def test_active_binding_is_exact_v3_with_unchanged_v2_claude_policy():
+def test_active_binding_is_exact_v4_with_unchanged_v3_claude_policy():
     v2 = get_owner_frozen_e5_provider_model_price_binding_v2()
-    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
-    assert binding.binding_version == "e5-provider-model-price-binding-v3"
+    v3 = get_owner_frozen_e5_provider_model_price_binding_v3()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v4()
+    assert binding.binding_version == "e5-provider-model-price-binding-v4"
     assert binding.binding_sha256 == ACTIVE_BINDING_SHA256
     assert (
         binding.claude_l1_model_id,
@@ -274,7 +276,17 @@ def test_active_binding_is_exact_v3_with_unchanged_v2_claude_policy():
         "maximum_daily_cost_micro_usd",
     )
     assert tuple(getattr(binding, field) for field in claude_policy_fields) == tuple(
+        getattr(v3, field) for field in claude_policy_fields
+    )
+    assert tuple(getattr(v3, field) for field in claude_policy_fields) == tuple(
         getattr(v2, field) for field in claude_policy_fields
+    )
+    assert binding.claude_l1_thinking_mode == "disabled"
+    assert binding.claude_l1_effort == "high"
+    assert binding.claude_l2_thinking_mode == "always_on_adaptive"
+    assert binding.claude_l2_effort == "high"
+    assert binding.provider_output_limit_activation_status == (
+        "NON_PRODUCTION_CANARY_CANDIDATES_NOT_PRODUCTION_PROVEN"
     )
     assert binding.latest_alias_allowed is False
     assert binding.cross_provider_substitution_allowed is False

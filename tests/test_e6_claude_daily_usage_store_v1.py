@@ -13,11 +13,11 @@ from test_e5_claude_review_router_v1 import UTC_DAY, _usage
 
 
 TIMESTAMP = "2026-07-30T12:00:00Z"
-ACTIVE_BINDING_V3_SHA256 = (
-    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
+ACTIVE_BINDING_V4_SHA256 = (
+    "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
 )
-HISTORICAL_BINDING_V2_SHA256 = (
-    "b6dec84a88151e465cff5ea0a4166b43e93653bcc7fb1668fb72ae65878650a8"
+HISTORICAL_BINDING_V3_SHA256 = (
+    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
 )
 RECORD_FIELDS = (
     "store_version",
@@ -93,7 +93,7 @@ def test_exact_store_contract_record_hash_file_and_mode(tmp_path):
     assert subject.E6ClaudeDailyUsageStoreRecordV1.__dataclass_params__.frozen
     assert "__dict__" not in subject.E6ClaudeDailyUsageStoreRecordV1.__slots__
     assert tuple(record.to_mapping()) == RECORD_FIELDS
-    assert record.provider_binding_sha256 == ACTIVE_BINDING_V3_SHA256
+    assert record.provider_binding_sha256 == ACTIVE_BINDING_V4_SHA256
     assert _canonical_hash(json.loads(record.canonical_record_json())) == (
         record.record_sha256
     )
@@ -152,13 +152,13 @@ def test_first_and_subsequent_compare_and_set_preserve_prefixes(tmp_path):
     assert loaded == second
 
 
-def test_current_day_v2_record_is_rejected_under_v3_without_rewrite_or_carry(
+def test_current_day_v3_record_is_rejected_under_v4_without_rewrite_or_carry(
     tmp_path,
 ):
     active_record = _commit(tmp_path, _usage(l1=(_sha(1),)))
     historical_mapping = active_record.to_mapping()
     historical_mapping["provider_binding_sha256"] = (
-        HISTORICAL_BINDING_V2_SHA256
+        HISTORICAL_BINDING_V3_SHA256
     )
     preimage = dict(historical_mapping)
     preimage.pop("record_sha256")
@@ -197,7 +197,7 @@ def test_current_day_v2_record_is_rejected_under_v3_without_rewrite_or_carry(
     )
     assert _file(tmp_path).read_bytes() == historical_raw
     unchanged = json.loads(historical_raw)
-    assert unchanged["provider_binding_sha256"] == HISTORICAL_BINDING_V2_SHA256
+    assert unchanged["provider_binding_sha256"] == HISTORICAL_BINDING_V3_SHA256
     assert unchanged["store_generation"] == 1
     assert unchanged["usage"]["l1_reviewed_payload_sha256s"] == [_sha(1)]
     assert not hasattr(subject, "invoke_e5_claude_review_once_v1")

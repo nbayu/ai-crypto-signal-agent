@@ -517,6 +517,9 @@ def test_exact_versions_field_tuple_and_decision_codes():
     assert subject.E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION == (
         "e5-provider-model-price-binding-v3"
     )
+    assert subject.E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION == (
+        "e5-provider-model-price-binding-v4"
+    )
     assert subject.E5_TECHNICAL_REVIEW_PAYLOAD_VERSION == (
         "e5-technical-review-payload-v1"
     )
@@ -537,6 +540,7 @@ def test_exact_versions_field_tuple_and_decision_codes():
         subject.E5ProviderModelPriceBindingV1,
         subject.E5ProviderModelPriceBindingV2,
         subject.E5ProviderModelPriceBindingV3,
+        subject.E5ProviderModelPriceBindingV4,
         subject.E5TechnicalReviewPayloadV1,
         subject.E5TechnicalReviewTokenPreflightResultV1,
     ),
@@ -701,13 +705,15 @@ def test_v2_preserves_exact_six_artifact_hashes():
     )
 
 
-def test_v1_and_v2_binding_mappings_are_deterministic_and_distinct():
+def test_historical_and_active_binding_mappings_are_deterministic_and_distinct():
     v1 = subject.get_owner_frozen_e5_provider_model_price_binding_v1()
     v2 = subject.get_owner_frozen_e5_provider_model_price_binding_v2()
     v3 = subject.get_owner_frozen_e5_provider_model_price_binding_v3()
+    v4 = subject.get_owner_frozen_e5_provider_model_price_binding_v4()
     assert v1 == subject.get_owner_frozen_e5_provider_model_price_binding_v1()
     assert v2 == subject.get_owner_frozen_e5_provider_model_price_binding_v2()
     assert v3 == subject.get_owner_frozen_e5_provider_model_price_binding_v3()
+    assert v4 == subject.get_owner_frozen_e5_provider_model_price_binding_v4()
     assert v1.binding_sha256 == (
         "0acb1a37dc4b7b308aae7e4f2f5faf7223d735ab0cd070e5a27393b845768eb0"
     )
@@ -724,6 +730,7 @@ def test_v1_and_v2_binding_mappings_are_deterministic_and_distinct():
         v1.binding_sha256,
         v2.binding_sha256,
         v3.binding_sha256,
+        v4.binding_sha256,
     )
     for binding in (v1, v2):
         assert hashlib.sha256(
@@ -763,6 +770,108 @@ def test_exact_owner_frozen_v3_binding_preimage_timeout_and_sha():
     assert not inspect.signature(
         subject.get_owner_frozen_e5_provider_model_price_binding_v3
     ).parameters
+
+
+def test_exact_owner_frozen_v4_binding_preimage_policy_and_sha():
+    binding = subject.get_owner_frozen_e5_provider_model_price_binding_v4()
+    v3 = subject.get_owner_frozen_e5_provider_model_price_binding_v3()
+    field_names = tuple(field.name for field in fields(type(binding)))
+    canonical = binding.canonical_binding_json()
+    preimage = json.loads(canonical)
+    v3_preimage = json.loads(v3.canonical_binding_json())
+    new_values = {
+        "deepseek_thinking_mode": "disabled",
+        "deepseek_reasoning_effort": "none",
+        "claude_l1_thinking_mode": "disabled",
+        "claude_l1_effort": "high",
+        "claude_l2_thinking_mode": "always_on_adaptive",
+        "claude_l2_effort": "high",
+        "billed_cost_semantics": (
+            "LOCALLY_DERIVED_DETERMINISTIC_COST_USING_VALIDATED_PROVIDER_"
+            "USAGE_AND_OWNER_FROZEN_BINDING_PRICES"
+        ),
+        "claude_cache_input_cost_policy": (
+            "CACHE_NOT_REQUESTED_REQUIRE_CACHE_CREATION_AND_CACHE_READ_"
+            "COUNTS_BOTH_ZERO_UNTIL_DISTINCT_CACHE_PRICES_ARE_OWNER_FROZEN"
+        ),
+        "provider_output_limit_activation_status": (
+            "NON_PRODUCTION_CANARY_CANDIDATES_NOT_PRODUCTION_PROVEN"
+        ),
+    }
+    assert binding.binding_version == "e5-provider-model-price-binding-v4"
+    assert len(field_names) == 55
+    assert field_names == (
+        *(field.name for field in fields(subject.E5ProviderModelPriceBindingV3)),
+        *new_values,
+    )
+    assert len(preimage) == 54
+    assert "binding_sha256" not in preimage
+    assert {name: preimage[name] for name in new_values} == new_values
+    comparable_v4 = dict(preimage)
+    for name in new_values:
+        comparable_v4.pop(name)
+    comparable_v4["binding_version"] = v3_preimage["binding_version"]
+    assert comparable_v4 == v3_preimage
+    assert (
+        binding.deepseek_output_hard_limit_tokens,
+        binding.claude_l1_output_hard_limit_tokens,
+        binding.claude_l2_output_hard_limit_tokens,
+    ) == (500, 500, 800)
+    assert len(canonical.encode("utf-8")) == 2689
+    assert binding.binding_sha256 == subject.E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256
+    assert binding.binding_sha256 == (
+        "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
+    )
+    assert hashlib.sha256(canonical.encode("utf-8")).hexdigest() == (
+        binding.binding_sha256
+    )
+    assert not inspect.signature(
+        subject.get_owner_frozen_e5_provider_model_price_binding_v4
+    ).parameters
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("deepseek_thinking_mode", "enabled"),
+        ("deepseek_reasoning_effort", "high"),
+        ("claude_l1_thinking_mode", "adaptive"),
+        ("claude_l1_effort", "low"),
+        ("claude_l2_thinking_mode", "disabled"),
+        ("claude_l2_effort", "medium"),
+        ("billed_cost_semantics", "provider_invoice"),
+        ("claude_cache_input_cost_policy", "base_input_price"),
+        ("provider_output_limit_activation_status", "production_proven"),
+        ("deepseek_thinking_mode", True),
+        ("deepseek_thinking_mode", None),
+        ("deepseek_thinking_mode", " disabled"),
+    ),
+)
+def test_v4_binding_rejects_nonexact_policy_values(field, value):
+    binding = subject.get_owner_frozen_e5_provider_model_price_binding_v4()
+    with pytest.raises(ValueError, match="^invalid E5 technical review payload$"):
+        replace(binding, **{field: value})
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "deepseek_thinking_mode",
+        "deepseek_reasoning_effort",
+        "claude_l1_thinking_mode",
+        "claude_l1_effort",
+        "claude_l2_thinking_mode",
+        "claude_l2_effort",
+        "billed_cost_semantics",
+        "claude_cache_input_cost_policy",
+        "provider_output_limit_activation_status",
+    ),
+)
+def test_v4_binding_rejects_missing_policy_field(field):
+    mapping = subject.get_owner_frozen_e5_provider_model_price_binding_v4().to_mapping()
+    mapping.pop(field)
+    with pytest.raises(TypeError):
+        subject.E5ProviderModelPriceBindingV4(**mapping)
 
 
 @pytest.mark.parametrize("timeout", (True, 0, -1, 1.5, "60", None, 59, 61))
@@ -858,7 +967,7 @@ def test_six_real_mode_side_chains_build_and_retain_exact_identities(
         "low_tick": chain["geometry"].golden_zone_low_tick,
     }
     assert payload.provider_binding_sha256 == (
-        subject.get_owner_frozen_e5_provider_model_price_binding_v3().binding_sha256
+        subject.get_owner_frozen_e5_provider_model_price_binding_v4().binding_sha256
     )
 
 
@@ -904,33 +1013,40 @@ def test_payload_mapping_projection_binds_all_nineteen_evidence_categories(tmp_p
         "final_material_risk_state"
     ] == "NONE"
     assert payload.provider_binding_sha256 == (
-        subject.get_owner_frozen_e5_provider_model_price_binding_v3().binding_sha256
+        subject.get_owner_frozen_e5_provider_model_price_binding_v4().binding_sha256
     )
 
 
-def test_v1_v2_and_v3_payload_reconstruction_and_identity_separation(tmp_path):
-    _, _, active_v3 = _bundle(tmp_path)
+def test_historical_payload_reconstruction_and_identity_separation(tmp_path):
+    _, _, active_v4 = _bundle(tmp_path)
     v1_binding = subject.get_owner_frozen_e5_provider_model_price_binding_v1()
     v2_binding = subject.get_owner_frozen_e5_provider_model_price_binding_v2()
     v3_binding = subject.get_owner_frozen_e5_provider_model_price_binding_v3()
+    v4_binding = subject.get_owner_frozen_e5_provider_model_price_binding_v4()
     historical_v1 = _payload_with_registered_binding(
-        active_v3,
+        active_v4,
         v1_binding.binding_sha256,
     )
     historical_v2 = _payload_with_registered_binding(
-        active_v3,
+        active_v4,
         v2_binding.binding_sha256,
     )
-    assert active_v3.provider_binding_sha256 == v3_binding.binding_sha256
+    historical_v3 = _payload_with_registered_binding(
+        active_v4,
+        v3_binding.binding_sha256,
+    )
+    assert active_v4.provider_binding_sha256 == v4_binding.binding_sha256
     assert historical_v1.provider_binding_sha256 == v1_binding.binding_sha256
     assert historical_v2.provider_binding_sha256 == v2_binding.binding_sha256
+    assert historical_v3.provider_binding_sha256 == v3_binding.binding_sha256
     assert len(
         {
             historical_v1.payload_sha256,
             historical_v2.payload_sha256,
-            active_v3.payload_sha256,
+            historical_v3.payload_sha256,
+            active_v4.payload_sha256,
         }
-    ) == 3
+    ) == 4
     assert subject.reconstruct_e5_technical_review_payload_v1(
         historical_v1.to_mapping()
     ).to_mapping() == historical_v1.to_mapping()
@@ -938,8 +1054,11 @@ def test_v1_v2_and_v3_payload_reconstruction_and_identity_separation(tmp_path):
         historical_v2.to_mapping()
     ).to_mapping() == historical_v2.to_mapping()
     assert subject.reconstruct_e5_technical_review_payload_v1(
-        active_v3.to_mapping()
-    ).to_mapping() == active_v3.to_mapping()
+        historical_v3.to_mapping()
+    ).to_mapping() == historical_v3.to_mapping()
+    assert subject.reconstruct_e5_technical_review_payload_v1(
+        active_v4.to_mapping()
+    ).to_mapping() == active_v4.to_mapping()
 
 
 def test_unknown_provider_binding_sha_fails_historical_reconstruction(tmp_path):
@@ -960,7 +1079,7 @@ def test_unknown_provider_binding_sha_fails_historical_reconstruction(tmp_path):
         subject.reconstruct_e5_technical_review_payload_v1(mapping)
 
 
-def test_active_builder_has_no_binding_selector_and_always_emits_v3(tmp_path):
+def test_active_builder_has_no_binding_selector_and_always_emits_v4(tmp_path):
     parameters = inspect.signature(
         subject.build_e5_technical_review_payload_v1
     ).parameters
@@ -969,7 +1088,7 @@ def test_active_builder_has_no_binding_selector_and_always_emits_v3(tmp_path):
     assert "provider_binding_sha256" not in parameters
     _, _, payload = _bundle(tmp_path)
     assert payload.provider_binding_sha256 == (
-        subject.get_owner_frozen_e5_provider_model_price_binding_v3().binding_sha256
+        subject.get_owner_frozen_e5_provider_model_price_binding_v4().binding_sha256
     )
 
 
@@ -1159,7 +1278,7 @@ def test_deepseek_token_preflight_exact_boundaries_and_priority(
     assert result.output_hard_limit_tokens == 500
     assert result.payload_sha256 == payload.payload_sha256
     assert payload.provider_binding_sha256 == (
-        subject.get_owner_frozen_e5_provider_model_price_binding_v3().binding_sha256
+        subject.get_owner_frozen_e5_provider_model_price_binding_v4().binding_sha256
     )
     assert result.within_limits is within
     assert result.decision_code == code
@@ -1170,15 +1289,16 @@ def test_deepseek_token_preflight_exact_boundaries_and_priority(
     (
         subject.get_owner_frozen_e5_provider_model_price_binding_v1,
         subject.get_owner_frozen_e5_provider_model_price_binding_v2,
+        subject.get_owner_frozen_e5_provider_model_price_binding_v3,
     ),
 )
 def test_active_token_preflight_rejects_historical_payload(
     tmp_path,
     binding_getter,
 ):
-    _, _, active_v3 = _bundle(tmp_path)
+    _, _, active_v4 = _bundle(tmp_path)
     historical = _payload_with_registered_binding(
-        active_v3,
+        active_v4,
         binding_getter().binding_sha256,
     )
     with pytest.raises(ValueError, match="^invalid E5 technical review payload$"):
@@ -1194,15 +1314,16 @@ def test_active_token_preflight_rejects_historical_payload(
     (
         subject.get_owner_frozen_e5_provider_model_price_binding_v1,
         subject.get_owner_frozen_e5_provider_model_price_binding_v2,
+        subject.get_owner_frozen_e5_provider_model_price_binding_v3,
     ),
 )
 def test_active_slice_03_review_rejects_historical_payload(
     tmp_path,
     binding_getter,
 ):
-    _, _, active_v3 = _bundle(tmp_path)
+    _, _, active_v4 = _bundle(tmp_path)
     historical = _payload_with_registered_binding(
-        active_v3,
+        active_v4,
         binding_getter().binding_sha256,
     )
     with pytest.raises(ValueError, match="^invalid E5 DeepSeek technical review$"):

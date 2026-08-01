@@ -33,14 +33,14 @@ from engine.e5_deepseek_technical_review_v1 import (
     reconstruct_e5_deepseek_structured_review_v1,
 )
 from engine.e5_technical_review_payload_v1 import (
-    E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
     E5_TECHNICAL_REVIEW_EVIDENCE_FIELDS,
     HOLD_INPUT_TOKEN_LIMIT,
     HOLD_OUTPUT_TOKEN_LIMIT,
     PASS_TOKEN_BUDGET,
     E5TechnicalReviewPayloadV1,
     E5TechnicalReviewTokenPreflightResultV1,
-    get_owner_frozen_e5_provider_model_price_binding_v3,
+    get_owner_frozen_e5_provider_model_price_binding_v4,
 )
 
 
@@ -57,9 +57,12 @@ E5_PROVIDER_INVOCATION_RESULT_VERSION: Final = (
 E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION: Final = (
     "e5-provider-accepted-response-execution-v1"
 )
+E5_PROVIDER_PRE_NETWORK_FAILURE_V1_VERSION: Final = (
+    "e5-provider-pre-network-failure-v1"
+)
 
 ACTIVE_PROVIDER_BINDING_SHA256: Final = (
-    "dc2454ffdc7f05978a168f88beaf892e7e04387053a0b91c89da79adccf3778e"
+    "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
 )
 
 DEEPSEEK: Final = "DEEPSEEK"
@@ -173,6 +176,48 @@ _TRANSPORT_FAILURE_MAP: Final = {
     MALFORMED_OR_SCHEMA_INVALID_RESPONSE: HOLD_INVALID_RESPONSE,
     TOKEN_LIMIT_EXCEEDED: HOLD_TOKEN_LIMIT,
 }
+_PRE_NETWORK_CONFIGURATION_DETAIL_CODES: Final = (
+    "RUNTIME_CONFIGURATION_INVALID",
+    "CREDENTIAL_MISSING",
+    "CREDENTIAL_EMPTY",
+    "REQUEST_CONTRACT_INVALID",
+    "REQUEST_SERIALIZATION_FAILED",
+    "HTTP_CLIENT_CONFIGURATION_INVALID",
+)
+_PRE_NETWORK_UNAVAILABLE_DETAIL_CODES: Final = (
+    "HTTP_CLIENT_TEMPORARILY_UNAVAILABLE_BEFORE_SEND",
+    "PRE_SEND_CLIENT_FAILURE",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class E5ProviderPreNetworkFailureV1(Exception):
+    failure_version: str
+    failure_classification: str
+    safe_detail_code: str
+
+    def __post_init__(self) -> None:
+        try:
+            _require(
+                type(self.failure_version) is str
+                and self.failure_version
+                == E5_PROVIDER_PRE_NETWORK_FAILURE_V1_VERSION
+            )
+            _require(type(self.failure_classification) is str)
+            _require(type(self.safe_detail_code) is str)
+            if self.safe_detail_code in _PRE_NETWORK_CONFIGURATION_DETAIL_CODES:
+                _require(
+                    self.failure_classification
+                    == HOLD_PROVIDER_CONFIGURATION
+                )
+            elif self.safe_detail_code in _PRE_NETWORK_UNAVAILABLE_DETAIL_CODES:
+                _require(
+                    self.failure_classification == HOLD_PROVIDER_UNAVAILABLE
+                )
+            else:
+                _fail()
+        except Exception:
+            _fail()
 
 
 def _fail() -> None:
@@ -206,9 +251,9 @@ def _valid_sha256(value: object) -> bool:
 
 
 def _active_binding():
-    binding = get_owner_frozen_e5_provider_model_price_binding_v3()
+    binding = get_owner_frozen_e5_provider_model_price_binding_v4()
     _require(
-        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V3_VERSION
+        binding.binding_version == E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION
     )
     _require(binding.binding_sha256 == ACTIVE_PROVIDER_BINDING_SHA256)
     _require(binding.deepseek_model_id == "deepseek-v4-pro")
@@ -236,6 +281,26 @@ def _active_binding():
     _require(binding.malformed_response_prompt_repair_allowed is False)
     _require(binding.stale_result_reuse_allowed is False)
     _require(binding.same_invocation_retry_allowed is False)
+    _require(binding.deepseek_thinking_mode == "disabled")
+    _require(binding.deepseek_reasoning_effort == "none")
+    _require(binding.claude_l1_thinking_mode == "disabled")
+    _require(binding.claude_l1_effort == "high")
+    _require(binding.claude_l2_thinking_mode == "always_on_adaptive")
+    _require(binding.claude_l2_effort == "high")
+    _require(
+        binding.billed_cost_semantics
+        == "LOCALLY_DERIVED_DETERMINISTIC_COST_USING_VALIDATED_PROVIDER_"
+        "USAGE_AND_OWNER_FROZEN_BINDING_PRICES"
+    )
+    _require(
+        binding.claude_cache_input_cost_policy
+        == "CACHE_NOT_REQUESTED_REQUIRE_CACHE_CREATION_AND_CACHE_READ_"
+        "COUNTS_BOTH_ZERO_UNTIL_DISTINCT_CACHE_PRICES_ARE_OWNER_FROZEN"
+    )
+    _require(
+        binding.provider_output_limit_activation_status
+        == "NON_PRODUCTION_CANARY_CANDIDATES_NOT_PRODUCTION_PROVEN"
+    )
     return binding
 
 
@@ -1329,6 +1394,16 @@ def _execute_e5_deepseek_review_once_core_v1(
         )
         try:
             raw_observation = transport(request)
+        except E5ProviderPreNetworkFailureV1 as failure:
+            failure.__post_init__()
+            return _build_execution(
+                invocation_result=_deepseek_result(
+                    payload=verified_payload,
+                    request=None,
+                    cause=failure.failure_classification,
+                    final=failure.failure_classification,
+                )
+            )
         except Exception:
             return _build_execution(
                 invocation_result=_deepseek_result(
@@ -1460,7 +1535,7 @@ def _claude_provider_failure_result(
     *,
     payload: E5TechnicalReviewPayloadV1,
     route: E5ClaudeReviewRouteResultV1,
-    request: E5ProviderRequestV1,
+    request: E5ProviderRequestV1 | None,
     cause: str,
     response_digest: str | None = None,
 ) -> E5ProviderInvocationResultV1:
@@ -1560,6 +1635,16 @@ def _execute_e5_claude_review_once_core_v1(
         )
         try:
             raw_observation = transport(request)
+        except E5ProviderPreNetworkFailureV1 as failure:
+            failure.__post_init__()
+            return _build_execution(
+                invocation_result=_claude_provider_failure_result(
+                    payload=verified_payload,
+                    route=route,
+                    request=None,
+                    cause=failure.failure_classification,
+                )
+            )
         except Exception:
             return _build_execution(
                 invocation_result=_claude_provider_failure_result(
@@ -1723,6 +1808,7 @@ __all__ = (
     "E5_CLAUDE_ESCALATION_REVIEW_VERSION",
     "E5_PROVIDER_INVOCATION_RESULT_VERSION",
     "E5_PROVIDER_ACCEPTED_RESPONSE_EXECUTION_VERSION",
+    "E5_PROVIDER_PRE_NETWORK_FAILURE_V1_VERSION",
     "ACTIVE_PROVIDER_BINDING_SHA256",
     "DEEPSEEK",
     "ANTHROPIC",
@@ -1761,6 +1847,7 @@ __all__ = (
     "MAXIMUM_PROVIDER_ATTEMPTS",
     "RETRY_COUNT",
     "E5ProviderRequestV1",
+    "E5ProviderPreNetworkFailureV1",
     "E5ProviderAttemptObservationV1",
     "E5ClaudeEscalationReviewV1",
     "E5ProviderInvocationResultV1",
