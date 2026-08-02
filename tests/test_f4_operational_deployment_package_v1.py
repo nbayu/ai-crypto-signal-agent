@@ -362,6 +362,7 @@ esac
         "lock": lock_path,
         "timer": timer,
         "release_timer": release / "deploy/operational_v1/systemd/ai-crypto-signal-agent.timer",
+        "e6_timer": release / "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer",
         "telegram_env": telegram_env,
     }
     return health, environment, paths
@@ -455,6 +456,94 @@ def test_health_state_machine_accepts_two_exact_states_and_rejects_partial_state
         assert result.returncode != 0, name
         assert "HEALTH_STATUS=NOT_READY" in result.stdout, name
         assert f"HEALTH_REASON={expected_reason}" in result.stdout, result.stdout
+
+
+def test_health_timer_discovery_is_scoped_to_legacy_package_with_e6_coexistence(
+    tmp_path: Path,
+) -> None:
+    health, environment, paths = _make_health_fixture(tmp_path)
+    assert paths["release_timer"].is_file()
+    assert paths["e6_timer"].is_file()
+
+    result = subprocess.run(
+        [str(health)],
+        check=False,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "TIMER_FILE_COUNT_CONTRACT=YES" in result.stdout
+    assert "TIMER_TARGET_CONTRACT=YES" in result.stdout
+    assert "TIMER_PERSISTENT_CONTRACT=YES" in result.stdout
+    assert "HEALTH_STATUS=READY_NOT_ENABLED" in result.stdout
+
+
+def test_health_requires_exact_legacy_timer_when_e6_timer_exists(
+    tmp_path: Path,
+) -> None:
+    health, environment, paths = _make_health_fixture(tmp_path)
+    assert paths["e6_timer"].is_file()
+    paths["release_timer"].unlink()
+
+    result = subprocess.run(
+        [str(health)],
+        check=False,
+        env=environment,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "TIMER_FILE_COUNT_CONTRACT=NO" in result.stdout
+    assert "HEALTH_REASON=TIMER_FILE_COUNT_MISMATCH" in result.stdout
+    assert "HEALTH_REASON=TIMER_UNIT_IDENTITY_MISMATCH" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
+
+
+def test_health_rejects_wrong_target_and_extra_timer_inside_legacy_package(
+    tmp_path: Path,
+) -> None:
+    wrong_health, wrong_environment, wrong_paths = _make_health_fixture(
+        tmp_path / "wrong-target"
+    )
+    for path in (wrong_paths["timer"], wrong_paths["release_timer"]):
+        path.write_text(
+            path.read_text().replace(
+                "Unit=ai-crypto-signal-agent.service",
+                "Unit=ai-crypto-signal-agent-e6.service",
+            )
+        )
+    wrong = subprocess.run(
+        [str(wrong_health)],
+        check=False,
+        env=wrong_environment,
+        text=True,
+        capture_output=True,
+    )
+    assert wrong.returncode != 0
+    assert "TIMER_FILE_COUNT_CONTRACT=YES" in wrong.stdout
+    assert "TIMER_TARGET_CONTRACT=NO" in wrong.stdout
+    assert "HEALTH_REASON=TIMER_TARGET_MISMATCH" in wrong.stdout
+    assert "HEALTH_STATUS=NOT_READY" in wrong.stdout
+
+    extra_health, extra_environment, extra_paths = _make_health_fixture(
+        tmp_path / "extra-legacy-timer"
+    )
+    extra_timer = extra_paths["release_timer"].with_name("conflicting.timer")
+    extra_timer.write_bytes(extra_paths["e6_timer"].read_bytes())
+    extra = subprocess.run(
+        [str(extra_health)],
+        check=False,
+        env=extra_environment,
+        text=True,
+        capture_output=True,
+    )
+    assert extra.returncode != 0
+    assert "TIMER_FILE_COUNT_CONTRACT=NO" in extra.stdout
+    assert "HEALTH_REASON=TIMER_FILE_COUNT_MISMATCH" in extra.stdout
+    assert "HEALTH_STATUS=NOT_READY" in extra.stdout
 
 
 def _make_inert_wrapper_fixture(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
@@ -841,6 +930,7 @@ def test_wrapper_rejects_non_directory_runtime_path(tmp_path: Path) -> None:
 
 def test_health_lock_check_never_creates_lock_file(tmp_path: Path) -> None:
     health, environment, paths = _make_health_fixture(tmp_path)
+    assert paths["e6_timer"].is_file()
     result = subprocess.run(
         [str(health)],
         check=False,
@@ -849,6 +939,7 @@ def test_health_lock_check_never_creates_lock_file(tmp_path: Path) -> None:
         capture_output=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "TIMER_FILE_COUNT_CONTRACT=YES" in result.stdout
     assert "OPERATIONAL_LOCK_STATE_VALID=YES" in result.stdout
     assert "OVERLAP_LOCK_RESIDUAL=NO" in result.stdout
     assert not paths["lock"].exists()

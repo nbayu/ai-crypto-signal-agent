@@ -179,8 +179,11 @@ if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" ]]; then
     [[ "$(unit_directive "$TIMER_UNIT" Unit)" == "ai-crypto-signal-agent.service" ]] &&
         timer_target_valid=YES
 fi
-if [[ -n "$release_root" && -d "$release_root/deploy" ]]; then
-    [[ "$(find "$release_root/deploy" -type f -name '*.timer' -print | wc -l)" -eq 1 ]] &&
+if [[ -n "$release_root" && -d "$release_root/deploy/operational_v1" &&
+      ! -L "$release_root/deploy/operational_v1" ]]; then
+    legacy_package_timer="$release_root/deploy/operational_v1/systemd/ai-crypto-signal-agent.timer"
+    [[ -f "$legacy_package_timer" && ! -L "$legacy_package_timer" &&
+       "$(find "$release_root/deploy/operational_v1" -type f -name '*.timer' -print | wc -l)" -eq 1 ]] &&
         timer_count_valid=YES
     package_manifest="$release_root/deploy/operational_v1/deployment-package-manifest.txt"
     if [[ -f "$package_manifest" && ! -L "$package_manifest" ]]; then

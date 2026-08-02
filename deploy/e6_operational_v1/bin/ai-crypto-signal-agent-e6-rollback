@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
+
+usage() {
+    printf '%s\n' "usage: $0 --target-release PATH --destdir PATH" >&2
+    exit 64
+}
+
+target_release=""
+destdir=""
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --target-release)
+            [[ "$#" -ge 2 ]] || usage
+            target_release="$2"
+            shift 2
+            ;;
+        --destdir)
+            [[ "$#" -ge 2 ]] || usage
+            destdir="$2"
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+[[ "$target_release" = /* && "$destdir" = /* ]] || usage
+[[ -d "$destdir" && ! -L "$destdir" ]] || exit 65
+state_root="$destdir/var/lib/ai-crypto-signal-agent"
+[[ -d "$state_root" && ! -L "$state_root" ]] || exit 65
+current_ref="$state_root/e6-installed-release.path"
+rollback_ref="$state_root/e6-rollback-release.path"
+evidence_path="$state_root/e6-rollback-evidence.txt"
+
+verify_release() {
+    local release="$1"
+    [[ "$release" = /* && -d "$release" && ! -L "$release" && ! -w "$release" ]] || return 1
+    [[ "$(realpath -- "$release")" == "$release" ]] || return 1
+    local commit
+    commit="$(basename -- "$release")"
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [[ -f "$release/.e6-release-manifest" && ! -L "$release/.e6-release-manifest" ]] || return 1
+    [[ -f "$release/.e6-sha256-manifest" && ! -L "$release/.e6-sha256-manifest" ]] || return 1
+    [[ "$(sed -n 's/^SOURCE_COMMIT=//p' "$release/.e6-release-manifest")" == "$commit" ]] || return 1
+    [[ "$(sed -n 's/^SOURCE_TREE=//p' "$release/.e6-release-manifest")" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [[ "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]] || return 1
+    (cd -- "$release" && sha256sum --quiet -c .e6-sha256-manifest) || return 1
+}
+
+read_reference() {
+    local path="$1"
+    [[ -f "$path" && ! -L "$path" && "$(wc -l < "$path")" -eq 1 ]] || return 1
+    sed -n '1p' "$path"
+}
+
+atomic_write() {
+    local destination="$1"
+    local content="$2"
+    local temporary
+    temporary="$(mktemp "$state_root/.e6-rollback.XXXXXXXX")"
+    printf '%s\n' "$content" > "$temporary"
+    chmod 0400 "$temporary"
+    mv -fT -- "$temporary" "$destination"
+}
+
+current_release="$(read_reference "$current_ref")" || exit 65
+[[ -d "$target_release" && ! -L "$target_release" ]] || exit 65
+resolved_target="$(realpath -- "$target_release" 2>/dev/null)" || exit 65
+[[ "$resolved_target" == "$target_release" ]] || exit 65
+target_release="$resolved_target"
+
+if [[ "$current_release" == "$target_release" ]]; then
+    prior_release="$(read_reference "$rollback_ref")" || exit 66
+    [[ -f "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
+    [[ "$(sed -n 's/^FROM_RELEASE=//p' "$evidence_path")" == "$prior_release" ]] || exit 66
+    [[ "$(sed -n 's/^TO_RELEASE=//p' "$evidence_path")" == "$target_release" ]] || exit 66
+    verify_release "$current_release" || exit 66
+    verify_release "$prior_release" || exit 66
+    printf '%s\n' "E6_ROLLBACK=IDEMPOTENT_REPLAY"
+    printf '%s\n' "SERVICE_OPERATION_EXECUTED=NO"
+    exit 0
+fi
+
+verify_release "$current_release" || exit 65
+verify_release "$target_release" || exit 65
+[[ ! -e "$rollback_ref" && ! -L "$rollback_ref" ]] || exit 66
+[[ ! -e "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
+
+atomic_write "$rollback_ref" "$current_release"
+atomic_write "$evidence_path" "FROM_RELEASE=$current_release
+TO_RELEASE=$target_release
+TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT"
+atomic_write "$current_ref" "$target_release"
+
+printf '%s\n' "E6_ROLLBACK=COMPLETE"
+printf '%s\n' "CURRENT_VERIFIED_RELEASE_RETAINED=YES"
+printf '%s\n' "SERVICE_OPERATION_EXECUTED=NO"
+printf '%s\n' "TIMER_ENABLEMENT_OPERATION_EXECUTED=NO"

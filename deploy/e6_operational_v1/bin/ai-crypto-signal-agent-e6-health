@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
+readonly RELEASE_REF="/var/lib/ai-crypto-signal-agent/e6-installed-release.path"
+readonly RUNTIME_MARKER="/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker"
+readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"
+readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"
+readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.service"
+readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.timer"
+readonly ACTIVATION_CONFIGURATION="/etc/ai-crypto-signal-agent/e6-activation-v1.env"
+readonly CREDENTIAL_METADATA="/etc/ai-crypto-signal-agent/e6-credentials.metadata"
+readonly OWNER_CONTROL_STATE="/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json"
+readonly ROLLBACK_REF="/var/lib/ai-crypto-signal-agent/e6-rollback-release.path"
+readonly SERVICE_USER="ai-crypto-signal-agent"
+readonly SERVICE_GROUP="ai-crypto-signal-agent"
+readonly EXPECTED_CONFIGURATION_KEYS=$'E6_ACTIVATION_SCHEMA_VERSION\nE6_RELEASE_COMMIT\nE6_RELEASE_TREE\nE6_TRUSTED_CHECKPOINT_COMMIT\nE6_RELEASE_ROOT\nE6_RELEASE_REFERENCE_PATH\nE6_CREDENTIAL_METADATA_PATH\nE6_OWNER_CONTROL_STATE_PATH\nE6_SERVICE_USER\nE6_SERVICE_GROUP\nE6_RUNTIME_ENABLED\nE6_PROVIDER_ENABLED\nE6_ACTIVATION_GATE\nE6_WORKLOAD_GATE\nE6_CREDENTIAL_GATE\nE6_NETWORK_GATE\nE6_PUBLICATION_GATE\nE6_TELEGRAM_PUBLICATION_GATE\nE6_AUTOMATIC_RETRY_COUNT\nE6_PROVIDER_SUBSTITUTION_ENABLED\nE6_PROMPT_REPAIR_ENABLED\nE6_STALE_REVIEW_REUSE_ENABLED\nE6_AUTOMATED_EXCHANGE_TRADING_ENABLED'
+
+failure_count=0
+declare -a failure_reasons=()
+
+record_check() {
+    local key="$1"
+    local result="$2"
+    local reason="$3"
+    printf '%s=%s\n' "$key" "$result"
+    if [[ "$result" != "YES" && "$result" != "PASS" ]]; then
+        failure_reasons+=("$reason")
+        failure_count=$((failure_count + 1))
+    fi
+}
+
+record_failure() {
+    failure_reasons+=("$1")
+    failure_count=$((failure_count + 1))
+}
+
+unit_directive() {
+    sed -n "s/^$2=//p" "$1"
+}
+
+configuration_value() {
+    sed -n "s/^$1=//p" "$ACTIVATION_CONFIGURATION"
+}
+
+release_root=""
+if [[ -f "$RELEASE_REF" && ! -L "$RELEASE_REF" && "$(wc -l < "$RELEASE_REF")" -eq 1 ]]; then
+    release_root="$(sed -n '1p' "$RELEASE_REF")"
+fi
+
+release_match=NO
+release_bytes_match=NO
+binding_match=NO
+runtime_marker_match=NO
+package_manifest_match=NO
+service_match=NO
+timer_match=NO
+source_commit=""
+source_tree=""
+if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" && ! -w "$release_root" &&
+      "$(basename -- "$release_root")" =~ ^[0-9a-f]{40}$ &&
+      -f "$release_root/.e6-release-manifest" && ! -L "$release_root/.e6-release-manifest" &&
+      -f "$release_root/.e6-sha256-manifest" && ! -L "$release_root/.e6-sha256-manifest" ]]; then
+    source_commit="$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.e6-release-manifest")"
+    source_tree="$(sed -n 's/^SOURCE_TREE=//p' "$release_root/.e6-release-manifest")"
+    release_trust="$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")"
+    if [[ "$source_commit" == "$(basename -- "$release_root")" &&
+          "$source_tree" =~ ^[0-9a-f]{40}$ &&
+          "$release_trust" == "$TRUSTED_CHECKPOINT_COMMIT" ]]; then
+        release_match=YES
+    fi
+    if (cd -- "$release_root" && sha256sum --quiet -c .e6-sha256-manifest); then
+        release_bytes_match=YES
+    fi
+    if [[ -f "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" &&
+          ! -L "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" &&
+          "$(cat "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT")" == "$TRUSTED_CHECKPOINT_COMMIT" ]]; then
+        binding_match=YES
+    fi
+    package_manifest="$release_root/deploy/e6_operational_v1/deployment-package-manifest.txt"
+    if [[ -f "$package_manifest" && ! -L "$package_manifest" &&
+          "$(sed -n 's/^PACKAGE_VERSION=//p' "$package_manifest")" == "E6_OPERATIONAL_DEPLOYMENT_PACKAGE_V1" &&
+          "$(sed -n 's/^SOURCE_COMMIT=//p' "$package_manifest")" == "$source_commit" &&
+          "$(sed -n 's/^SOURCE_TREE=//p' "$package_manifest")" == "$source_tree" &&
+          "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$package_manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" &&
+          "$(sed -n 's/^AUTOMATIC_RETRY_COUNT=//p' "$package_manifest")" == "0" &&
+          "$(sed -n 's/^AUTOMATED_EXCHANGE_TRADING=//p' "$package_manifest")" == "disabled" &&
+          "$(sed -n 's/^E6_RUNTIME_DEFAULT=//p' "$package_manifest")" == "disabled" &&
+          "$(sed -n 's/^PROVIDER_DEFAULT=//p' "$package_manifest")" == "disabled" &&
+          "$(sed -n 's/^NETWORK_DEFAULT=//p' "$package_manifest")" == "disabled" &&
+          "$(sed -n 's/^PUBLICATION_DEFAULT=//p' "$package_manifest")" == "disabled" &&
+          "$(sed -n 's/^TELEGRAM_PUBLICATION_DEFAULT=//p' "$package_manifest")" == "disabled" ]]; then
+        package_manifest_match=YES
+    fi
+    if [[ -f "$SERVICE_UNIT" && ! -L "$SERVICE_UNIT" &&
+          -f "$release_root/.e6-rendered/ai-crypto-signal-agent-e6.service" &&
+          "$(sha256sum "$SERVICE_UNIT" | awk '{print $1}')" == "$(sha256sum "$release_root/.e6-rendered/ai-crypto-signal-agent-e6.service" | awk '{print $1}')" ]]; then
+        service_match=YES
+    fi
+    if [[ -f "$TIMER_UNIT" && ! -L "$TIMER_UNIT" &&
+          "$(sha256sum "$TIMER_UNIT" | awk '{print $1}')" == "$(sha256sum "$release_root/deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer" | awk '{print $1}')" ]]; then
+        timer_match=YES
+    fi
+fi
+if [[ -n "$source_commit" && -f "$RUNTIME_MARKER" && ! -L "$RUNTIME_MARKER" &&
+      "$(cat "$RUNTIME_MARKER")" == "$source_commit" ]]; then
+    runtime_marker_match=YES
+fi
+
+activation_configuration_valid=NO
+activation_defaults_closed=NO
+activation_all_authorized=NO
+credential_metadata_valid=NO
+owner_control_metadata_valid=NO
+if [[ -f "$ACTIVATION_CONFIGURATION" && ! -L "$ACTIVATION_CONFIGURATION" &&
+      "$(stat -Lc '%U:%G:%a' "$ACTIVATION_CONFIGURATION")" == "$SERVICE_USER:$SERVICE_GROUP:640" &&
+      "$(cut -d= -f1 "$ACTIVATION_CONFIGURATION")" == "$EXPECTED_CONFIGURATION_KEYS" ]] &&
+   ! LC_ALL=C grep -q $'\r' "$ACTIVATION_CONFIGURATION"; then
+    if [[ "$(configuration_value E6_ACTIVATION_SCHEMA_VERSION)" == "e6-activation-configuration-v1" &&
+          "$(configuration_value E6_RELEASE_COMMIT)" == "$source_commit" &&
+          "$(configuration_value E6_RELEASE_TREE)" == "$source_tree" &&
+          "$(configuration_value E6_TRUSTED_CHECKPOINT_COMMIT)" == "$TRUSTED_CHECKPOINT_COMMIT" &&
+          "$(configuration_value E6_RELEASE_ROOT)" == "$release_root" &&
+          "$(configuration_value E6_RELEASE_REFERENCE_PATH)" == "$RELEASE_REF" &&
+          "$(configuration_value E6_CREDENTIAL_METADATA_PATH)" == "$CREDENTIAL_METADATA" &&
+          "$(configuration_value E6_OWNER_CONTROL_STATE_PATH)" == "$OWNER_CONTROL_STATE" &&
+          "$(configuration_value E6_SERVICE_USER)" == "$SERVICE_USER" &&
+          "$(configuration_value E6_SERVICE_GROUP)" == "$SERVICE_GROUP" &&
+          "$(configuration_value E6_AUTOMATIC_RETRY_COUNT)" == "0" &&
+          "$(configuration_value E6_PROVIDER_SUBSTITUTION_ENABLED)" == "false" &&
+          "$(configuration_value E6_PROMPT_REPAIR_ENABLED)" == "false" &&
+          "$(configuration_value E6_STALE_REVIEW_REUSE_ENABLED)" == "false" &&
+          "$(configuration_value E6_AUTOMATED_EXCHANGE_TRADING_ENABLED)" == "false" ]]; then
+        activation_configuration_valid=YES
+    fi
+    gate_values="$(printf '%s\n' \
+        "$(configuration_value E6_RUNTIME_ENABLED)" \
+        "$(configuration_value E6_PROVIDER_ENABLED)" \
+        "$(configuration_value E6_ACTIVATION_GATE)" \
+        "$(configuration_value E6_WORKLOAD_GATE)" \
+        "$(configuration_value E6_CREDENTIAL_GATE)" \
+        "$(configuration_value E6_NETWORK_GATE)" \
+        "$(configuration_value E6_PUBLICATION_GATE)" \
+        "$(configuration_value E6_TELEGRAM_PUBLICATION_GATE)")"
+    if [[ "$gate_values" == $'false\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse' ]]; then
+        activation_defaults_closed=YES
+    elif [[ "$gate_values" == $'true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue' ]]; then
+        activation_all_authorized=YES
+    else
+        activation_configuration_valid=NO
+    fi
+fi
+if [[ -f "$CREDENTIAL_METADATA" && ! -L "$CREDENTIAL_METADATA" &&
+      "$(stat -Lc '%U:%G:%a' "$CREDENTIAL_METADATA")" == "$SERVICE_USER:$SERVICE_GROUP:640" ]]; then
+    credential_metadata_valid=YES
+fi
+if [[ -f "$OWNER_CONTROL_STATE" && ! -L "$OWNER_CONTROL_STATE" &&
+      "$(stat -Lc '%U:%G:%a' "$OWNER_CONTROL_STATE")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] &&
+   grep -q '"schema_name":"telegram-owner-control-state"' "$OWNER_CONTROL_STATE" &&
+   grep -q '"schema_version":1' "$OWNER_CONTROL_STATE"; then
+    owner_control_metadata_valid=YES
+fi
+
+timer_contract_valid=NO
+if [[ "$timer_match" == YES &&
+      "$(unit_directive "$TIMER_UNIT" Unit)" == "ai-crypto-signal-agent-e6.service" &&
+      "$(unit_directive "$TIMER_UNIT" OnActiveSec)" == "30min" &&
+      "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" == "30min" &&
+      "$(unit_directive "$TIMER_UNIT" AccuracySec)" == "1min" &&
+      "$(unit_directive "$TIMER_UNIT" Persistent)" == "false" ]]; then
+    timer_contract_valid=YES
+fi
+
+service_active_state="$(systemctl is-active ai-crypto-signal-agent-e6.service 2>/dev/null || true)"
+service_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent-e6.service 2>/dev/null || true)"
+timer_active_state="$(systemctl is-active ai-crypto-signal-agent-e6.timer 2>/dev/null || true)"
+timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent-e6.timer 2>/dev/null || true)"
+timer_substate="$(systemctl show ai-crypto-signal-agent-e6.timer -p SubState --value 2>/dev/null || true)"
+timer_next_monotonic="$(systemctl show ai-crypto-signal-agent-e6.timer -p NextElapseUSecMonotonic --value 2>/dev/null || true)"
+
+kill_switch_valid=YES
+kill_switch_active=NO
+if [[ -e "$KILL_SWITCH" || -L "$KILL_SWITCH" ]]; then
+    if [[ -f "$KILL_SWITCH" && ! -L "$KILL_SWITCH" ]]; then
+        kill_switch_active=YES
+    else
+        kill_switch_valid=NO
+    fi
+fi
+
+lock_state_valid=YES
+lock_residual=NO
+if [[ -e "$LOCK_PATH" || -L "$LOCK_PATH" ]]; then
+    if [[ ! -f "$LOCK_PATH" || -L "$LOCK_PATH" ||
+          "$(stat -Lc '%U:%G:%a' "$LOCK_PATH" 2>/dev/null || true)" != "$SERVICE_USER:$SERVICE_GROUP:600" ]]; then
+        lock_state_valid=NO
+    elif ! { exec 8<"$LOCK_PATH"; } 2>/dev/null; then
+        lock_state_valid=NO
+    elif ! flock -n 8; then
+        lock_residual=YES
+    fi
+fi
+
+rollback_readiness=YES
+rollback_state=NOT_CONFIGURED
+if [[ -e "$ROLLBACK_REF" || -L "$ROLLBACK_REF" ]]; then
+    rollback_state=INVALID
+    if [[ -f "$ROLLBACK_REF" && ! -L "$ROLLBACK_REF" && "$(wc -l < "$ROLLBACK_REF")" -eq 1 ]]; then
+        rollback_root="$(sed -n '1p' "$ROLLBACK_REF")"
+        if [[ -d "$rollback_root" && ! -L "$rollback_root" && ! -w "$rollback_root" &&
+              "$(basename -- "$rollback_root")" =~ ^[0-9a-f]{40}$ &&
+              -f "$rollback_root/.e6-release-manifest" &&
+              "$(sed -n 's/^SOURCE_COMMIT=//p' "$rollback_root/.e6-release-manifest")" == "$(basename -- "$rollback_root")" &&
+              "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$rollback_root/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]]; then
+            rollback_state=READY
+        else
+            rollback_readiness=NO
+        fi
+    else
+        rollback_readiness=NO
+    fi
+fi
+
+record_check IMMUTABLE_RELEASE_MATCH "$release_match" RELEASE_IDENTITY_MISMATCH
+record_check RELEASE_BYTE_IDENTITY "$release_bytes_match" RELEASE_BYTE_IDENTITY_MISMATCH
+record_check TRUSTED_CHECKPOINT_BINDING "$binding_match" TRUSTED_CHECKPOINT_BINDING_MISMATCH
+record_check RUNTIME_MARKER_MATCH "$runtime_marker_match" RUNTIME_MARKER_MISMATCH
+record_check PACKAGE_MANIFEST_MATCH "$package_manifest_match" PACKAGE_MANIFEST_MISMATCH
+record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
+record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
+record_check TIMER_CONTRACT_VALID "$timer_contract_valid" TIMER_CONTRACT_MISMATCH
+record_check ACTIVATION_CONFIGURATION_VALID "$activation_configuration_valid" ACTIVATION_CONFIGURATION_INVALID
+record_check CREDENTIAL_METADATA_VALID "$credential_metadata_valid" CREDENTIAL_METADATA_INVALID
+record_check OWNER_CONTROL_METADATA_VALID "$owner_control_metadata_valid" OWNER_CONTROL_METADATA_INVALID
+record_check KILL_SWITCH_STATE_VALID "$kill_switch_valid" KILL_SWITCH_STATE_INVALID
+printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_switch_active"
+[[ "$kill_switch_active" == NO ]] || record_failure KILL_SWITCH_ACTIVE
+record_check OPERATIONAL_LOCK_STATE_VALID "$lock_state_valid" OPERATIONAL_LOCK_STATE_INVALID
+printf 'OVERLAP_LOCK_RESIDUAL=%s\n' "$lock_residual"
+[[ "$lock_residual" == NO ]] || record_failure OVERLAP_LOCK_RESIDUAL
+record_check ROLLBACK_READINESS "$rollback_readiness" ROLLBACK_TARGET_INVALID
+printf 'ROLLBACK_STATE=%s\n' "$rollback_state"
+printf '%s\n' "SECRET_VALUE_EXPOSURE_COUNT=0"
+printf '%s\n' "AUTOMATIC_RETRY_COUNT=0"
+printf '%s\n' "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO"
+
+health_state=NOT_READY
+if [[ "$service_active_state" == inactive &&
+      ( "$service_enabled_state" == static || "$service_enabled_state" == disabled ) ]]; then
+    if [[ "$timer_active_state" == inactive && "$timer_enabled_state" == disabled &&
+          "$timer_next_monotonic" == 0 && "$activation_defaults_closed" == YES ]]; then
+        health_state=READY_NOT_ENABLED
+    elif [[ "$timer_active_state" == active && "$timer_enabled_state" == enabled &&
+            "$timer_substate" == waiting && "$timer_next_monotonic" =~ ^[1-9][0-9]*$ &&
+            "$activation_all_authorized" == YES ]]; then
+        health_state=READY_AND_AUTOMATION_ENABLED
+    else
+        record_failure SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY
+    fi
+else
+    record_failure SERVICE_STATE_INVALID
+fi
+
+printf 'SERVICE_ACTIVE=%s\n' "$service_active_state"
+printf 'SERVICE_ENABLED=%s\n' "$service_enabled_state"
+printf 'TIMER_ACTIVE=%s\n' "$timer_active_state"
+printf 'TIMER_ENABLED=%s\n' "$timer_enabled_state"
+printf 'TIMER_SUBSTATE=%s\n' "$timer_substate"
+
+if [[ "$failure_count" -eq 0 && "$health_state" != NOT_READY ]]; then
+    printf 'HEALTH_STATUS=%s\n' "$health_state"
+    exit 0
+fi
+for reason in "${failure_reasons[@]}"; do
+    printf 'HEALTH_REASON=%s\n' "$reason"
+done
+printf '%s\n' "HEALTH_STATUS=NOT_READY"
+printf 'HEALTH_FAILURE_COUNT=%d\n' "$failure_count"
+exit 1

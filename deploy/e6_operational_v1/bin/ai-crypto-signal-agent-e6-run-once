@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
+readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"
+readonly KILL_SWITCH_PATH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"
+readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"
+readonly SERVICE_USER="ai-crypto-signal-agent"
+readonly SERVICE_GROUP="ai-crypto-signal-agent"
+readonly EXPECTED_CONFIGURATION_KEYS=$'E6_ACTIVATION_SCHEMA_VERSION\nE6_RELEASE_COMMIT\nE6_RELEASE_TREE\nE6_TRUSTED_CHECKPOINT_COMMIT\nE6_RELEASE_ROOT\nE6_RELEASE_REFERENCE_PATH\nE6_CREDENTIAL_METADATA_PATH\nE6_OWNER_CONTROL_STATE_PATH\nE6_SERVICE_USER\nE6_SERVICE_GROUP\nE6_RUNTIME_ENABLED\nE6_PROVIDER_ENABLED\nE6_ACTIVATION_GATE\nE6_WORKLOAD_GATE\nE6_CREDENTIAL_GATE\nE6_NETWORK_GATE\nE6_PUBLICATION_GATE\nE6_TELEGRAM_PUBLICATION_GATE\nE6_AUTOMATIC_RETRY_COUNT\nE6_PROVIDER_SUBSTITUTION_ENABLED\nE6_PROMPT_REPAIR_ENABLED\nE6_STALE_REVIEW_REUSE_ENABLED\nE6_AUTOMATED_EXCHANGE_TRADING_ENABLED'
+
+umask 0077
+
+fail_closed() {
+    printf 'E6_LAUNCH_BLOCKED=%s\n' "$1" >&2
+    exit 78
+}
+
+configuration_value() {
+    sed -n "s/^$1=//p" "$configuration_path"
+}
+
+script_path="$(realpath -- "$0")"
+release_root="$(realpath -- "$(dirname -- "$script_path")/../../..")"
+release_name="$(basename -- "$release_root")"
+
+[[ "$release_name" =~ ^[0-9a-f]{40}$ ]] || fail_closed "RELEASE_PATH_IDENTITY"
+[[ ! -w "$release_root" ]] || fail_closed "RELEASE_NOT_IMMUTABLE"
+[[ -f "$release_root/.e6-release-manifest" && ! -L "$release_root/.e6-release-manifest" ]] ||
+    fail_closed "RELEASE_MANIFEST_FILE"
+[[ -f "$release_root/.e6-sha256-manifest" && ! -L "$release_root/.e6-sha256-manifest" ]] ||
+    fail_closed "RELEASE_SHA256_MANIFEST_FILE"
+
+source_commit="$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.e6-release-manifest")"
+source_tree="$(sed -n 's/^SOURCE_TREE=//p' "$release_root/.e6-release-manifest")"
+release_trust="$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")"
+[[ "$source_commit" == "$release_name" ]] || fail_closed "RELEASE_COMMIT_IDENTITY"
+[[ "$source_tree" =~ ^[0-9a-f]{40}$ ]] || fail_closed "RELEASE_TREE_IDENTITY"
+[[ "$release_trust" == "$TRUSTED_CHECKPOINT_COMMIT" ]] || fail_closed "RELEASE_TRUST_IDENTITY"
+
+(
+    cd -- "$release_root"
+    sha256sum --quiet -c .e6-sha256-manifest
+) || fail_closed "RELEASE_BYTE_IDENTITY"
+
+[[ -f "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" && ! -L "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" ]] ||
+    fail_closed "REPOSITORY_BINDING_FILE"
+[[ "$(cat "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT")" == "$TRUSTED_CHECKPOINT_COMMIT" ]] ||
+    fail_closed "REPOSITORY_BINDING_BYTES"
+
+configuration_path="${E6_ACTIVATION_CONFIGURATION_PATH:-}"
+[[ "$configuration_path" = /* && -f "$configuration_path" && ! -L "$configuration_path" ]] ||
+    fail_closed "ACTIVATION_CONFIGURATION_FILE"
+[[ "$(stat -Lc '%U:%G:%a' "$configuration_path")" == "$SERVICE_USER:$SERVICE_GROUP:640" ]] ||
+    fail_closed "ACTIVATION_CONFIGURATION_METADATA"
+[[ "$(cut -d= -f1 "$configuration_path")" == "$EXPECTED_CONFIGURATION_KEYS" ]] ||
+    fail_closed "ACTIVATION_CONFIGURATION_KEYS"
+! LC_ALL=C grep -q $'\r' "$configuration_path" ||
+    fail_closed "ACTIVATION_CONFIGURATION_FORMAT"
+
+[[ "$(configuration_value E6_ACTIVATION_SCHEMA_VERSION)" == "e6-activation-configuration-v1" ]] ||
+    fail_closed "ACTIVATION_CONFIGURATION_SCHEMA"
+[[ "$(configuration_value E6_RELEASE_COMMIT)" == "$source_commit" ]] ||
+    fail_closed "ACTIVATION_RELEASE_COMMIT"
+[[ "$(configuration_value E6_RELEASE_TREE)" == "$source_tree" ]] ||
+    fail_closed "ACTIVATION_RELEASE_TREE"
+[[ "$(configuration_value E6_TRUSTED_CHECKPOINT_COMMIT)" == "$TRUSTED_CHECKPOINT_COMMIT" ]] ||
+    fail_closed "ACTIVATION_TRUST_IDENTITY"
+[[ "$(configuration_value E6_RELEASE_ROOT)" == "$release_root" ]] ||
+    fail_closed "ACTIVATION_RELEASE_ROOT"
+release_reference_path="$(configuration_value E6_RELEASE_REFERENCE_PATH)"
+credential_metadata_path="$(configuration_value E6_CREDENTIAL_METADATA_PATH)"
+owner_control_state_path="$(configuration_value E6_OWNER_CONTROL_STATE_PATH)"
+[[ "$release_reference_path" = /* && -f "$release_reference_path" && ! -L "$release_reference_path" &&
+      "$(cat "$release_reference_path")" == "$release_root" ]] ||
+    fail_closed "ACTIVATION_RELEASE_REFERENCE"
+[[ "$credential_metadata_path" = /* && -f "$credential_metadata_path" && ! -L "$credential_metadata_path" &&
+      "$(stat -Lc '%U:%G:%a' "$credential_metadata_path")" == "$SERVICE_USER:$SERVICE_GROUP:640" ]] ||
+    fail_closed "CREDENTIAL_METADATA_INVALID"
+[[ "$owner_control_state_path" = /* && -f "$owner_control_state_path" && ! -L "$owner_control_state_path" &&
+      "$(stat -Lc '%U:%G:%a' "$owner_control_state_path")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] ||
+    fail_closed "OWNER_CONTROL_METADATA_INVALID"
+[[ "$(configuration_value E6_SERVICE_USER)" == "$SERVICE_USER" ]] ||
+    fail_closed "ACTIVATION_SERVICE_USER"
+[[ "$(configuration_value E6_SERVICE_GROUP)" == "$SERVICE_GROUP" ]] ||
+    fail_closed "ACTIVATION_SERVICE_GROUP"
+[[ "$(configuration_value E6_RUNTIME_ENABLED)" == "true" ]] ||
+    fail_closed "E6_RUNTIME_DISABLED"
+[[ "$(configuration_value E6_PROVIDER_ENABLED)" == "true" ]] ||
+    fail_closed "E6_PROVIDER_DISABLED"
+[[ "$(configuration_value E6_ACTIVATION_GATE)" == "true" ]] || fail_closed "ACTIVATION_GATE_CLOSED"
+[[ "$(configuration_value E6_WORKLOAD_GATE)" == "true" ]] || fail_closed "WORKLOAD_GATE_CLOSED"
+[[ "$(configuration_value E6_CREDENTIAL_GATE)" == "true" ]] || fail_closed "CREDENTIAL_GATE_CLOSED"
+[[ "$(configuration_value E6_NETWORK_GATE)" == "true" ]] || fail_closed "NETWORK_GATE_CLOSED"
+[[ "$(configuration_value E6_PUBLICATION_GATE)" == "true" ]] || fail_closed "PUBLICATION_GATE_CLOSED"
+[[ "$(configuration_value E6_TELEGRAM_PUBLICATION_GATE)" == "true" ]] ||
+    fail_closed "TELEGRAM_PUBLICATION_GATE_CLOSED"
+[[ "$(configuration_value E6_AUTOMATIC_RETRY_COUNT)" == "0" ]] || fail_closed "RETRY_POLICY_INVALID"
+[[ "$(configuration_value E6_PROVIDER_SUBSTITUTION_ENABLED)" == "false" ]] || fail_closed "PROVIDER_SUBSTITUTION_FORBIDDEN"
+[[ "$(configuration_value E6_PROMPT_REPAIR_ENABLED)" == "false" ]] || fail_closed "PROMPT_REPAIR_FORBIDDEN"
+[[ "$(configuration_value E6_STALE_REVIEW_REUSE_ENABLED)" == "false" ]] || fail_closed "STALE_REVIEW_REUSE_FORBIDDEN"
+[[ "$(configuration_value E6_AUTOMATED_EXCHANGE_TRADING_ENABLED)" == "false" ]] || fail_closed "EXCHANGE_TRADING_FORBIDDEN"
+
+credential_dir="${CREDENTIALS_DIRECTORY:-}"
+marker_path="${credential_dir}/accepted_e6_release_commit"
+[[ -n "$credential_dir" && -f "$marker_path" && ! -L "$marker_path" ]] ||
+    fail_closed "RUNTIME_MARKER_FILE"
+[[ "$(cat "$marker_path")" == "$source_commit" ]] || fail_closed "RUNTIME_MARKER_BYTES"
+
+if [[ -e "$KILL_SWITCH_PATH" || -L "$KILL_SWITCH_PATH" ]]; then
+    [[ -f "$KILL_SWITCH_PATH" && ! -L "$KILL_SWITCH_PATH" && -r "$KILL_SWITCH_PATH" ]] ||
+        fail_closed "KILL_SWITCH_STATE"
+    printf '%s\n' "E6_LAUNCH_BLOCKED=KILL_SWITCH_ACTIVE" >&2
+    exit 75
+fi
+
+lock_directory="$(dirname -- "$LOCK_PATH")"
+[[ -d "$lock_directory" && ! -L "$lock_directory" ]] || fail_closed "LOCK_DIRECTORY"
+[[ "$(stat -Lc '%U:%G:%a' "$lock_directory")" == "$SERVICE_USER:$SERVICE_GROUP:750" ]] ||
+    fail_closed "LOCK_DIRECTORY_IDENTITY"
+if [[ -e "$LOCK_PATH" || -L "$LOCK_PATH" ]]; then
+    [[ -f "$LOCK_PATH" && ! -L "$LOCK_PATH" ]] || fail_closed "LOCK_FILE_STATE"
+    [[ "$(stat -Lc '%U:%G:%a' "$LOCK_PATH")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] ||
+        fail_closed "LOCK_FILE_IDENTITY"
+fi
+if ! { exec 9>"$LOCK_PATH"; } 2>/dev/null; then
+    fail_closed "LOCK_PERMISSION"
+fi
+[[ -f "$LOCK_PATH" && ! -L "$LOCK_PATH" ]] || fail_closed "LOCK_FILE_STATE"
+[[ "$(stat -Lc '%U:%G:%a' "$LOCK_PATH")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] ||
+    fail_closed "LOCK_FILE_IDENTITY"
+flock -n 9 || {
+    printf '%s\n' "E6_LAUNCH_BLOCKED=OVERLAP_LOCK_HELD" >&2
+    exit 75
+}
+
+cleanup_lock() {
+    unlink -- "$LOCK_PATH"
+}
+trap cleanup_lock EXIT
+
+export PYTHONPATH="$release_root"
+/usr/bin/timeout --signal=TERM --kill-after=30s 20m \
+    "$PYTHON_BIN" -m engine.run_production_signal_v1
