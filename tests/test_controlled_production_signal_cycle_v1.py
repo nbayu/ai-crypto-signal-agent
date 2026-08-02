@@ -9,6 +9,8 @@ import pytest
 from engine import controlled_production_signal_cycle_v1 as cycle
 from engine import active_signal_ledger_v1 as active
 from engine import passive_production_signal_flow_v1 as flow
+from engine import e6_service_composition_root_v1 as e6_service
+from test_e6_integrated_orchestrator_v1 import _scenario
 
 
 NOW = "2026-07-21T00:00:00Z"
@@ -152,6 +154,7 @@ def test_authorization_and_result_types_are_frozen_slotted_and_ordered():
         "publication_confirmed", "registration_applied", "partial_success", "replay",
         "candidate_generated", "publication_attempted", "delivery_attempted",
         "registration_attempted", "reason", "timestamp",
+        "e6_service_result",
     )
 
 
@@ -367,3 +370,65 @@ def test_active_pair_gate_stops_before_adapter_and_publication(monkeypatch, tmp_
     assert result.result == cycle.NO_ELIGIBLE_SIGNAL
     assert result.reason == "GLOBAL_PAIR_ACTIVE"
     assert calls == [] and not result.delivery_attempted
+
+
+def test_e6_selected_cycle_delegates_without_legacy_publication_bypass(tmp_path):
+    scenario = _scenario(tmp_path, name="controlled-e6")
+    deliveries = []
+
+    def deliver(payload, *, channel, destination_id):
+        deliveries.append(payload)
+        return {
+            "channel": channel,
+            "destination_id": destination_id,
+            "external_delivery_id": "fixture-message-1",
+            "delivered_at": "2026-07-30T13:00:01Z",
+        }
+
+    request = e6_service.E6ServiceCycleRequestV1(
+        orchestrator_request=scenario["request"],
+        orchestrator_ports=scenario["ports"],
+        channel="TELEGRAM",
+        destination_id="isolated-owner-state-test",
+    )
+    root = e6_service.E6ServiceCompositionRootV1(
+        telegram_delivery=deliver,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+    )
+    legacy_calls = []
+
+    result = _call(
+        credential_loader=lambda: legacy_calls.append("credential"),
+        candidate_source=lambda: legacy_calls.append("candidate"),
+        delivery_adapter_factory=lambda _: legacy_calls.append("legacy-adapter"),
+        e6_composition_root=root,
+        e6_cycle_request=request,
+        e6_required=True,
+    )
+
+    assert result.result == e6_service.DELIVERED
+    assert result.e6_service_result is not None
+    assert result.e6_service_result.telegram_attempt_count == 1
+    assert len(deliveries) == 1
+    assert legacy_calls == []
+    assert result.e6_service_result.owner_decision_count == 0
+    assert result.e6_service_result.entry_active_mutation_count == 0
+    assert result.e6_service_result.slot_mutation_count == 0
+    assert result.e6_service_result.pair_lock_mutation_count == 0
+    assert result.e6_service_result.exchange_order_count == 0
+
+
+def test_e6_required_without_typed_composition_fails_before_legacy_dependencies():
+    calls = []
+    result = _call(
+        credential_loader=lambda: calls.append("credential"),
+        candidate_source=lambda: calls.append("candidate"),
+        delivery_adapter_factory=lambda _: calls.append("adapter"),
+        e6_required=True,
+    )
+    assert result.result == cycle.FAIL_CLOSED
+    assert result.reason == cycle.INVALID_CYCLE_CONFIGURATION
+    assert calls == []

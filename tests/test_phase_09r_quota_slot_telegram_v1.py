@@ -2,7 +2,11 @@ import pytest
 import json
 from unittest.mock import patch, MagicMock
 from engine.telegram_runtime_v4 import TelegramRuntimeConfig
-from engine.phase09r_telegram_delivery_adapter_v1 import Phase09RTelegramDeliveryAdapterV1
+from engine.phase09r_telegram_delivery_adapter_v1 import (
+    E6TelegramDeliveryRequestV1,
+    Phase09RTelegramDeliveryAdapterV1,
+)
+from test_e6_integrated_orchestrator_v1 import _run, _scenario
 
 
 def _payload():
@@ -75,3 +79,32 @@ def test_static_operational_quota_does_not_gate_autonomous_delivery(config):
         assert mock_post.call_count == 2
         assert adapter.rejection_reason is None
         assert not (config.quota_state_path and __import__("pathlib").Path(config.quota_state_path).exists())
+
+
+def test_e6_delivery_uses_exact_rendered_message_and_typed_identity(config, tmp_path):
+    orchestrator = _run(_scenario(tmp_path, name="adapter-e6"))
+    request = E6TelegramDeliveryRequestV1(
+        rendered_message=orchestrator.rendered_message,
+        publication_eligibility=orchestrator.publication_eligibility,
+        publication_envelope=orchestrator.publication_envelope,
+        owner_lifecycle_binding=orchestrator.owner_lifecycle_binding,
+        delivery_id=orchestrator.owner_lifecycle_binding.binding.delivery_id,
+    )
+    attempts = []
+
+    def post(url, *, json, timeout):
+        attempts.append((url, json, timeout))
+        response = MagicMock()
+        response.json.return_value = {"ok": True, "result": {"message_id": 808}}
+        return response
+
+    adapter = Phase09RTelegramDeliveryAdapterV1(config, http_post=post)
+    receipt = adapter(request, "TELEGRAM", "isolated-owner-state-test")
+
+    assert receipt["external_delivery_id"] == "808"
+    assert len(attempts) == 1
+    assert attempts[0][1]["text"] == orchestrator.rendered_message
+    assert "Manual owner confirmation is required before ENTRY_ACTIVE." in attempts[0][1]["text"]
+    assert attempts[0][1]["text"] != json.dumps(
+        orchestrator.publication_envelope.to_mapping(), sort_keys=True
+    )

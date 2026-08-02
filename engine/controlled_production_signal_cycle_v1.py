@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from engine import passive_production_signal_flow_v1 as flow
 from engine import production_signal_service_v1 as production
 from engine.owner_blueprint_scanner_gate_v1 import evaluate_candidate
+
+if TYPE_CHECKING:
+    from engine.e6_service_composition_root_v1 import (
+        E6ServiceCompositionRootV1,
+        E6ServiceCycleRequestV1,
+        E6ServiceCycleResultV1,
+    )
 
 
 RUN_CONTROLLED_PRODUCTION_SIGNAL_CYCLE = "RUN_CONTROLLED_PRODUCTION_SIGNAL_CYCLE"
@@ -95,6 +102,7 @@ class ControlledProductionSignalCycleResultV1:
     registration_attempted: bool
     reason: str
     timestamp: str | None
+    e6_service_result: E6ServiceCycleResultV1 | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -118,6 +126,11 @@ class ControlledProductionSignalCycleResultV1:
             "registration_attempted": self.registration_attempted,
             "reason": self.reason,
             "timestamp": self.timestamp,
+            "e6_service_result": (
+                None
+                if self.e6_service_result is None
+                else self.e6_service_result.to_mapping()
+            ),
         }
 
 
@@ -142,6 +155,7 @@ def _result(
     publication_attempted: bool = False,
     delivery_attempted: bool = False,
     registration_attempted: bool = False,
+    e6_service_result: E6ServiceCycleResultV1 | None = None,
 ) -> ControlledProductionSignalCycleResultV1:
     return ControlledProductionSignalCycleResultV1(
         result=result,
@@ -164,6 +178,7 @@ def _result(
         registration_attempted=registration_attempted,
         reason=reason,
         timestamp=timestamp if isinstance(timestamp, str) else None,
+        e6_service_result=e6_service_result,
     )
 
 
@@ -309,6 +324,9 @@ def run_controlled_production_signal_cycle(
     stage_a_provider_probe: object = None,
     stage_a_evidence_storage: object = None,
     owner_blueprint_ledger: object = None,
+    e6_composition_root: E6ServiceCompositionRootV1 | None = None,
+    e6_cycle_request: E6ServiceCycleRequestV1 | None = None,
+    e6_required: bool = False,
 ) -> ControlledProductionSignalCycleResultV1:
     """Perform one explicitly authorized publication and registration attempt."""
     if hasattr(phase_12_config, "activation_mode"):
@@ -335,6 +353,60 @@ def run_controlled_production_signal_cycle(
             timestamp=timestamp,
             gate=classification,
             reason=classification,
+        )
+
+    if type(e6_required) is not bool:
+        return _result(FAIL_CLOSED, timestamp=timestamp, reason=INVALID_CYCLE_CONFIGURATION)
+    e6_selected = e6_composition_root is not None or e6_cycle_request is not None
+    if e6_required or e6_selected:
+        try:
+            from engine.e6_service_composition_root_v1 import (
+                DELIVERED as E6_DELIVERED,
+                IDEMPOTENT_REPLAY as E6_IDEMPOTENT_REPLAY,
+                E6ServiceCompositionRootV1,
+                E6ServiceCycleRequestV1,
+                run_e6_service_cycle_v1,
+            )
+
+            if type(e6_composition_root) is not E6ServiceCompositionRootV1:
+                raise ValueError
+            if type(e6_cycle_request) is not E6ServiceCycleRequestV1:
+                raise ValueError
+            if e6_composition_root.authorization != gates:
+                raise ValueError
+            e6_result = run_e6_service_cycle_v1(
+                root=e6_composition_root,
+                request=e6_cycle_request,
+            )
+        except Exception:
+            return _result(
+                FAIL_CLOSED,
+                timestamp=timestamp,
+                reason=INVALID_CYCLE_CONFIGURATION,
+            )
+        completed = e6_result.disposition in {
+            E6_DELIVERED,
+            E6_IDEMPOTENT_REPLAY,
+        }
+        return _result(
+            e6_result.disposition,
+            timestamp=timestamp,
+            reason=e6_result.reason_code,
+            signal_id=e6_result.signal_id,
+            delivery_id=e6_result.delivery_id,
+            publication_confirmed=completed,
+            registration_applied=e6_result.owner_registration_applied,
+            partial_success=(
+                e6_result.owner_registration_applied and not completed
+            ),
+            replay=e6_result.disposition == E6_IDEMPOTENT_REPLAY,
+            candidate_generated=e6_result.orchestrator_disposition is not None,
+            publication_attempted=e6_result.telegram_attempt_count == 1,
+            delivery_attempted=e6_result.telegram_attempt_count == 1,
+            registration_attempted=(
+                e6_result.owner_lifecycle_binding_disposition is not None
+            ),
+            e6_service_result=e6_result,
         )
 
     if not _valid_configuration(

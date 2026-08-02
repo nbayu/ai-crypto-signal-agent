@@ -1,240 +1,296 @@
-import os
+from __future__ import annotations
+
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
 from engine import active_signal_ledger_v1 as active
-from engine.telegram_owner_control_state_v1 import initialize_state, load_state
+from engine import controlled_production_signal_cycle_v1 as controlled
+from engine.phase09r_telegram_delivery_adapter_v1 import (
+    Phase09RTelegramDeliveryAdapterV1,
+)
 from engine.run_production_signal_v1 import main
+from engine.telegram_owner_control_state_v1 import initialize_state, load_state
+from test_e6_integrated_orchestrator_v1 import _scenario
+from engine.e6_service_composition_root_v1 import E6ServiceCycleRequestV1
 
-NOW = "2026-07-29T11:17:41Z"
+
+IDENTITY = "a" * 32
+NOW = "2026-07-30T13:00:01Z"
 
 
-@pytest.fixture
-def valid_env():
-    return {
-        "TELEGRAM_BOT_TOKEN": "test_token",
-        "TELEGRAM_DESTINATION_ID": "test_dest_id",
-        "TELEGRAM_MAX_MESSAGE_LENGTH": "4000",
+def _authorization(**changes):
+    values = {name: True for name, _ in controlled._GATES}
+    values.update(changes)
+    return controlled.ControlledProductionSignalCycleAuthorizationV1(**values)
+
+
+def _bomb(calls, name):
+    def fail(*_args, **_kwargs):
+        calls.append(name)
+        raise AssertionError(name)
+
+    return fail
+
+
+def test_default_invocation_is_e6_disabled_and_reads_no_runtime_or_environment():
+    calls = []
+    assert main(
+        outcome_invocation_id_provider=_bomb(calls, "identity"),
+        e6_runtime_factory=_bomb(calls, "runtime"),
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+        telegram_delivery_adapter_factory=_bomb(calls, "telegram-adapter"),
+    ) == 2
+    assert calls == []
+
+
+@pytest.mark.parametrize("field, _reason", controlled._GATES)
+def test_every_controlled_gate_is_independently_required_before_construction(
+    field, _reason,
+):
+    calls = []
+    assert main(
+        outcome_invocation_id=IDENTITY,
+        e6_enabled=True,
+        authorization=_authorization(**{field: False}),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=_bomb(calls, "runtime"),
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+        telegram_delivery_adapter_factory=_bomb(calls, "telegram-adapter"),
+    ) == 2
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "e6_enabled",
+        "e6_activation_authorized",
+        "network_authorized",
+        "publication_authorized",
+    ),
+)
+def test_each_cli_e6_decision_is_explicit_and_independently_required(field):
+    calls = []
+    decisions = {
+        "e6_enabled": True,
+        "e6_activation_authorized": True,
+        "network_authorized": True,
+        "publication_authorized": True,
     }
+    decisions[field] = False
+    assert main(
+        outcome_invocation_id=IDENTITY,
+        authorization=_authorization(),
+        e6_runtime_factory=_bomb(calls, "runtime"),
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+        telegram_delivery_adapter_factory=_bomb(calls, "telegram-adapter"),
+        **decisions,
+    ) == 2
+    assert calls == []
 
 
-def test_missing_config_and_destination_return_2(valid_env):
-    with patch.dict(os.environ, {}, clear=True):
-        assert main(outcome_invocation_id="a" * 32) == 2
-
-    env = dict(valid_env)
-    del env["TELEGRAM_DESTINATION_ID"]
-    with patch.dict(os.environ, env, clear=True):
-        assert main(outcome_invocation_id="a" * 32) == 2
-
-
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_outcome_invocation_identity_generated_once_and_passed_to_master(
-    mock_run,
-    valid_env,
-):
-    generated = []
-    identity = "a" * 32
-
-    def provider():
-        generated.append(identity)
-        return identity
-
-    mock_run.return_value = {
-        "production_signal_out": {
-            "status": "OK",
-            "publication": {"delivery_state": "DELIVERY_SUCCEEDED"},
-        }
-    }
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id_provider=provider) == 0
-
-    mock_run.assert_called_once()
-    assert generated == [identity]
-    assert mock_run.call_args.kwargs["outcome_invocation_id"] == identity
-    assert mock_run.call_args.kwargs["enable_publication"] is True
-    assert mock_run.call_args.kwargs["owner_blueprint_ledger"] is None
-
-    provider_calls = []
-    mock_run.reset_mock()
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(
-            outcome_invocation_id="b" * 32,
-            outcome_invocation_id_provider=lambda: provider_calls.append(True),
-        ) == 0
-
-    assert provider_calls == []
-    assert mock_run.call_args.kwargs["outcome_invocation_id"] == "b" * 32
+@pytest.mark.parametrize(
+    "authorization",
+    (
+        None,
+        {name: True for name, _ in controlled._GATES},
+        controlled.ControlledProductionSignalCycleAuthorizationV1(),
+    ),
+)
+def test_invalid_or_partial_authorization_fails_closed(authorization):
+    calls = []
+    assert main(
+        outcome_invocation_id=IDENTITY,
+        e6_enabled=True,
+        authorization=authorization,
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=_bomb(calls, "runtime"),
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+    ) == 2
+    assert calls == []
 
 
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_missing_outcome_invocation_identity_fails_before_master(
-    mock_run,
-    valid_env,
-):
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id_provider=lambda: None) == 7
-
-    mock_run.assert_not_called()
-
-
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_malformed_outcome_invocation_identity_fails_before_master(
-    mock_run,
-    valid_env,
-):
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id="A" * 32) == 7
-
-    mock_run.assert_not_called()
+def test_invalid_outcome_identity_fails_before_runtime_or_telegram_construction():
+    calls = []
+    assert main(
+        outcome_invocation_id="A" * 32,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=_bomb(calls, "runtime"),
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+        telegram_delivery_adapter_factory=_bomb(calls, "telegram-adapter"),
+    ) == 7
+    assert calls == []
 
 
-def test_static_f4_quota_values_are_not_required(valid_env):
-    with patch.dict(os.environ, valid_env, clear=True):
-        with patch(
-            "engine.run_production_signal_v1.run_master_engine_v4"
-        ) as mock_run:
-            mock_run.return_value = {
-                "production_signal_out": {
-                    "evaluation": {"outcome_kind": "NO_TRADE"}
-                }
-            }
-            assert main(outcome_invocation_id="a" * 32) == 0
-
-
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_master_failure_and_delivery_failure_exit_contracts(
-    mock_run,
-    valid_env,
-    capsys,
-):
-    mock_run.side_effect = Exception("General error")
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id="a" * 32) == 7
-    captured = capsys.readouterr()
-    assert "test_token" not in captured.out
-    assert "test_token" not in captured.err
-
-    mock_run.reset_mock()
-    mock_run.side_effect = lambda *args, **kwargs: {
-        "production_signal_out": {
-            "status": "OK",
-            "publication": {"delivery_state": "DELIVERY_FAILED"},
-        }
-    }
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id="b" * 32) == 5
-
-
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_malformed_receipt_returns_6(mock_run, valid_env):
-    def fake_run(*args, **kwargs):
-        adapter = kwargs["delivery_adapter"]
-        adapter.malformed_receipt = True
-        return {
-            "production_signal_out": {
-                "status": "OK",
-                "publication": {"delivery_state": "DELIVERY_FAILED"},
-            }
-        }
-
-    mock_run.side_effect = fake_run
-    with patch.dict(os.environ, valid_env, clear=True):
-        assert main(outcome_invocation_id="a" * 32) == 6
-
-
-def _completed_publication():
-    signal_id = "PSG-" + "1" * 64
-    delivery_id = "PDL-" + "2" * 64
-    return {
-        "delivery_state": "DELIVERY_SUCCEEDED",
-        "signal_id": signal_id,
-        "delivery_id": delivery_id,
-        "mode": "SWING",
-        "published_at": "2026-07-29T11:17:37Z",
-        "source_payload_hash": "3" * 64,
-        "publication_payload_hash": "4" * 64,
-        "publication_payload": {
-            "signal_id": signal_id,
-            "mode": "SWING",
-            "symbol": "KMNO/USDT:USDT",
-        },
-        "delivery_receipt": {
-            "destination_id": "test_dest_id",
-            "external_delivery_id": "913",
-            "delivered_at": NOW,
-        },
-    }
-
-
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_delivery_success_registers_pending_before_binding_and_replays_idempotently(
-    mock_run, valid_env, tmp_path,
-):
-    ledger_path = tmp_path / "ledger.json"
-    control_path = tmp_path / "control.json"
-    active.initialize_ledger(ledger_path, created_at=NOW)
+def test_authorized_fake_e6_cli_sends_once_and_binds_pending_owner_state(tmp_path):
+    scenario = _scenario(tmp_path, name="entrypoint-success")
+    control_path = tmp_path / "owner-control.json"
     initialize_state(control_path, timestamp=NOW)
-    publication = _completed_publication()
-    mock_run.return_value = {
-        "production_signal_out": {"status": "OK", "publication": publication},
-    }
-    env = {
-        **valid_env,
-        "ACTIVE_SIGNAL_LEDGER_PATH": str(ledger_path),
+    environment = {
+        "TELEGRAM_DESTINATION_ID": "isolated-owner-state-test",
         "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
     }
-
-    with patch.dict(os.environ, env, clear=True):
-        assert main(outcome_invocation_id="c" * 32) == 0
-
-    ledger = active.load_ledger(ledger_path)
-    signal = ledger["signals"][publication["signal_id"]]
-    assert signal["state"] == active.PUBLISHED_PENDING_ENTRY
-    assert signal["delivery_id"] == publication["delivery_id"]
-    assert active.inspect_capacity(ledger)["active_by_mode"]["SWING"] == 0
-    assert not any(
-        record["state"] == active.ENTRY_ACTIVE
-        for record in ledger["signals"].values()
+    config = SimpleNamespace(
+        bot_token="fixture-only-token",
+        max_response_chars=4000,
     )
-    binding = load_state(control_path)["signal_message_bindings"]["test_dest_id:913"]
-    assert binding["signal_id"] == publication["signal_id"]
-    assert binding["canonical_pair"] == "KMNO/USDT"
-    before_ledger = ledger_path.read_bytes()
-    before_control = control_path.read_bytes()
+    identity_calls = []
+    runtime_calls = []
+    config_calls = []
+    http_attempts = []
 
-    with patch.dict(os.environ, env, clear=True):
-        assert main(outcome_invocation_id="d" * 32) == 0
+    def identity_provider():
+        identity_calls.append(IDENTITY)
+        return IDENTITY
 
-    assert ledger_path.read_bytes() == before_ledger
-    assert control_path.read_bytes() == before_control
+    def runtime_factory(*, outcome_invocation_id):
+        runtime_calls.append(outcome_invocation_id)
+        return E6ServiceCycleRequestV1(
+            orchestrator_request=scenario["request"],
+            orchestrator_ports=scenario["ports"],
+            channel="TELEGRAM",
+            destination_id="isolated-owner-state-test",
+        )
+
+    def config_loader(value):
+        config_calls.append(value)
+        return config
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 913}}
+
+    def fake_post(url, *, json, timeout):
+        http_attempts.append((url, json, timeout))
+        return Response()
+
+    def adapter_factory(value, **kwargs):
+        assert value is config
+        return Phase09RTelegramDeliveryAdapterV1(
+            value,
+            http_post=fake_post,
+            quota_now_provider=lambda: __import__("datetime").datetime(
+                2026,
+                7,
+                30,
+                13,
+                0,
+                1,
+                tzinfo=__import__("datetime").timezone.utc,
+            ),
+            **kwargs,
+        )
+
+    exit_status = main(
+        outcome_invocation_id_provider=identity_provider,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=runtime_factory,
+        environment=environment,
+        telegram_config_loader=config_loader,
+        telegram_delivery_adapter_factory=adapter_factory,
+    )
+
+    assert exit_status == 0
+    assert identity_calls == [IDENTITY]
+    assert runtime_calls == [IDENTITY]
+    assert config_calls == [environment]
+    assert len(http_attempts) == 1
+    assert http_attempts[0][1]["chat_id"] == "isolated-owner-state-test"
+    assert http_attempts[0][1]["text"].startswith(
+        "AI CRYPTO SIGNAL — MANUAL OWNER REVIEW"
+    )
+    assert "Manual owner confirmation is required before ENTRY_ACTIVE." in (
+        http_attempts[0][1]["text"]
+    )
+    state = load_state(control_path)
+    binding = state["signal_message_bindings"]["isolated-owner-state-test:913"]
+    assert binding["signal_id"] == scenario["request"].publication_signal_id
+    ledger = active.load_ledger(scenario["ports"].active_ledger_path)
+    assert ledger["signals"][binding["signal_id"]]["state"] == (
+        active.PUBLISHED_PENDING_ENTRY
+    )
+    assert active.inspect_capacity(ledger)["total_active"] == 0
 
 
-@patch("engine.run_production_signal_v1.run_master_engine_v4")
-def test_registration_failure_fails_closed_without_binding_or_occupancy(
-    mock_run, valid_env, tmp_path,
+def test_fake_telegram_failure_returns_5_once_without_secret_output(
+    tmp_path, capsys,
 ):
-    ledger_path = tmp_path / "ledger.json"
-    control_path = tmp_path / "control.json"
-    active.initialize_ledger(ledger_path, created_at=NOW)
+    scenario = _scenario(tmp_path, name="entrypoint-failure")
+    control_path = tmp_path / "owner-control-failure.json"
     initialize_state(control_path, timestamp=NOW)
-    mock_run.return_value = {
-        "production_signal_out": {
-            "status": "OK", "publication": _completed_publication(),
-        },
-    }
-    env = {
-        **valid_env,
-        "ACTIVE_SIGNAL_LEDGER_PATH": str(ledger_path),
-        "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
-    }
+    attempts = []
 
-    with patch.dict(os.environ, env, clear=True), patch(
-        "engine.run_production_signal_v1.signal_flow.register_completed_publication",
-        return_value=SimpleNamespace(result="FAIL_CLOSED"),
-    ):
-        assert main(outcome_invocation_id="e" * 32) == 7
-    assert active.load_ledger(ledger_path)["ledger_revision"] == 0
+    def runtime_factory(**_kwargs):
+        return E6ServiceCycleRequestV1(
+            orchestrator_request=scenario["request"],
+            orchestrator_ports=scenario["ports"],
+            channel="TELEGRAM",
+            destination_id="isolated-owner-state-test",
+        )
+
+    def adapter_factory(config, **kwargs):
+        def fail(*_args, **_options):
+            attempts.append(1)
+            raise RuntimeError("fixture-secret-token")
+
+        return Phase09RTelegramDeliveryAdapterV1(
+            config,
+            http_post=fail,
+            **kwargs,
+        )
+
+    status = main(
+        outcome_invocation_id=IDENTITY,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=runtime_factory,
+        environment={
+            "TELEGRAM_DESTINATION_ID": "isolated-owner-state-test",
+            "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
+        },
+        telegram_config_loader=lambda _env: SimpleNamespace(
+            bot_token="fixture-only-token",
+            max_response_chars=4000,
+        ),
+        telegram_delivery_adapter_factory=adapter_factory,
+    )
+    captured = capsys.readouterr()
+
+    assert status == 5
+    assert attempts == [1]
+    assert "fixture-secret-token" not in captured.out
+    assert "fixture-secret-token" not in captured.err
     assert load_state(control_path)["signal_message_bindings"] == {}
+
+
+def test_entrypoint_has_no_legacy_publication_or_exchange_bypass():
+    source = Path(__import__("engine.run_production_signal_v1", fromlist=["x"]).__file__).read_text(
+        encoding="utf-8"
+    )
+    assert "run_master_engine_v4" not in source
+    assert "enable_publication=True" not in source
+    assert "production_signal_service_v1" not in source
+    assert "ccxt" not in source
+    assert "binance" not in source
+    assert "mark_entry_active" not in source
+    assert "systemctl" not in source
