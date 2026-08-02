@@ -8,10 +8,15 @@ readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"
 readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"
 readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.service"
 readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.timer"
+readonly CONFIGURATION_DIRECTORY="/etc/ai-crypto-signal-agent"
 readonly ACTIVATION_CONFIGURATION="/etc/ai-crypto-signal-agent/e6-activation-v1.env"
 readonly CREDENTIAL_METADATA="/etc/ai-crypto-signal-agent/e6-credentials.metadata"
+readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"
+readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"
 readonly OWNER_CONTROL_STATE="/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json"
 readonly ROLLBACK_REF="/var/lib/ai-crypto-signal-agent/e6-rollback-release.path"
+readonly ROOT_USER="root"
+readonly ROOT_GROUP="root"
 readonly SERVICE_USER="ai-crypto-signal-agent"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
 readonly EXPECTED_CONFIGURATION_KEYS=$'E6_ACTIVATION_SCHEMA_VERSION\nE6_RELEASE_COMMIT\nE6_RELEASE_TREE\nE6_TRUSTED_CHECKPOINT_COMMIT\nE6_RELEASE_ROOT\nE6_RELEASE_REFERENCE_PATH\nE6_CREDENTIAL_METADATA_PATH\nE6_OWNER_CONTROL_STATE_PATH\nE6_SERVICE_USER\nE6_SERVICE_GROUP\nE6_RUNTIME_ENABLED\nE6_PROVIDER_ENABLED\nE6_ACTIVATION_GATE\nE6_WORKLOAD_GATE\nE6_CREDENTIAL_GATE\nE6_NETWORK_GATE\nE6_PUBLICATION_GATE\nE6_TELEGRAM_PUBLICATION_GATE\nE6_AUTOMATIC_RETRY_COUNT\nE6_PROVIDER_SUBSTITUTION_ENABLED\nE6_PROMPT_REPAIR_ENABLED\nE6_STALE_REVIEW_REUSE_ENABLED\nE6_AUTOMATED_EXCHANGE_TRADING_ENABLED'
@@ -52,8 +57,19 @@ e6_path_has_no_write_mode_bits() {
     (( (8#$mode & 8#222) == 0 ))
 }
 
+configuration_directory_access_valid=NO
+if [[ -d "$CONFIGURATION_DIRECTORY" && ! -L "$CONFIGURATION_DIRECTORY" &&
+      "$(stat -Lc '%U:%G:%a' "$CONFIGURATION_DIRECTORY" 2>/dev/null || true)" == "$ROOT_USER:$SERVICE_GROUP:750" ]]; then
+    configuration_directory_access_valid=YES
+fi
+
+release_reference_metadata_valid=NO
 release_root=""
-if [[ -f "$RELEASE_REF" && ! -L "$RELEASE_REF" && "$(wc -l < "$RELEASE_REF")" -eq 1 ]]; then
+if [[ -f "$RELEASE_REF" && ! -L "$RELEASE_REF" &&
+      "$(stat -Lc '%U:%G:%a' "$RELEASE_REF" 2>/dev/null || true)" == "$ROOT_USER:$SERVICE_GROUP:440" ]]; then
+    release_reference_metadata_valid=YES
+fi
+if [[ "$release_reference_metadata_valid" == YES && "$(wc -l < "$RELEASE_REF")" -eq 1 ]]; then
     release_root="$(sed -n '1p' "$RELEASE_REF")"
 fi
 
@@ -112,7 +128,12 @@ if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" &&
         timer_match=YES
     fi
 fi
-if [[ -n "$source_commit" && -f "$RUNTIME_MARKER" && ! -L "$RUNTIME_MARKER" &&
+runtime_marker_metadata_valid=NO
+if [[ -f "$RUNTIME_MARKER" && ! -L "$RUNTIME_MARKER" &&
+      "$(stat -Lc '%U:%G:%a' "$RUNTIME_MARKER" 2>/dev/null || true)" == "$ROOT_USER:$ROOT_GROUP:400" ]]; then
+    runtime_marker_metadata_valid=YES
+fi
+if [[ -n "$source_commit" && "$runtime_marker_metadata_valid" == YES &&
       "$(cat "$RUNTIME_MARKER")" == "$source_commit" ]]; then
     runtime_marker_match=YES
 fi
@@ -122,7 +143,15 @@ activation_defaults_closed=NO
 activation_all_authorized=NO
 credential_metadata_valid=NO
 owner_control_metadata_valid=NO
-if [[ -f "$ACTIVATION_CONFIGURATION" && ! -L "$ACTIVATION_CONFIGURATION" &&
+secret_environment_metadata_valid=NO
+if [[ -f "$TELEGRAM_ENVIRONMENT" && ! -L "$TELEGRAM_ENVIRONMENT" &&
+      "$(stat -Lc '%U:%G:%a' "$TELEGRAM_ENVIRONMENT" 2>/dev/null || true)" == "$ROOT_USER:$ROOT_GROUP:600" &&
+      -f "$PROVIDER_ENVIRONMENT" && ! -L "$PROVIDER_ENVIRONMENT" &&
+      "$(stat -Lc '%U:%G:%a' "$PROVIDER_ENVIRONMENT" 2>/dev/null || true)" == "$ROOT_USER:$ROOT_GROUP:600" ]]; then
+    secret_environment_metadata_valid=YES
+fi
+if [[ "$configuration_directory_access_valid" == YES &&
+      -f "$ACTIVATION_CONFIGURATION" && ! -L "$ACTIVATION_CONFIGURATION" &&
       "$(stat -Lc '%U:%G:%a' "$ACTIVATION_CONFIGURATION")" == "$SERVICE_USER:$SERVICE_GROUP:640" &&
       "$(cut -d= -f1 "$ACTIVATION_CONFIGURATION")" == "$EXPECTED_CONFIGURATION_KEYS" ]] &&
    ! LC_ALL=C grep -q $'\r' "$ACTIVATION_CONFIGURATION"; then
@@ -160,7 +189,8 @@ if [[ -f "$ACTIVATION_CONFIGURATION" && ! -L "$ACTIVATION_CONFIGURATION" &&
         activation_configuration_valid=NO
     fi
 fi
-if [[ -f "$CREDENTIAL_METADATA" && ! -L "$CREDENTIAL_METADATA" &&
+if [[ "$configuration_directory_access_valid" == YES &&
+      -f "$CREDENTIAL_METADATA" && ! -L "$CREDENTIAL_METADATA" &&
       "$(stat -Lc '%U:%G:%a' "$CREDENTIAL_METADATA")" == "$SERVICE_USER:$SERVICE_GROUP:640" ]]; then
     credential_metadata_valid=YES
 fi
@@ -233,8 +263,11 @@ if [[ -e "$ROLLBACK_REF" || -L "$ROLLBACK_REF" ]]; then
 fi
 
 record_check IMMUTABLE_RELEASE_MATCH "$release_match" RELEASE_IDENTITY_MISMATCH
+record_check CONFIGURATION_DIRECTORY_ACCESS_VALID "$configuration_directory_access_valid" CONFIGURATION_DIRECTORY_ACCESS_INVALID
+record_check INSTALLED_RELEASE_REFERENCE_METADATA_VALID "$release_reference_metadata_valid" INSTALLED_RELEASE_REFERENCE_METADATA_INVALID
 record_check RELEASE_BYTE_IDENTITY "$release_bytes_match" RELEASE_BYTE_IDENTITY_MISMATCH
 record_check TRUSTED_CHECKPOINT_BINDING "$binding_match" TRUSTED_CHECKPOINT_BINDING_MISMATCH
+record_check ACCEPTED_RELEASE_MARKER_METADATA_VALID "$runtime_marker_metadata_valid" ACCEPTED_RELEASE_MARKER_METADATA_INVALID
 record_check RUNTIME_MARKER_MATCH "$runtime_marker_match" RUNTIME_MARKER_MISMATCH
 record_check PACKAGE_MANIFEST_MATCH "$package_manifest_match" PACKAGE_MANIFEST_MISMATCH
 record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
@@ -242,6 +275,7 @@ record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
 record_check TIMER_CONTRACT_VALID "$timer_contract_valid" TIMER_CONTRACT_MISMATCH
 record_check ACTIVATION_CONFIGURATION_VALID "$activation_configuration_valid" ACTIVATION_CONFIGURATION_INVALID
 record_check CREDENTIAL_METADATA_VALID "$credential_metadata_valid" CREDENTIAL_METADATA_INVALID
+record_check SECRET_ENVIRONMENT_METADATA_VALID "$secret_environment_metadata_valid" SECRET_ENVIRONMENT_METADATA_INVALID
 record_check OWNER_CONTROL_METADATA_VALID "$owner_control_metadata_valid" OWNER_CONTROL_METADATA_INVALID
 record_check KILL_SWITCH_STATE_VALID "$kill_switch_valid" KILL_SWITCH_STATE_INVALID
 printf 'KILL_SWITCH_ACTIVE=%s\n' "$kill_switch_active"

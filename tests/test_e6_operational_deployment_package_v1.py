@@ -16,6 +16,25 @@ SYSTEMD = PACKAGE / "systemd"
 COMMIT = "a" * 40
 TREE = "b" * 40
 TRUSTED = "c" * 40
+STATIC_ACTIVATION_PATH_BINDING = (
+    "E6_ACTIVATION_CONFIGURATION_PATH="
+    "/etc/ai-crypto-signal-agent/e6-activation-v1.env"
+)
+HOST_ACCESS_CONTRACT = {
+    "/etc/ai-crypto-signal-agent": "root:ai-crypto-signal-agent:0750",
+    "/etc/ai-crypto-signal-agent/e6-activation-v1.env": (
+        "ai-crypto-signal-agent:ai-crypto-signal-agent:0640"
+    ),
+    "/etc/ai-crypto-signal-agent/e6-credentials.metadata": (
+        "ai-crypto-signal-agent:ai-crypto-signal-agent:0640"
+    ),
+    "/etc/ai-crypto-signal-agent/phase09r1.env": "root:root:0600",
+    "/etc/ai-crypto-signal-agent/deepseek.env": "root:root:0600",
+    "/var/lib/ai-crypto-signal-agent/e6-installed-release.path": (
+        "root:ai-crypto-signal-agent:0440"
+    ),
+    "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker": "root:root:0400",
+}
 
 TEN_PATHS = {
     "engine/e6_activation_configuration_v1.py",
@@ -81,6 +100,10 @@ def _text(path: Path) -> str:
 def _directives(text: str, key: str) -> list[str]:
     prefix = f"{key}="
     return [line[len(prefix) :] for line in text.splitlines() if line.startswith(prefix)]
+
+
+def _metadata(path: Path) -> tuple[str, str, str]:
+    return path.owner(), path.group(), f"{path.stat().st_mode & 0o777:04o}"
 
 
 def _render(value: str, *, release: Path, commit: str, tree: str, trusted: str) -> str:
@@ -294,6 +317,13 @@ def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> 
     ]
     assert _directives(service, "EnvironmentFile") == required_environment_files
     assert not any(value.startswith("-") for value in required_environment_files)
+    assert _directives(service, "Environment").count(
+        STATIC_ACTIVATION_PATH_BINDING
+    ) == 1
+    assert _directives(service, "LoadCredential") == [
+        "accepted_e6_release_commit:"
+        "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker"
+    ]
     assert _directives(service, "ExecStart") == [
         "@@RELEASE_ROOT@@/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
     ]
@@ -302,6 +332,12 @@ def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> 
         release / ".e6-rendered/ai-crypto-signal-agent-e6.service"
     )
     assert _directives(rendered_service, "EnvironmentFile") == required_environment_files
+    assert _directives(rendered_service, "Environment").count(
+        STATIC_ACTIVATION_PATH_BINDING
+    ) == 1
+    assert _directives(rendered_service, "LoadCredential") == _directives(
+        service, "LoadCredential"
+    )
     assert not any(
         value.startswith("-")
         for value in _directives(rendered_service, "EnvironmentFile")
@@ -315,6 +351,9 @@ def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> 
     ):
         assert forbidden not in rendered_service
     assert "run_master_engine_v4" not in service
+    assert _directives(service, "User") == ["ai-crypto-signal-agent"]
+    assert _directives(service, "Group") == ["ai-crypto-signal-agent"]
+    assert _directives(service, "Restart") == ["no"]
     assert "[Install]" not in service
     timer = _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
     assert _directives(timer, "Unit") == ["ai-crypto-signal-agent-e6.service"]
@@ -323,6 +362,20 @@ def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> 
     assert _directives(timer, "AccuracySec") == ["1min"]
     assert _directives(timer, "Persistent") == ["false"]
     assert not any(_directives(timer, key) for key in ("OnBootSec", "OnStartupSec", "OnUnitActiveSec"))
+
+
+def test_host_access_contract_is_exact_nonsecret_and_documented() -> None:
+    assert len(CONFIGURATION_KEYS) == 23
+    assert "E6_ACTIVATION_CONFIGURATION_PATH" not in CONFIGURATION_KEYS
+    readme = _text(PACKAGE / "README.md")
+    for path, metadata in HOST_ACCESS_CONTRACT.items():
+        assert path in readme
+        assert metadata in readme
+    assert STATIC_ACTIVATION_PATH_BINDING in readme
+    assert "schema remains exactly 23 keys" in readme
+    assert "direct service-user file readability" in readme
+    assert "${CREDENTIALS_DIRECTORY}/accepted_e6_release_commit" in readme
+    assert "no second canary, cutover, or activation" in readme
 
 
 def _make_run_once_fixture(
@@ -358,6 +411,7 @@ def _make_run_once_fixture(
     owner_state = metadata / "owner-state.json"
     configuration = metadata / "activation.env"
     release_ref.write_text(f"{release}\n", encoding="ascii")
+    release_ref.chmod(0o440)
     credential_metadata.write_text("metadata-only\n", encoding="ascii")
     owner_state.write_text("{}\n", encoding="ascii")
     credential_metadata.chmod(0o640)
@@ -388,6 +442,35 @@ def _make_run_once_fixture(
     paths = {"invocation": invocation, "lock": lock, "kill": kill, "configuration": configuration}
     wrapper = release / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
     return wrapper, environment, paths
+
+
+def test_run_once_requires_bound_activation_path_and_credential_copy(
+    tmp_path: Path,
+) -> None:
+    wrapper, environment, paths = _make_run_once_fixture(tmp_path, authorized=True)
+    for configured_path in (None, ""):
+        rejected_environment = environment.copy()
+        if configured_path is None:
+            rejected_environment.pop("E6_ACTIVATION_CONFIGURATION_PATH")
+        else:
+            rejected_environment["E6_ACTIVATION_CONFIGURATION_PATH"] = configured_path
+        rejected = subprocess.run(
+            [str(wrapper)],
+            env=rejected_environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode == 78
+        assert "E6_LAUNCH_BLOCKED=ACTIVATION_CONFIGURATION_FILE" in rejected.stderr
+        assert not paths["invocation"].exists()
+
+    source = _text(BIN / "ai-crypto-signal-agent-e6-run-once")
+    assert "/etc/ai-crypto-signal-agent/phase09r1.env" not in source
+    assert "/etc/ai-crypto-signal-agent/deepseek.env" not in source
+    assert "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker" not in source
+    assert '${CREDENTIALS_DIRECTORY:-}' in source
+    assert 'accepted_e6_release_commit' in source
 
 
 def test_run_once_defaults_and_partial_authorization_block_before_invocation(tmp_path: Path) -> None:
@@ -461,6 +544,7 @@ def _make_health_fixture(
     fake_bin = tmp_path / "fake-bin"
     for path in (runtime, units, metadata, fake_bin):
         path.mkdir(parents=True)
+    metadata.chmod(0o750)
     user = tmp_path.owner()
     group = tmp_path.group()
     release_ref = runtime / "installed-release.path"
@@ -471,6 +555,8 @@ def _make_health_fixture(
     timer = units / "ai-crypto-signal-agent-e6.timer"
     configuration = metadata / "activation.env"
     credential_metadata = metadata / "credentials.metadata"
+    telegram_environment = metadata / "phase09r1.env"
+    provider_environment = metadata / "deepseek.env"
     owner_state = metadata / "owner-state.json"
     rollback_ref = runtime / "rollback-release.path"
     replacements = {
@@ -480,16 +566,23 @@ def _make_health_fixture(
         'readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"': f'readonly LOCK_PATH="{lock}"',
         'readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.service"': f'readonly SERVICE_UNIT="{service}"',
         'readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.timer"': f'readonly TIMER_UNIT="{timer}"',
+        'readonly CONFIGURATION_DIRECTORY="/etc/ai-crypto-signal-agent"': f'readonly CONFIGURATION_DIRECTORY="{metadata}"',
         'readonly ACTIVATION_CONFIGURATION="/etc/ai-crypto-signal-agent/e6-activation-v1.env"': f'readonly ACTIVATION_CONFIGURATION="{configuration}"',
         'readonly CREDENTIAL_METADATA="/etc/ai-crypto-signal-agent/e6-credentials.metadata"': f'readonly CREDENTIAL_METADATA="{credential_metadata}"',
+        'readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"': f'readonly TELEGRAM_ENVIRONMENT="{telegram_environment}"',
+        'readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"': f'readonly PROVIDER_ENVIRONMENT="{provider_environment}"',
         'readonly OWNER_CONTROL_STATE="/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json"': f'readonly OWNER_CONTROL_STATE="{owner_state}"',
         'readonly ROLLBACK_REF="/var/lib/ai-crypto-signal-agent/e6-rollback-release.path"': f'readonly ROLLBACK_REF="{rollback_ref}"',
+        'readonly ROOT_USER="root"': f'readonly ROOT_USER="{user}"',
+        'readonly ROOT_GROUP="root"': f'readonly ROOT_GROUP="{group}"',
         'readonly SERVICE_USER="ai-crypto-signal-agent"': f'readonly SERVICE_USER="{user}"',
         'readonly SERVICE_GROUP="ai-crypto-signal-agent"': f'readonly SERVICE_GROUP="{group}"',
     }
     release = _make_release(tmp_path / "release-parent", replacements=replacements)
     release_ref.write_text(f"{release}\n", encoding="ascii")
+    release_ref.chmod(0o440)
     marker.write_text(release.name + "\n", encoding="ascii")
+    marker.chmod(0o400)
     service.write_bytes(release.joinpath(".e6-rendered/ai-crypto-signal-agent-e6.service").read_bytes())
     timer.write_bytes(release.joinpath("deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer").read_bytes())
     configuration.write_text(
@@ -507,6 +600,10 @@ def _make_health_fixture(
     configuration.chmod(0o640)
     credential_metadata.write_text("fixture-secret-must-not-be-output\n", encoding="ascii")
     credential_metadata.chmod(0o640)
+    telegram_environment.write_text("telegram-secret-must-not-be-output\n", encoding="ascii")
+    telegram_environment.chmod(0o600)
+    provider_environment.write_text("provider-secret-must-not-be-output\n", encoding="ascii")
+    provider_environment.chmod(0o600)
     owner_state.write_text(
         '{"schema_name":"telegram-owner-control-state","schema_version":1}\n',
         encoding="ascii",
@@ -536,6 +633,28 @@ esac
         encoding="utf-8",
     )
     fake_systemctl.chmod(0o755)
+    fake_stat = fake_bin / "stat"
+    fake_stat.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+path="${!#}"
+if [[ "$path" == "$MOCK_CONFIG_DIRECTORY_PATH" && -n "${MOCK_CONFIG_DIRECTORY_STAT:-}" ]]; then
+  printf '%s\n' "$MOCK_CONFIG_DIRECTORY_STAT"
+elif [[ "$path" == "$MOCK_RELEASE_REFERENCE_PATH" && -n "${MOCK_RELEASE_REFERENCE_STAT:-}" ]]; then
+  printf '%s\n' "$MOCK_RELEASE_REFERENCE_STAT"
+elif [[ "$path" == "$MOCK_ACCEPTED_MARKER_PATH" && -n "${MOCK_ACCEPTED_MARKER_STAT:-}" ]]; then
+  printf '%s\n' "$MOCK_ACCEPTED_MARKER_STAT"
+elif [[ "$path" == "$MOCK_TELEGRAM_ENVIRONMENT_PATH" && -n "${MOCK_TELEGRAM_ENVIRONMENT_STAT:-}" ]]; then
+  printf '%s\n' "$MOCK_TELEGRAM_ENVIRONMENT_STAT"
+elif [[ "$path" == "$MOCK_PROVIDER_ENVIRONMENT_PATH" && -n "${MOCK_PROVIDER_ENVIRONMENT_STAT:-}" ]]; then
+  printf '%s\n' "$MOCK_PROVIDER_ENVIRONMENT_STAT"
+else
+  exec /usr/bin/stat "$@"
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_stat.chmod(0o755)
     environment = {
         **os.environ,
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
@@ -545,12 +664,22 @@ esac
         "MOCK_TIMER_ENABLED": "disabled",
         "MOCK_TIMER_SUBSTATE": "dead",
         "MOCK_TIMER_NEXT": "0",
+        "MOCK_CONFIG_DIRECTORY_PATH": str(metadata),
+        "MOCK_RELEASE_REFERENCE_PATH": str(release_ref),
+        "MOCK_ACCEPTED_MARKER_PATH": str(marker),
+        "MOCK_TELEGRAM_ENVIRONMENT_PATH": str(telegram_environment),
+        "MOCK_PROVIDER_ENVIRONMENT_PATH": str(provider_environment),
     }
     health = release / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-health"
     paths = {
         "release": release,
         "configuration": configuration,
         "credential_metadata": credential_metadata,
+        "configuration_directory": metadata,
+        "release_ref": release_ref,
+        "marker": marker,
+        "telegram_environment": telegram_environment,
+        "provider_environment": provider_environment,
         "kill": kill,
         "lock": lock,
         "service": service,
@@ -567,6 +696,16 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
     assert "SERVICE_UNIT_MATCH=YES" in disabled.stdout
     assert "ROLLBACK_READINESS=YES" in disabled.stdout
     assert "ROLLBACK_STATE=NOT_CONFIGURED" in disabled.stdout
+    assert "HEALTH_REASON=" not in disabled.stdout
+    assert "SECRET_VALUE_EXPOSURE_COUNT=0" in disabled.stdout
+    assert "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO" in disabled.stdout
+    assert "CONFIGURATION_DIRECTORY_ACCESS_VALID=YES" in disabled.stdout
+    assert "INSTALLED_RELEASE_REFERENCE_METADATA_VALID=YES" in disabled.stdout
+    assert "ACCEPTED_RELEASE_MARKER_METADATA_VALID=YES" in disabled.stdout
+    assert "SECRET_ENVIRONMENT_METADATA_VALID=YES" in disabled.stdout
+    assert "fixture-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
+    assert "telegram-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
+    assert "provider-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
 
     health, environment, _paths = _make_health_fixture(tmp_path / "disabled-infinity")
     environment["MOCK_TIMER_NEXT"] = "infinity"
@@ -645,6 +784,108 @@ def test_health_rejects_service_missing_required_environment_file(tmp_path: Path
         assert "SERVICE_UNIT_MATCH=NO" in rejected.stdout
         assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
 
+    service_variants = {
+        "missing-static-binding": lambda text: text.replace(
+            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n", ""
+        ),
+        "duplicate-static-binding": lambda text: text.replace(
+            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n",
+            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n" * 2,
+        ),
+        "altered-static-binding": lambda text: text.replace(
+            STATIC_ACTIVATION_PATH_BINDING,
+            "E6_ACTIVATION_CONFIGURATION_PATH=/etc/ai-crypto-signal-agent/wrong.env",
+        ),
+        "reordered-static-binding": lambda text: text.replace(
+            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n"
+            f"Environment=E6_SOURCE_COMMIT={COMMIT}\n",
+            f"Environment=E6_SOURCE_COMMIT={COMMIT}\n"
+            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n",
+        ),
+    }
+    for name, mutate in service_variants.items():
+        health, environment, paths = _make_health_fixture(tmp_path / name)
+        service = paths["service"]
+        original = service.read_text(encoding="utf-8")
+        changed = mutate(original)
+        assert changed != original
+        service.write_text(changed, encoding="utf-8")
+        rejected = subprocess.run(
+            [str(health)], env=environment, text=True, capture_output=True, check=False
+        )
+        assert rejected.returncode == 1
+        assert "SERVICE_UNIT_MATCH=NO" in rejected.stdout
+        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
+
+
+def test_health_rejects_each_host_access_metadata_defect_without_secret_read(
+    tmp_path: Path,
+) -> None:
+    cases = (
+        "configuration-parent-old-group",
+        "configuration-parent-wrong-mode",
+        "configuration-parent-symlink",
+        "release-reference-old-metadata",
+        "release-reference-wrong-group",
+        "release-reference-wrong-mode",
+        "release-reference-symlink",
+        "accepted-marker-wrong-owner",
+        "accepted-marker-wrong-group",
+        "accepted-marker-wrong-mode",
+        "telegram-environment-wrong-owner",
+        "telegram-environment-wrong-mode",
+        "provider-environment-wrong-group",
+        "provider-environment-wrong-mode",
+    )
+    for case in cases:
+        health, environment, paths = _make_health_fixture(tmp_path / case)
+        user = tmp_path.owner()
+        group = tmp_path.group()
+        if case == "configuration-parent-old-group":
+            environment["MOCK_CONFIG_DIRECTORY_STAT"] = f"{user}:root:750"
+        elif case == "configuration-parent-wrong-mode":
+            paths["configuration_directory"].chmod(0o700)
+        elif case == "configuration-parent-symlink":
+            configuration_directory = paths["configuration_directory"]
+            real_directory = configuration_directory.with_name("metadata-real")
+            configuration_directory.rename(real_directory)
+            configuration_directory.symlink_to(real_directory, target_is_directory=True)
+        elif case == "release-reference-old-metadata":
+            environment["MOCK_RELEASE_REFERENCE_STAT"] = f"{user}:root:400"
+        elif case == "release-reference-wrong-group":
+            environment["MOCK_RELEASE_REFERENCE_STAT"] = f"{user}:wrong:440"
+        elif case == "release-reference-wrong-mode":
+            paths["release_ref"].chmod(0o400)
+        elif case == "release-reference-symlink":
+            release_ref = paths["release_ref"]
+            real_reference = release_ref.with_name("installed-release-real.path")
+            release_ref.rename(real_reference)
+            release_ref.symlink_to(real_reference)
+        elif case == "accepted-marker-wrong-owner":
+            environment["MOCK_ACCEPTED_MARKER_STAT"] = f"wrong:{group}:400"
+        elif case == "accepted-marker-wrong-group":
+            environment["MOCK_ACCEPTED_MARKER_STAT"] = f"{user}:wrong:400"
+        elif case == "accepted-marker-wrong-mode":
+            paths["marker"].chmod(0o440)
+        elif case == "telegram-environment-wrong-owner":
+            environment["MOCK_TELEGRAM_ENVIRONMENT_STAT"] = f"wrong:{group}:600"
+        elif case == "telegram-environment-wrong-mode":
+            paths["telegram_environment"].chmod(0o640)
+        elif case == "provider-environment-wrong-group":
+            environment["MOCK_PROVIDER_ENVIRONMENT_STAT"] = f"{user}:wrong:600"
+        elif case == "provider-environment-wrong-mode":
+            paths["provider_environment"].chmod(0o640)
+        rejected = subprocess.run(
+            [str(health)], env=environment, text=True, capture_output=True, check=False
+        )
+        assert rejected.returncode == 1, case
+        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, case
+        assert "fixture-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
+        assert "telegram-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
+        assert "provider-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
+        assert "AUTOMATIC_RETRY_COUNT=0" in rejected.stdout
+        assert "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO" in rejected.stdout
+
 
 def test_health_rejects_identity_timer_credential_kill_and_lock_defects_read_only(tmp_path: Path) -> None:
     health, environment, paths = _make_health_fixture(tmp_path / "lock-absent")
@@ -699,6 +940,23 @@ def _make_rollback_release(parent: Path, commit: str, trusted: str = TRUSTED) ->
     return _make_release(parent, commit=commit, trusted=trusted)
 
 
+def _make_rollback_script(tmp_path: Path) -> Path:
+    rollback = tmp_path / "e6-rollback"
+    rollback.write_text(
+        _text(BIN / "ai-crypto-signal-agent-e6-rollback")
+        .replace("@@TRUSTED_CHECKPOINT_COMMIT@@", TRUSTED)
+        .replace('readonly ROOT_USER="root"', f'readonly ROOT_USER="{tmp_path.owner()}"')
+        .replace('readonly ROOT_GROUP="root"', f'readonly ROOT_GROUP="{tmp_path.group()}"')
+        .replace(
+            'readonly SERVICE_GROUP="ai-crypto-signal-agent"',
+            f'readonly SERVICE_GROUP="{tmp_path.group()}"',
+        ),
+        encoding="utf-8",
+    )
+    rollback.chmod(0o755)
+    return rollback
+
+
 def test_manual_rollback_requires_trusted_immutable_target_and_is_idempotent(tmp_path: Path) -> None:
     current = _make_rollback_release(tmp_path / "current", "d" * 40)
     target = _make_rollback_release(tmp_path / "target", "e" * 40)
@@ -707,14 +965,12 @@ def test_manual_rollback_requires_trusted_immutable_target_and_is_idempotent(tmp
     state.mkdir(parents=True)
     current_ref = state / "e6-installed-release.path"
     current_ref.write_text(f"{current}\n", encoding="ascii")
-    rollback = tmp_path / "e6-rollback"
-    rollback.write_text(
-        _text(BIN / "ai-crypto-signal-agent-e6-rollback").replace(
-            "@@TRUSTED_CHECKPOINT_COMMIT@@", TRUSTED
-        ),
-        encoding="utf-8",
-    )
-    rollback.chmod(0o755)
+    current_ref.chmod(0o440)
+    accepted_marker = state / "e6-accepted-release.marker"
+    accepted_marker.write_text(current.name + "\n", encoding="ascii")
+    accepted_marker.chmod(0o400)
+    accepted_before = (accepted_marker.read_bytes(), _metadata(accepted_marker))
+    rollback = _make_rollback_script(tmp_path)
 
     first = subprocess.run(
         [str(rollback), "--target-release", str(target), "--destdir", str(host)],
@@ -729,7 +985,20 @@ def test_manual_rollback_requires_trusted_immutable_target_and_is_idempotent(tmp
     evidence = state / "e6-rollback-evidence.txt"
     assert rollback_ref.read_text() == f"{current}\n"
     assert f"FROM_RELEASE={current}" in evidence.read_text()
-    before = (current_ref.read_bytes(), rollback_ref.read_bytes(), evidence.read_bytes())
+    expected_user = tmp_path.owner()
+    expected_group = tmp_path.group()
+    assert _metadata(current_ref) == (expected_user, expected_group, "0440")
+    assert _metadata(rollback_ref) == (expected_user, expected_group, "0400")
+    assert _metadata(evidence) == (expected_user, expected_group, "0400")
+    assert accepted_before == (accepted_marker.read_bytes(), _metadata(accepted_marker))
+    before = (
+        current_ref.read_bytes(),
+        _metadata(current_ref),
+        rollback_ref.read_bytes(),
+        _metadata(rollback_ref),
+        evidence.read_bytes(),
+        _metadata(evidence),
+    )
 
     replay = subprocess.run(
         [str(rollback), "--target-release", str(target), "--destdir", str(host)],
@@ -739,7 +1008,15 @@ def test_manual_rollback_requires_trusted_immutable_target_and_is_idempotent(tmp
     )
     assert replay.returncode == 0
     assert "E6_ROLLBACK=IDEMPOTENT_REPLAY" in replay.stdout
-    assert before == (current_ref.read_bytes(), rollback_ref.read_bytes(), evidence.read_bytes())
+    assert before == (
+        current_ref.read_bytes(),
+        _metadata(current_ref),
+        rollback_ref.read_bytes(),
+        _metadata(rollback_ref),
+        evidence.read_bytes(),
+        _metadata(evidence),
+    )
+    assert accepted_before == (accepted_marker.read_bytes(), _metadata(accepted_marker))
 
 
 def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(tmp_path: Path) -> None:
@@ -747,14 +1024,10 @@ def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(
     host = tmp_path / "host"
     state = host / "var/lib/ai-crypto-signal-agent"
     state.mkdir(parents=True)
-    state.joinpath("e6-installed-release.path").write_text(f"{current}\n")
-    rollback = tmp_path / "e6-rollback"
-    rollback.write_text(
-        _text(BIN / "ai-crypto-signal-agent-e6-rollback").replace(
-            "@@TRUSTED_CHECKPOINT_COMMIT@@", TRUSTED
-        )
-    )
-    rollback.chmod(0o755)
+    current_ref = state / "e6-installed-release.path"
+    current_ref.write_text(f"{current}\n")
+    current_ref.chmod(0o440)
+    rollback = _make_rollback_script(tmp_path)
     writable_targets = []
     for mode in (0o755, 0o575, 0o557):
         writable = _make_rollback_release(tmp_path / f"writable-{mode:o}", "e" * 40)
@@ -766,6 +1039,7 @@ def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(
     legacy = tmp_path / "legacy" / ("1" * 40)
     legacy.mkdir(parents=True)
     legacy.chmod(0o555)
+    current_before = (current_ref.read_bytes(), _metadata(current_ref))
     for target in (tmp_path / "missing", *writable_targets, link, untrusted, legacy):
         rejected = subprocess.run(
             [str(rollback), "--target-release", str(target), "--destdir", str(host)],
@@ -774,8 +1048,52 @@ def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(
             check=False,
         )
         assert rejected.returncode == 65
-    assert state.joinpath("e6-installed-release.path").read_text() == f"{current}\n"
+        assert current_before == (current_ref.read_bytes(), _metadata(current_ref))
+    assert current_ref.read_text() == f"{current}\n"
     assert not state.joinpath("e6-rollback-release.path").exists()
+
+
+def test_manual_rollback_atomic_current_reference_failure_preserves_current(
+    tmp_path: Path,
+) -> None:
+    current = _make_rollback_release(tmp_path / "current", "d" * 40)
+    target = _make_rollback_release(tmp_path / "target", "e" * 40)
+    host = tmp_path / "host"
+    state = host / "var/lib/ai-crypto-signal-agent"
+    state.mkdir(parents=True)
+    current_ref = state / "e6-installed-release.path"
+    current_ref.write_text(f"{current}\n", encoding="ascii")
+    current_ref.chmod(0o440)
+    before = (current_ref.read_bytes(), _metadata(current_ref))
+    rollback = _make_rollback_script(tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_mv = fake_bin / "mv"
+    fake_mv.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${!#}" == "$FAIL_DESTINATION" ]]; then
+  exit 74
+fi
+exec /usr/bin/mv "$@"
+""",
+        encoding="utf-8",
+    )
+    fake_mv.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "FAIL_DESTINATION": str(current_ref),
+    }
+    failed = subprocess.run(
+        [str(rollback), "--target-release", str(target), "--destdir", str(host)],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert failed.returncode != 0
+    assert before == (current_ref.read_bytes(), _metadata(current_ref))
 
 
 def test_package_has_no_automatic_rollback_service_control_or_trading_authority() -> None:

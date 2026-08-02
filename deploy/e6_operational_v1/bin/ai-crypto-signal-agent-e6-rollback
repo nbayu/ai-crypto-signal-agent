@@ -2,6 +2,9 @@
 set -euo pipefail
 
 readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
+readonly ROOT_USER="root"
+readonly ROOT_GROUP="root"
+readonly SERVICE_GROUP="ai-crypto-signal-agent"
 
 usage() {
     printf '%s\n' "usage: $0 --target-release PATH --destdir PATH" >&2
@@ -70,14 +73,30 @@ read_reference() {
 atomic_write() {
     local destination="$1"
     local content="$2"
+    local owner="$3"
+    local group="$4"
+    local mode="$5"
     local temporary
     temporary="$(mktemp "$state_root/.e6-rollback.XXXXXXXX")"
-    printf '%s\n' "$content" > "$temporary"
-    chmod 0400 "$temporary"
-    mv -fT -- "$temporary" "$destination"
+    if ! { printf '%s\n' "$content" > "$temporary" &&
+           chown "$owner:$group" "$temporary" &&
+           chmod "$mode" "$temporary" &&
+           mv -fT -- "$temporary" "$destination"; }; then
+        unlink -- "$temporary" 2>/dev/null || true
+        return 1
+    fi
+}
+
+reference_metadata_matches() {
+    local path="$1"
+    local owner="$2"
+    local group="$3"
+    local mode="$4"
+    [[ "$(stat -Lc '%U:%G:%a' "$path" 2>/dev/null || true)" == "$owner:$group:$mode" ]]
 }
 
 current_release="$(read_reference "$current_ref")" || exit 65
+reference_metadata_matches "$current_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 65
 [[ -d "$target_release" && ! -L "$target_release" ]] || exit 65
 resolved_target="$(realpath -- "$target_release" 2>/dev/null)" || exit 65
 [[ "$resolved_target" == "$target_release" ]] || exit 65
@@ -88,6 +107,9 @@ if [[ "$current_release" == "$target_release" ]]; then
     [[ -f "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
     [[ "$(sed -n 's/^FROM_RELEASE=//p' "$evidence_path")" == "$prior_release" ]] || exit 66
     [[ "$(sed -n 's/^TO_RELEASE=//p' "$evidence_path")" == "$target_release" ]] || exit 66
+    reference_metadata_matches "$current_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 66
+    reference_metadata_matches "$rollback_ref" "$ROOT_USER" "$ROOT_GROUP" 400 || exit 66
+    reference_metadata_matches "$evidence_path" "$ROOT_USER" "$ROOT_GROUP" 400 || exit 66
     verify_release "$current_release" || exit 66
     verify_release "$prior_release" || exit 66
     printf '%s\n' "E6_ROLLBACK=IDEMPOTENT_REPLAY"
@@ -100,11 +122,11 @@ verify_release "$target_release" || exit 65
 [[ ! -e "$rollback_ref" && ! -L "$rollback_ref" ]] || exit 66
 [[ ! -e "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
 
-atomic_write "$rollback_ref" "$current_release"
+atomic_write "$rollback_ref" "$current_release" "$ROOT_USER" "$ROOT_GROUP" 0400
 atomic_write "$evidence_path" "FROM_RELEASE=$current_release
 TO_RELEASE=$target_release
-TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT"
-atomic_write "$current_ref" "$target_release"
+TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT" "$ROOT_USER" "$ROOT_GROUP" 0400
+atomic_write "$current_ref" "$target_release" "$ROOT_USER" "$SERVICE_GROUP" 0440
 
 printf '%s\n' "E6_ROLLBACK=COMPLETE"
 printf '%s\n' "CURRENT_VERIFIED_RELEASE_RETAINED=YES"

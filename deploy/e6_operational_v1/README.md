@@ -72,6 +72,36 @@ synthesize an owner decision. Owner-confirmed `ENTRY_ACTIVE` remains the sole
 authority that consumes a slot or pair lock. Automated trading and exchange
 orders are prohibited.
 
+## Host access contract
+
+The service supplies the activation-file location through the static row
+`Environment=E6_ACTIVATION_CONFIGURATION_PATH=/etc/ai-crypto-signal-agent/e6-activation-v1.env`.
+This launcher binding is not a twenty-fourth activation key: the activation
+configuration schema remains exactly 23 keys.
+
+Host preparation must apply this exact metadata contract in a separately
+authorized bounded installation transaction:
+
+- `/etc/ai-crypto-signal-agent` is
+  `root:ai-crypto-signal-agent:0750`;
+- `/etc/ai-crypto-signal-agent/e6-activation-v1.env` and
+  `/etc/ai-crypto-signal-agent/e6-credentials.metadata` are
+  `ai-crypto-signal-agent:ai-crypto-signal-agent:0640`;
+- `/etc/ai-crypto-signal-agent/phase09r1.env` and
+  `/etc/ai-crypto-signal-agent/deepseek.env` remain `root:root:0600` because
+  systemd reads them as `EnvironmentFile` inputs; direct service-user file readability is neither required nor permitted;
+- `/var/lib/ai-crypto-signal-agent/e6-installed-release.path` is
+  `root:ai-crypto-signal-agent:0440`;
+- `/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker` remains
+  `root:root:0400` and reaches run-once only as
+  `${CREDENTIALS_DIRECTORY}/accepted_e6_release_commit` through
+  `LoadCredential`.
+
+Health rejects the former `root:root:0750` configuration parent and former
+`root:root:0400` installed-release reference. Source remediation alone changes
+no host metadata and authorizes no second canary, cutover, or activation.
+Automated exchange trading remains prohibited.
+
 ## Required future sequence
 
 1. Slice 10: read-only final candidate audit.
