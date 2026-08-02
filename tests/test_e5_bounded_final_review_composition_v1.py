@@ -65,6 +65,25 @@ INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT = 0
 INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT = 0
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_injected_fake_transport_call_counts():
+    """Keep this module's exact call-count contract independent of test order."""
+
+    global INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT
+    global INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT
+    prior = (
+        INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT,
+        INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT,
+    )
+    INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT = 0
+    INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT = 0
+    yield
+    (
+        INJECTED_FAKE_DEEPSEEK_TRANSPORT_CALL_COUNT,
+        INJECTED_FAKE_CLAUDE_TRANSPORT_CALL_COUNT,
+    ) = prior
+
+
 def _canonical_hash(mapping):
     return hashlib.sha256(
         json.dumps(

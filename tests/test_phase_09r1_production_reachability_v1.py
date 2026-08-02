@@ -1,321 +1,180 @@
-import os
-import json
-import pytest
-from unittest.mock import patch, MagicMock
+from __future__ import annotations
+
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
-import datetime as real_datetime
+from types import SimpleNamespace
 
-class FakeDatetime(real_datetime.datetime):
-    @classmethod
-    def now(cls, tz=None):
-        return real_datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=tz)
-
-import engine.master_engine_v4
-engine.master_engine_v4.datetime = FakeDatetime
-import engine.production_signal_service_v1
-engine.production_signal_service_v1.datetime = FakeDatetime
-import engine.run_production_signal_v1
-engine.run_production_signal_v1.datetime = FakeDatetime
-
-import pandas as pd
-
+from engine import active_signal_ledger_v1 as active
+from engine import controlled_production_signal_cycle_v1 as controlled
+from engine.e6_service_composition_root_v1 import E6ServiceCycleRequestV1
+from engine.phase09r_telegram_delivery_adapter_v1 import (
+    Phase09RTelegramDeliveryAdapterV1,
+)
+from engine.production_signal_contract_v1 import build_delivery_id
 from engine.run_production_signal_v1 import main
+from engine.telegram_owner_control_state_v1 import initialize_state, load_state
+from test_e6_integrated_orchestrator_v1 import _new_ports, _scenario
 
-_orig_default = json.JSONEncoder.default
-def _custom_default(self, obj):
-    if isinstance(obj, pd.Timestamp): return obj.isoformat()
-    return _orig_default(self, obj)
-json.JSONEncoder.default = _custom_default
 
-@pytest.fixture
-def test_env(tmp_path):
-    q_path = tmp_path / "q.json"
-    w_path = tmp_path / "w.json"
+IDENTITY = "a" * 32
+NOW = "2026-07-30T13:00:01Z"
+SCENARIO_DESTINATION_ID = "isolated-owner-state-test"
 
-    pub_root = tmp_path / "pub"
-    pub_root.mkdir(exist_ok=True)
 
-    return {
-        "DEEPSEEK_API_KEY": "fake_key",
-        "TELEGRAM_BOT_TOKEN": "test_token",
-        "TELEGRAM_DESTINATION_ID": "test_dest_id",
-        "TELEGRAM_QUOTA_LIMIT": "1",
-        "TELEGRAM_SLOT_CAPACITY": "1",
-        "TELEGRAM_WINDOW_ID": "f4-operational-cycle",
-        "TELEGRAM_QUOTA_STATE_PATH": str(q_path),
-        "TELEGRAM_WORKER_STATE_PATH": str(w_path),
-        "TELEGRAM_MAX_MESSAGE_LENGTH": "4000",
-        "PRODUCTION_SIGNAL_DIR": str(pub_root),
-        "TELEGRAM_ADAPTER_ENABLED": "true"
+def _authorization(**changes):
+    values = {name: True for name, _ in controlled._GATES}
+    values.update(changes)
+    return controlled.ControlledProductionSignalCycleAuthorizationV1(**values)
+
+
+def _bomb(calls, name):
+    def fail(*_args, **_kwargs):
+        calls.append(name)
+        raise AssertionError(name)
+
+    return fail
+
+
+def test_real_path_reachability(tmp_path):
+    """The real entrypoint reaches E6 once, remains passive, and replays dry."""
+
+    denied_calls = []
+    assert main(
+        outcome_invocation_id_provider=_bomb(denied_calls, "identity"),
+        e6_runtime_factory=_bomb(denied_calls, "runtime"),
+        telegram_config_loader=_bomb(denied_calls, "config"),
+        telegram_delivery_adapter_factory=_bomb(denied_calls, "adapter"),
+    ) == 2
+    assert denied_calls == []
+
+    scenario = _scenario(tmp_path, name="phase09r1-reachability")
+    request = scenario["request"]
+    assert request.publication_delivery_id == build_delivery_id(
+        signal_id=request.publication_signal_id,
+        channel="TELEGRAM",
+        destination_id=SCENARIO_DESTINATION_ID,
+        publication_payload_hash=request.publication_payload_hash,
+    )
+    control_path = tmp_path / "owner-control.json"
+    initialize_state(control_path, timestamp=NOW)
+    environment = {
+        "TELEGRAM_DESTINATION_ID": SCENARIO_DESTINATION_ID,
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(control_path),
     }
-
-def get_dummy_ohlcv():
-    data = []
-    base_price = 10000.0
-    for i in range(120):
-        open_p = base_price + i * 50
-        close_p = open_p + 10
-        high_p = close_p + 10
-        low_p = open_p - 10
-        volume = 2000.0
-        timestamp = f"2026-{(i//30)+1:02d}-{(i%30)+1:02d}T12:00:00Z"
-        data.append({
-            "timestamp": timestamp,
-            "open": open_p,
-            "high": high_p,
-            "low": low_p,
-            "close": close_p,
-            "volume": volume
-        })
-    data[95]["high"] = 15000.0
-    data[95]["low"] = 14000.0
-    data[95]["close"] = 14500.0
-    
-    # OB at 110
-    data[110]["open"] = 16000.0
-    data[110]["close"] = 15000.0
-    data[110]["high"] = 16500.0
-    data[110]["low"] = 14500.0
-
-    # Strong bullish at 111
-    data[111]["open"] = 15000.0
-    data[111]["close"] = 18000.0
-    
-    # Last candle close at 16500 to hit the OB exactly
-    data[-2]["close"] = 16500.0
-    data[-1]["close"] = 16500.0
-    data[-2]["volume"] = 10000.0
-    data[-1]["volume"] = 10000.0
-    
-    df = pd.DataFrame(data)
-    df["timestamp"] = pd.date_range(start="2026-01-01", periods=len(df), freq="1D")
-    return df
-
-
-def get_dummy_fetch_ohlcv(*args, **kwargs):
-    data = []
-    for i in range(50):
-        data.append([1000+i, 10, 15, 5, 10+i, 100])
-    return data
-
-class MockResponse:
-    def __init__(self, json_data, status_code=200):
-        self._json = json_data
-        self.status_code = status_code
-    def json(self):
-        return self._json
-    def raise_for_status(self):
-        if self.status_code != 200:
-            raise Exception("HTTP Error")
-
-def fake_requests_get(url, **kwargs):
-    if "ticker/24hr" in url:
-        return MockResponse([{"symbol": "TESTUSDT", "quoteVolume": "50000"}])
-    elif "openInterestHist" in url:
-        data = [{"symbol": "TESTUSDT", "sumOpenInterest": str(100000 + i * 100)} for i in range(13)]
-        return MockResponse(data)
-    return MockResponse([])
-
-@patch("engine.mtf.exchange.fetch_ohlcv")
-@patch("engine.deepseek_validator_v4.OpenAI")
-@patch("requests.get", side_effect=fake_requests_get)
-@patch("engine.pre_delivery_market_data_v4.get_ohlcv")
-@patch("engine.scanner.get_ohlcv")
-@patch("engine.scanner.get_symbols")
-def test_real_path_reachability(
-    mock_get_symbols, mock_get_ohlcv, mock_pre_delivery_ohlcv, mock_requests_get,
-    mock_openai,
-    mock_fetch_ohlcv,
-    test_env, tmp_path, monkeypatch
-):
-    repository_root = Path(__file__).resolve().parents[1]
-    repository_runtime_roots = (
-        repository_root / "data" / "v4_outcomes",
-        repository_root / "data" / "validated_snapshots_v4",
+    config = SimpleNamespace(
+        bot_token="fixture-only-token",
+        max_response_chars=4000,
     )
+    runtime_calls = []
+    telegram_attempts = []
 
-    def repository_runtime_files():
-        return {
-            path.relative_to(repository_root): path.read_bytes()
-            for root in repository_runtime_roots
-            for path in root.rglob("*")
-            if path.is_file()
-        }
-
-    repository_runtime_files_before = repository_runtime_files()
-    monkeypatch.chdir(tmp_path)
-
-    mock_get_symbols.return_value = ["TEST/USDT:USDT"]
-    mock_get_ohlcv.return_value = get_dummy_ohlcv()
-    mock_pre_delivery_ohlcv.return_value = get_dummy_ohlcv()
-    mock_fetch_ohlcv.side_effect = get_dummy_fetch_ohlcv
-    
-    mock_client_instance = MagicMock()
-    mock_openai.return_value = mock_client_instance
-    mock_client_instance.chat.completions.create.return_value = MagicMock(
-        choices=[MagicMock(message=MagicMock(content=json.dumps({
-            "validations": [{
-                "symbol": "TEST/USDT:USDT",
-                "status": "CLEAR",
-                "false_breakout_risk": "LOW",
-                "confluence": "STRONG",
-                "reason_code": "ALIGNED"
-            }]
-        })))],
-        usage=MagicMock(prompt_tokens=10, completion_tokens=10, total_tokens=20)
-    )
-
-    events = []
-    service_results = []
-    
-    with patch.dict(os.environ, test_env, clear=True):
-        from engine.master_engine_v4 import run_master_engine_v4, _hash_payload as master_hash
-        from engine.scanner import scan_market, calculate_score as orig_calc
-        from engine.production_signal_service_v1 import run_production_signal_service_v1, _hash_payload as art_hash
-        from engine.validated_pipeline_v4 import run_validated_pipeline_v4
-        from engine.run_production_signal_v1 import main
-        import engine.phase09r_telegram_delivery_adapter_v1 as delivery_adapter_module
-        
-        orig_run_master_engine = run_master_engine_v4
-        orig_scan_market = scan_market
-        orig_run_prod = run_production_signal_service_v1
-        orig_val_pipeline = run_validated_pipeline_v4
-        orig_main = main
-        
-        def fake_main(*args, **kwargs):
-            events.append("production_entrypoint")
-            return orig_main(*args, **kwargs)
-
-        def fake_scan_market(*args, **kwargs):
-            events.append("scanner")
-            return orig_scan_market(*args, **kwargs)
-            
-        def fake_run_master_engine(*args, **kwargs):
-            events.append("master_engine")
-            kwargs["scanner"] = fake_scan_market
-            kwargs["pipeline"] = fake_val_pipeline
-            kwargs["now_provider"] = FakeDatetime.now
-            return orig_run_master_engine(*args, **kwargs)
-            
-        def fake_calc(*args, **kwargs):
-            events.append("calculate_score")
-            return orig_calc(*args, **kwargs)
-            
-        def fake_master_hash(*args, **kwargs):
-            events.append("master_hash")
-            return master_hash(*args, **kwargs)
-            
-        def fake_val_pipeline(*args, **kwargs):
-            events.append("validated_pipeline")
-            return orig_val_pipeline(*args, **kwargs)
-
-        def fake_run_prod(*args, **kwargs):
-            events.append("phase09_service")
-            # If the duplicate suppression works, delivery won't happen the second time.
-            res = orig_run_prod(*args, **kwargs)
-            service_results.append(res)
-            if res.get("status") == "DUPLICATE_SUPPRESSED":
-                events.append("duplicate_suppressed")
-            return res
-
-        def fake_art_hash(*args, **kwargs):
-            events.append("artifact_hash")
-            return art_hash(*args, **kwargs)
-            
-        def fake_post(*args, **kwargs):
-            events.append("telegram_http")
-            events.append("delivery_receipt")
-            mock_resp = MagicMock()
-            mock_resp.status_code = 200
-            mock_resp.json.return_value = {"ok": True, "result": {"message_id": 999}}
-            return mock_resp
-            
-        with patch("engine.run_production_signal_v1.main", side_effect=fake_main):
-            with patch("engine.run_production_signal_v1.run_master_engine_v4", side_effect=fake_run_master_engine):
-                with patch("engine.scanner.calculate_score", side_effect=fake_calc):
-                    with patch("engine.master_engine_v4._hash_payload", side_effect=fake_master_hash):
-                        with patch("engine.validated_pipeline_v4.run_validated_pipeline_v4", side_effect=fake_val_pipeline):
-                            with patch("engine.master_engine_v4.run_production_signal_service_v1", side_effect=fake_run_prod):
-                                with patch("engine.production_signal_service_v1._hash_payload", side_effect=fake_art_hash):
-                                    with patch("httpx.post", side_effect=fake_post):
-                                        with patch("engine.master_engine_v4.datetime", FakeDatetime):
-                                            import engine.run_production_signal_v1; exit_code_1 = engine.run_production_signal_v1.main()
-                                            exit_code_2 = engine.run_production_signal_v1.main()
-            assert exit_code_1 == 0
-            assert exit_code_2 == 0
-            
-            with open("/tmp/events.txt", "w") as f:
-                f.write(repr(events))
-    
-        # Assert ordered trace elements
-    assert "production_entrypoint" in events
-    assert "master_engine" in events
-    assert "scanner" in events
-    assert "calculate_score" in events
-    assert "validated_pipeline" in events
-    assert "master_hash" in events
-    assert "phase09_service" in events
-    assert "artifact_hash" in events
-    assert "telegram_http" in events
-    assert "delivery_receipt" in events
-    assert not hasattr(delivery_adapter_module, "run_quota_slot_worker_v4")
-        
-    # Assert duplicate suppression behavior
-    assert events.count("production_entrypoint") == 2
-    assert events.count("phase09_service") == 2
-    assert events.count("telegram_http") == 1
-    assert events.count("delivery_receipt") == 1
-    assert len(service_results) == 2
-    assert service_results[0]["publication"] == service_results[1]["publication"]
-    assert service_results[0]["artifact_path"] == service_results[1]["artifact_path"]
-    outcome_files = sorted(
-        (tmp_path / "data" / "v4_outcomes").glob(
-            "outcome_entry_v4_*.json"
+    def runtime_factory(*, outcome_invocation_id):
+        runtime_calls.append(outcome_invocation_id)
+        return E6ServiceCycleRequestV1(
+            orchestrator_request=scenario["request"],
+            orchestrator_ports=scenario["ports"],
+            channel="TELEGRAM",
+            destination_id=SCENARIO_DESTINATION_ID,
         )
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 919}}
+
+    def fake_post(url, *, json, timeout):
+        telegram_attempts.append((url, json, timeout))
+        return Response()
+
+    def adapter_factory(value, **kwargs):
+        assert value is config
+        return Phase09RTelegramDeliveryAdapterV1(
+            value,
+            http_post=fake_post,
+            quota_now_provider=lambda: datetime(
+                2026, 7, 30, 13, 0, 1, tzinfo=timezone.utc
+            ),
+            **kwargs,
+        )
+
+    assert main(
+        outcome_invocation_id=IDENTITY,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=runtime_factory,
+        environment=environment,
+        telegram_config_loader=lambda value: config,
+        telegram_delivery_adapter_factory=adapter_factory,
+    ) == 0
+
+    assert runtime_calls == [IDENTITY]
+    assert len(telegram_attempts) == 1
+    assert telegram_attempts[0][1]["chat_id"] == SCENARIO_DESTINATION_ID
+    assert telegram_attempts[0][1]["text"].startswith(
+        "AI CRYPTO SIGNAL — MANUAL OWNER REVIEW"
     )
-    assert len(outcome_files) == 2
-    outcome_snapshots = [
-        json.loads(path.read_text())
-        for path in outcome_files
-    ]
-    assert {
-        snapshot["snapshot_type"]
-        for snapshot in outcome_snapshots
-    } == {"v4_outcome_tracker_entry"}
-    assert {
-        snapshot["captured_at"]
-        for snapshot in outcome_snapshots
-    } == {"2026-01-01T12:00:00"}
-    outcome_identities = {
-        path.stem.removeprefix("outcome_entry_v4_")
-        for path in outcome_files
-    }
-    assert len(outcome_identities) == 2
-    assert all(
-        len(identity) == 32
-        and identity == identity.lower()
-        and all(character in "0123456789abcdef" for character in identity)
-        for identity in outcome_identities
+    state = load_state(control_path)
+    binding_key = f"{SCENARIO_DESTINATION_ID}:919"
+    binding = state["signal_message_bindings"][binding_key]
+    assert binding["signal_id"] == scenario["request"].publication_signal_id
+    ledger = active.load_ledger(scenario["ports"].active_ledger_path)
+    assert ledger["signals"][binding["signal_id"]]["state"] == (
+        active.PUBLISHED_PENDING_ENTRY
+    )
+    assert active.inspect_capacity(ledger)["active_by_mode"]["SWING"] == 0
+    assert active.inspect_capacity(ledger)["total_active"] == 0
+    assert not any(
+        record["state"] == active.ENTRY_ACTIVE
+        for record in ledger["signals"].values()
     )
 
-    publication_artifacts = list(
-        (tmp_path / "pub" / "publications").glob("*/*.json")
+    before_ledger = scenario["ports"].active_ledger_path.read_bytes()
+    before_control = control_path.read_bytes()
+    replay_ports, _deep_calls, _claude_calls = _new_ports(
+        tmp_path,
+        name="phase09r1-reachability-replay",
+        payload=scenario["payload"],
+        decision="CLEAR",
+        ledger_path=scenario["ports"].active_ledger_path,
     )
-    assert len(publication_artifacts) == 1
-    assert publication_artifacts[0].resolve() == Path(
-        service_results[0]["artifact_path"]
-    ).resolve()
-    committed_publication = json.loads(
-        publication_artifacts[0].read_text()
+
+    def replay_runtime_factory(*, outcome_invocation_id):
+        runtime_calls.append(outcome_invocation_id)
+        return E6ServiceCycleRequestV1(
+            orchestrator_request=scenario["request"],
+            orchestrator_ports=replay_ports,
+            channel="TELEGRAM",
+            destination_id=SCENARIO_DESTINATION_ID,
+        )
+
+    assert main(
+        outcome_invocation_id="b" * 32,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=replay_runtime_factory,
+        environment=environment,
+        telegram_config_loader=lambda value: config,
+        telegram_delivery_adapter_factory=adapter_factory,
+    ) == 0
+    assert runtime_calls == [IDENTITY, "b" * 32]
+    assert len(telegram_attempts) == 1
+    assert scenario["ports"].active_ledger_path.read_bytes() == before_ledger
+    assert control_path.read_bytes() == before_control
+
+    source = Path(__import__("engine.run_production_signal_v1", fromlist=["x"]).__file__).read_text(
+        encoding="utf-8"
     )
-    assert committed_publication["delivery_state"] == "DELIVERY_SUCCEEDED"
-    assert committed_publication["delivery_receipt"] is not None
-    assert (
-        tmp_path
-        / "data"
-        / "validated_snapshots_v4"
-        / "validated_v4_20260101_120000.json"
-    ).is_file()
-    assert repository_runtime_files() == repository_runtime_files_before
-    
+    assert "E6ServiceCompositionRootV1" in source
+    assert "run_e6_service_cycle_v1" in source
+    assert "run_master_engine_v4" not in source
+    assert "enable_publication=True" not in source
+    assert "mark_entry_active" not in source
+    assert "systemctl" not in source

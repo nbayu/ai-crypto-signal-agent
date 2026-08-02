@@ -14,6 +14,9 @@ RUNTIME_ROOT = "/var/lib/ai-crypto-signal-agent/phase09r1"
 AUTHORIZED_F4_TIMER = Path(
     "deploy/operational_v1/systemd/ai-crypto-signal-agent.timer"
 )
+AUTHORIZED_E6_TIMER = Path(
+    "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer"
+)
 F4_INSTALLER = Path(
     "deploy/operational_v1/bin/ai-crypto-signal-agent-install"
 )
@@ -44,24 +47,26 @@ def _assert_phase09r1_and_f4_timer_scope(root):
     assert historical_phase09r1_timers == []
 
     timer_files = sorted(deploy_root.rglob("*.timer"))
-    authorized_timer = root / AUTHORIZED_F4_TIMER
-    assert timer_files == [authorized_timer]
+    authorized_timers = {
+        root / AUTHORIZED_F4_TIMER: "ai-crypto-signal-agent.service",
+        root / AUTHORIZED_E6_TIMER: "ai-crypto-signal-agent-e6.service",
+    }
+    assert timer_files == sorted(authorized_timers)
 
-    timer_text = authorized_timer.read_text(encoding="utf-8")
-    assert _directives(timer_text, "Unit") == [
-        "ai-crypto-signal-agent.service"
-    ]
-    assert _directives(timer_text, "OnActiveSec") == ["30min"]
-    assert _directives(timer_text, "OnUnitInactiveSec") == ["30min"]
-    assert _directives(timer_text, "AccuracySec") == ["1min"]
-    assert _directives(timer_text, "Persistent") == ["false"]
-    for forbidden_schedule in (
-        "OnBootSec",
-        "OnStartupSec",
-        "OnUnitActiveSec",
-        "OnCalendar",
-    ):
-        assert _directives(timer_text, forbidden_schedule) == []
+    for authorized_timer, expected_service in authorized_timers.items():
+        timer_text = authorized_timer.read_text(encoding="utf-8")
+        assert _directives(timer_text, "Unit") == [expected_service]
+        assert _directives(timer_text, "OnActiveSec") == ["30min"]
+        assert _directives(timer_text, "OnUnitInactiveSec") == ["30min"]
+        assert _directives(timer_text, "AccuracySec") == ["1min"]
+        assert _directives(timer_text, "Persistent") == ["false"]
+        for forbidden_schedule in (
+            "OnBootSec",
+            "OnStartupSec",
+            "OnUnitActiveSec",
+            "OnCalendar",
+        ):
+            assert _directives(timer_text, forbidden_schedule) == []
 
     installer_text = (root / F4_INSTALLER).read_text(encoding="utf-8")
     assert re.search(

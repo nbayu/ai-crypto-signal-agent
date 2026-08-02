@@ -2,11 +2,10 @@ import copy
 import hashlib
 import inspect
 import json
-import os
 import re
 from datetime import datetime
 from decimal import Decimal
-from unittest.mock import patch
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -14,8 +13,11 @@ import pytest
 
 import engine.master_engine_v4 as master_module
 import engine.run_production_signal_v1 as entrypoint_module
+from engine import controlled_production_signal_cycle_v1 as controlled
 from engine.phase09r_observability_v1 import (
+    BOUNDARY_NO,
     MASTER_ENGINE_SETUP_CONSTRUCTION_FAILED,
+    Phase09RExit7Failure,
 )
 from engine.production_signal_contract_v1 import (
     validate_production_signal_input,
@@ -344,8 +346,16 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
     out = _live_shaped_out(candidate)
     adapter = UnreachableAdapter()
     service_calls = []
-    synthetic_config = object()
     adapter_constructor_calls = []
+    config_loader_calls = []
+    synthetic_config = SimpleNamespace(
+        bot_token="fixture-only-token",
+        max_response_chars=4000,
+    )
+    environment = {
+        "TELEGRAM_DESTINATION_ID": "SYNTHETIC_DESTINATION",
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(tmp_path / "state.json"),
+    }
 
     monkeypatch.setattr(
         master_module,
@@ -358,51 +368,52 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
         lambda *args, **kwargs: (SOURCE_COMMIT + "\n").encode("ascii"),
     )
 
-    def run_master(**kwargs):
-        return master_module.run_master_engine_v4(
-            **kwargs,
+    with pytest.raises(Phase09RExit7Failure) as raised:
+        master_module.run_master_engine_v4(
+            outcome_invocation_id="a" * 32,
             **_master_fakes(tmp_path, out),
+            enable_publication=True,
+            delivery_adapter=adapter,
+            destination_id="SYNTHETIC_DESTINATION",
+            publication_root=tmp_path / "publications",
         )
+    assert raised.value.failure_stage == "ELIGIBLE_SETUP_CONSTRUCTION"
+    assert raised.value.failure_code == MASTER_ENGINE_SETUP_CONSTRUCTION_FAILED
+    assert raised.value.exception_class == "TypeError"
+    assert raised.value.telegram_boundary_reached == BOUNDARY_NO
 
-    monkeypatch.setattr(
-        entrypoint_module,
-        "load_telegram_delivery_config",
-        lambda environment: synthetic_config,
-    )
+    def fail_e6_runtime(**_kwargs):
+        raise TypeError(UnsupportedValue.marker)
 
-    def build_adapter(
-        config,
-        *,
-        available_slots_provider=None,
-        message_binding_recorder=None,
-    ):
-        assert config is synthetic_config
-        assert available_slots_provider is None
-        assert message_binding_recorder is None
-        adapter_constructor_calls.append(config)
+    def build_adapter(*args, **kwargs):
+        adapter_constructor_calls.append((args, kwargs))
         return adapter
 
-    monkeypatch.setattr(
-        entrypoint_module,
-        "Phase09RTelegramDeliveryAdapterV1",
-        build_adapter,
-    )
-    monkeypatch.setattr(
-        entrypoint_module,
-        "run_master_engine_v4",
-        run_master,
-    )
+    def load_config(value):
+        assert value is environment
+        config_loader_calls.append(value)
+        return synthetic_config
 
-    with patch.dict(
-        os.environ,
-        {"TELEGRAM_DESTINATION_ID": "SYNTHETIC_DESTINATION"},
-        clear=True,
-    ):
-        exit_code = entrypoint_module.main()
+    exit_code = entrypoint_module.main(
+        outcome_invocation_id="a" * 32,
+        e6_enabled=True,
+        authorization=controlled.ControlledProductionSignalCycleAuthorizationV1(
+            **{name: True for name, _ in controlled._GATES}
+        ),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=fail_e6_runtime,
+        environment=environment,
+        telegram_config_loader=load_config,
+        telegram_delivery_adapter_factory=build_adapter,
+    )
 
     captured = capsys.readouterr()
     assert exit_code == 7
-    assert adapter_constructor_calls == [synthetic_config]
+    assert config_loader_calls == [environment]
+    assert len(adapter_constructor_calls) == 0
+    assert adapter_constructor_calls == []
     assert captured.out == ""
     lines = captured.err.splitlines()
     assert len(lines) == 1
@@ -411,8 +422,8 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
         "event": "PHASE09R_EXIT7",
         "schema_version": 1,
         "exit_code": 7,
-        "failure_code": MASTER_ENGINE_SETUP_CONSTRUCTION_FAILED,
-        "failure_stage": "ELIGIBLE_SETUP_CONSTRUCTION",
+        "failure_code": "SERVICE_INVOCATION_INVALID",
+        "failure_stage": "E6_RUNTIME_REQUEST_CONSTRUCTION",
         "exception_class": "TypeError",
         "telegram_boundary_reached": "NO",
     }
