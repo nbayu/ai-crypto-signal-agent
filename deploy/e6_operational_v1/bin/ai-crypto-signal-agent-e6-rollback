@@ -8,6 +8,15 @@ usage() {
     exit 64
 }
 
+e6_path_has_no_write_mode_bits() {
+    local path="$1"
+    local mode
+
+    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 8#222) == 0 ))
+}
+
 target_release=""
 destdir=""
 while [[ "$#" -gt 0 ]]; do
@@ -38,7 +47,8 @@ evidence_path="$state_root/e6-rollback-evidence.txt"
 
 verify_release() {
     local release="$1"
-    [[ "$release" = /* && -d "$release" && ! -L "$release" && ! -w "$release" ]] || return 1
+    [[ "$release" = /* && -d "$release" && ! -L "$release" ]] || return 1
+    e6_path_has_no_write_mode_bits "$release" || return 1
     [[ "$(realpath -- "$release")" == "$release" ]] || return 1
     local commit
     commit="$(basename -- "$release")"

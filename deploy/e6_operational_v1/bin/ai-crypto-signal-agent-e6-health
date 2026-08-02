@@ -43,6 +43,15 @@ configuration_value() {
     sed -n "s/^$1=//p" "$ACTIVATION_CONFIGURATION"
 }
 
+e6_path_has_no_write_mode_bits() {
+    local path="$1"
+    local mode
+
+    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 8#222) == 0 ))
+}
+
 release_root=""
 if [[ -f "$RELEASE_REF" && ! -L "$RELEASE_REF" && "$(wc -l < "$RELEASE_REF")" -eq 1 ]]; then
     release_root="$(sed -n '1p' "$RELEASE_REF")"
@@ -57,10 +66,11 @@ service_match=NO
 timer_match=NO
 source_commit=""
 source_tree=""
-if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" && ! -w "$release_root" &&
+if [[ -n "$release_root" && -d "$release_root" && ! -L "$release_root" &&
       "$(basename -- "$release_root")" =~ ^[0-9a-f]{40}$ &&
       -f "$release_root/.e6-release-manifest" && ! -L "$release_root/.e6-release-manifest" &&
-      -f "$release_root/.e6-sha256-manifest" && ! -L "$release_root/.e6-sha256-manifest" ]]; then
+      -f "$release_root/.e6-sha256-manifest" && ! -L "$release_root/.e6-sha256-manifest" ]] &&
+   e6_path_has_no_write_mode_bits "$release_root"; then
     source_commit="$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.e6-release-manifest")"
     source_tree="$(sed -n 's/^SOURCE_TREE=//p' "$release_root/.e6-release-manifest")"
     release_trust="$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")"
@@ -207,11 +217,12 @@ if [[ -e "$ROLLBACK_REF" || -L "$ROLLBACK_REF" ]]; then
     rollback_state=INVALID
     if [[ -f "$ROLLBACK_REF" && ! -L "$ROLLBACK_REF" && "$(wc -l < "$ROLLBACK_REF")" -eq 1 ]]; then
         rollback_root="$(sed -n '1p' "$ROLLBACK_REF")"
-        if [[ -d "$rollback_root" && ! -L "$rollback_root" && ! -w "$rollback_root" &&
+        if [[ -d "$rollback_root" && ! -L "$rollback_root" &&
               "$(basename -- "$rollback_root")" =~ ^[0-9a-f]{40}$ &&
               -f "$rollback_root/.e6-release-manifest" &&
               "$(sed -n 's/^SOURCE_COMMIT=//p' "$rollback_root/.e6-release-manifest")" == "$(basename -- "$rollback_root")" &&
-              "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$rollback_root/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]]; then
+              "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$rollback_root/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]] &&
+           e6_path_has_no_write_mode_bits "$rollback_root"; then
             rollback_state=READY
         else
             rollback_readiness=NO
@@ -248,7 +259,8 @@ health_state=NOT_READY
 if [[ "$service_active_state" == inactive &&
       ( "$service_enabled_state" == static || "$service_enabled_state" == disabled ) ]]; then
     if [[ "$timer_active_state" == inactive && "$timer_enabled_state" == disabled &&
-          "$timer_next_monotonic" == 0 && "$activation_defaults_closed" == YES ]]; then
+          ( "$timer_next_monotonic" == 0 || "$timer_next_monotonic" == infinity ) &&
+          "$activation_defaults_closed" == YES ]]; then
         health_state=READY_NOT_ENABLED
     elif [[ "$timer_active_state" == active && "$timer_enabled_state" == enabled &&
             "$timer_substate" == waiting && "$timer_next_monotonic" =~ ^[1-9][0-9]*$ &&

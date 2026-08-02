@@ -20,12 +20,21 @@ configuration_value() {
     sed -n "s/^$1=//p" "$configuration_path"
 }
 
+e6_path_has_no_write_mode_bits() {
+    local path="$1"
+    local mode
+
+    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 8#222) == 0 ))
+}
+
 script_path="$(realpath -- "$0")"
 release_root="$(realpath -- "$(dirname -- "$script_path")/../../..")"
 release_name="$(basename -- "$release_root")"
 
 [[ "$release_name" =~ ^[0-9a-f]{40}$ ]] || fail_closed "RELEASE_PATH_IDENTITY"
-[[ ! -w "$release_root" ]] || fail_closed "RELEASE_NOT_IMMUTABLE"
+e6_path_has_no_write_mode_bits "$release_root" || fail_closed "RELEASE_NOT_IMMUTABLE"
 [[ -f "$release_root/.e6-release-manifest" && ! -L "$release_root/.e6-release-manifest" ]] ||
     fail_closed "RELEASE_MANIFEST_FILE"
 [[ -f "$release_root/.e6-sha256-manifest" && ! -L "$release_root/.e6-sha256-manifest" ]] ||

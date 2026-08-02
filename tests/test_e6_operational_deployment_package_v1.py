@@ -63,6 +63,15 @@ CONFIGURATION_KEYS = (
     "E6_STALE_REVIEW_REUSE_ENABLED",
     "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED",
 )
+ROOT_SAFE_IMMUTABILITY_HELPER = """e6_path_has_no_write_mode_bits() {
+    local path="$1"
+    local mode
+
+    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
+    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+    (( (8#$mode & 8#222) == 0 ))
+}
+"""
 
 
 def _text(path: Path) -> str:
@@ -252,6 +261,22 @@ def test_shell_syntax_and_static_no_retry_fallback_or_host_mutation_contract() -
     assert re.search(r"\b(open|touch|mkdir|mktemp|install|chmod|chown|mv|unlink)\b", health) is None
 
 
+def test_operational_scripts_use_root_safe_mode_bit_immutability_contract() -> None:
+    expected_occurrences = {
+        "ai-crypto-signal-agent-e6-health": 3,
+        "ai-crypto-signal-agent-e6-run-once": 2,
+        "ai-crypto-signal-agent-e6-rollback": 2,
+    }
+    for filename, occurrence_count in expected_occurrences.items():
+        text = _text(BIN / filename)
+        assert ROOT_SAFE_IMMUTABILITY_HELPER in text
+        assert text.count("e6_path_has_no_write_mode_bits") == occurrence_count
+        assert "! -w" not in text
+        assert "stat -Lc '%a' -- \"$path\"" in text
+        assert '[[ "$mode" =~ ^[0-7]{3,4}$ ]]' in text
+        assert "(( (8#$mode & 8#222) == 0 ))" in text
+
+
 def test_service_and_nonpersistent_timer_contracts_are_exact() -> None:
     service = _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
     assert _directives(service, "Type") == ["oneshot"]
@@ -371,6 +396,21 @@ def test_run_once_authorized_fake_invokes_e6_cli_once_and_removes_lock(tmp_path:
         "-m engine.run_production_signal_v1"
     ]
     assert not paths["lock"].exists()
+
+
+def test_run_once_release_write_mode_bits_fail_closed_before_invocation(tmp_path: Path) -> None:
+    for mode in (0o755, 0o575, 0o557):
+        wrapper, environment, paths = _make_run_once_fixture(
+            tmp_path / f"mode-{mode:o}", authorized=True
+        )
+        wrapper.parents[3].chmod(mode)
+        rejected = subprocess.run(
+            [str(wrapper)], env=environment, text=True, capture_output=True, check=False
+        )
+        assert rejected.returncode == 78, f"{mode:o}: {rejected.stdout}{rejected.stderr}"
+        assert "RELEASE_NOT_IMMUTABLE" in rejected.stderr
+        assert not paths["invocation"].exists()
+        assert not paths["lock"].exists()
 
 
 def test_run_once_kill_switch_and_overlap_lock_block_without_retry(tmp_path: Path) -> None:
@@ -498,10 +538,28 @@ esac
 
 
 def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) -> None:
-    health, environment, _paths = _make_health_fixture(tmp_path / "disabled")
+    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-zero")
     disabled = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
     assert disabled.returncode == 0, disabled.stdout + disabled.stderr
     assert "HEALTH_STATUS=READY_NOT_ENABLED" in disabled.stdout
+    assert "ROLLBACK_READINESS=YES" in disabled.stdout
+    assert "ROLLBACK_STATE=NOT_CONFIGURED" in disabled.stdout
+
+    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-infinity")
+    environment["MOCK_TIMER_NEXT"] = "infinity"
+    disabled_infinity = subprocess.run(
+        [str(health)], env=environment, text=True, capture_output=True, check=False
+    )
+    assert disabled_infinity.returncode == 0, disabled_infinity.stdout + disabled_infinity.stderr
+    assert "HEALTH_STATUS=READY_NOT_ENABLED" in disabled_infinity.stdout
+
+    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-finite")
+    environment["MOCK_TIMER_NEXT"] = "2800000000"
+    disabled_finite = subprocess.run(
+        [str(health)], env=environment, text=True, capture_output=True, check=False
+    )
+    assert disabled_finite.returncode == 1
+    assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in disabled_finite.stdout
 
     health, environment, _paths = _make_health_fixture(tmp_path / "active", authorized=True)
     environment.update(
@@ -513,6 +571,21 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
     active = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
     assert active.returncode == 0, active.stdout + active.stderr
     assert "HEALTH_STATUS=READY_AND_AUTOMATION_ENABLED" in active.stdout
+
+    health, environment, _paths = _make_health_fixture(
+        tmp_path / "active-infinity", authorized=True
+    )
+    environment.update(
+        MOCK_TIMER_ACTIVE="active",
+        MOCK_TIMER_ENABLED="enabled",
+        MOCK_TIMER_SUBSTATE="waiting",
+        MOCK_TIMER_NEXT="infinity",
+    )
+    active_infinity = subprocess.run(
+        [str(health)], env=environment, text=True, capture_output=True, check=False
+    )
+    assert active_infinity.returncode == 1
+    assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in active_infinity.stdout
 
     health, environment, _paths = _make_health_fixture(tmp_path / "partial")
     environment.update(MOCK_TIMER_ACTIVE="active", MOCK_TIMER_ENABLED="enabled", MOCK_TIMER_SUBSTATE="waiting", MOCK_TIMER_NEXT="2800000000")
@@ -531,12 +604,25 @@ def test_health_rejects_identity_timer_credential_kill_and_lock_defects_read_onl
     assert "fixture-secret-must-not-be-output" not in result.stdout + result.stderr
     assert all(path.read_bytes() == value for path, value in before.items())
 
-    cases = ("writable-release", "persistent", "credential", "kill", "lock")
+    cases = (
+        "writable-release-owner",
+        "writable-release-group",
+        "writable-release-other",
+        "persistent",
+        "credential",
+        "kill",
+        "lock",
+    )
+    writable_modes = {
+        "writable-release-owner": 0o755,
+        "writable-release-group": 0o575,
+        "writable-release-other": 0o557,
+    }
     for case in cases:
         health, environment, paths = _make_health_fixture(tmp_path / case)
         held = None
-        if case == "writable-release":
-            paths["release"].chmod(0o755)
+        if case in writable_modes:
+            paths["release"].chmod(writable_modes[case])
         elif case == "persistent":
             paths["timer"].write_text(
                 paths["timer"].read_text().replace("Persistent=false", "Persistent=true")
@@ -618,12 +704,18 @@ def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(
         )
     )
     rollback.chmod(0o755)
-    writable = _make_rollback_release(tmp_path / "writable", "e" * 40)
-    writable.chmod(0o755)
+    writable_targets = []
+    for mode in (0o755, 0o575, 0o557):
+        writable = _make_rollback_release(tmp_path / f"writable-{mode:o}", "e" * 40)
+        writable.chmod(mode)
+        writable_targets.append(writable)
     untrusted = _make_rollback_release(tmp_path / "untrusted", "f" * 40, "0" * 40)
     link = tmp_path / "target-link"
     link.symlink_to(untrusted, target_is_directory=True)
-    for target in (tmp_path / "missing", writable, link, untrusted):
+    legacy = tmp_path / "legacy" / ("1" * 40)
+    legacy.mkdir(parents=True)
+    legacy.chmod(0o555)
+    for target in (tmp_path / "missing", *writable_targets, link, untrusted, legacy):
         rejected = subprocess.run(
             [str(rollback), "--target-release", str(target), "--destdir", str(host)],
             text=True,
