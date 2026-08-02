@@ -12,6 +12,8 @@ User=ai-crypto-signal-agent
 Group=ai-crypto-signal-agent
 WorkingDirectory=/var/lib/ai-crypto-signal-agent/phase09r1
 EnvironmentFile=/etc/ai-crypto-signal-agent/e6-activation-v1.env
+EnvironmentFile=/etc/ai-crypto-signal-agent/phase09r1.env
+EnvironmentFile=/etc/ai-crypto-signal-agent/deepseek.env
 Environment=E6_SOURCE_COMMIT=@@E6_SOURCE_COMMIT@@
 Environment=E6_SOURCE_TREE=@@E6_SOURCE_TREE@@
 Environment=E6_TRUSTED_CHECKPOINT_COMMIT=@@TRUSTED_CHECKPOINT_COMMIT@@

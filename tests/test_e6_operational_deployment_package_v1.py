@@ -277,8 +277,13 @@ def test_operational_scripts_use_root_safe_mode_bit_immutability_contract() -> N
         assert "(( (8#$mode & 8#222) == 0 ))" in text
 
 
-def test_service_and_nonpersistent_timer_contracts_are_exact() -> None:
+def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> None:
     service = _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
+    required_environment_files = [
+        "/etc/ai-crypto-signal-agent/e6-activation-v1.env",
+        "/etc/ai-crypto-signal-agent/phase09r1.env",
+        "/etc/ai-crypto-signal-agent/deepseek.env",
+    ]
     assert _directives(service, "Type") == ["oneshot"]
     assert _directives(service, "Restart") == ["no"]
     assert _directives(service, "TimeoutStartSec") == ["20min"]
@@ -287,12 +292,28 @@ def test_service_and_nonpersistent_timer_contracts_are_exact() -> None:
     assert _directives(service, "WorkingDirectory") == [
         "/var/lib/ai-crypto-signal-agent/phase09r1"
     ]
-    assert _directives(service, "EnvironmentFile") == [
-        "/etc/ai-crypto-signal-agent/e6-activation-v1.env"
-    ]
+    assert _directives(service, "EnvironmentFile") == required_environment_files
+    assert not any(value.startswith("-") for value in required_environment_files)
     assert _directives(service, "ExecStart") == [
         "@@RELEASE_ROOT@@/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
     ]
+    release = _make_release(tmp_path / "rendered-service")
+    rendered_service = _text(
+        release / ".e6-rendered/ai-crypto-signal-agent-e6.service"
+    )
+    assert _directives(rendered_service, "EnvironmentFile") == required_environment_files
+    assert not any(
+        value.startswith("-")
+        for value in _directives(rendered_service, "EnvironmentFile")
+    )
+    for forbidden in (
+        "/etc/ai-crypto-signal-agent/owner-control.env",
+        "DEEPSEEK_API_KEY=",
+        "ANTHROPIC_API_KEY=",
+        "TELEGRAM_BOT_TOKEN=",
+        "TELEGRAM_DESTINATION_ID=",
+    ):
+        assert forbidden not in rendered_service
     assert "run_master_engine_v4" not in service
     assert "[Install]" not in service
     timer = _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
@@ -532,6 +553,7 @@ esac
         "credential_metadata": credential_metadata,
         "kill": kill,
         "lock": lock,
+        "service": service,
         "timer": timer,
     }
     return health, environment, paths
@@ -542,6 +564,7 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
     disabled = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
     assert disabled.returncode == 0, disabled.stdout + disabled.stderr
     assert "HEALTH_STATUS=READY_NOT_ENABLED" in disabled.stdout
+    assert "SERVICE_UNIT_MATCH=YES" in disabled.stdout
     assert "ROLLBACK_READINESS=YES" in disabled.stdout
     assert "ROLLBACK_STATE=NOT_CONFIGURED" in disabled.stdout
 
@@ -593,6 +616,34 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
     assert partial.returncode == 1
     assert "HEALTH_STATUS=NOT_READY" in partial.stdout
     assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in partial.stdout
+
+
+def test_health_rejects_service_missing_required_environment_file(tmp_path: Path) -> None:
+    required_host_environment_files = (
+        "/etc/ai-crypto-signal-agent/phase09r1.env",
+        "/etc/ai-crypto-signal-agent/deepseek.env",
+    )
+    for environment_file in required_host_environment_files:
+        health, environment, paths = _make_health_fixture(
+            tmp_path / Path(environment_file).stem
+        )
+        service = paths["service"]
+        service.write_text(
+            service.read_text(encoding="utf-8").replace(
+                f"EnvironmentFile={environment_file}\n", ""
+            ),
+            encoding="utf-8",
+        )
+        rejected = subprocess.run(
+            [str(health)],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode == 1
+        assert "SERVICE_UNIT_MATCH=NO" in rejected.stdout
+        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
 
 
 def test_health_rejects_identity_timer_credential_kill_and_lock_defects_read_only(tmp_path: Path) -> None:
