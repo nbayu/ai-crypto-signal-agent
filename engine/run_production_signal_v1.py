@@ -102,13 +102,17 @@ def main(
             return 2
         if not isinstance(control_state_path, str) or not control_state_path.strip():
             return 2
+    except Exception:
+        return 2
+
+    try:
         cycle_request = e6_runtime_factory(
             outcome_invocation_id=selected_outcome_invocation_id
         )
         if type(cycle_request) is not E6ServiceCycleRequestV1:
             return 7
     except Exception:
-        return 2
+        return 7
 
     delivered_bindings: list[dict[str, object]] = []
 
@@ -149,6 +153,11 @@ def main(
     if result.disposition == IDEMPOTENT_REPLAY:
         return 0
     if result.disposition != DELIVERED:
+        if (
+            result.terminal_stage == STAGE_5_ONE_TELEGRAM_ATTEMPT
+            and getattr(adapter, "malformed_receipt", False) is True
+        ):
+            return 6
         return 5 if result.terminal_stage == STAGE_5_ONE_TELEGRAM_ATTEMPT else 7
     if len(delivered_bindings) != 1:
         return 7
