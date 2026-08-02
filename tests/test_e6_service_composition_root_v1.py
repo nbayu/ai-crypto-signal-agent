@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import ast
 from dataclasses import FrozenInstanceError, fields, replace
-import importlib
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -71,7 +72,7 @@ def _tampered(result, **changes):
 
 
 def test_contracts_are_frozen_slotted_default_deny_and_construction_is_passive(
-    tmp_path, monkeypatch,
+    tmp_path,
 ):
     scenario = _scenario(tmp_path, name="contract")
     request = _request(scenario)
@@ -116,10 +117,49 @@ def test_contracts_are_frozen_slotted_default_deny_and_construction_is_passive(
         assert {item.name.casefold() for item in fields(contract)}.isdisjoint(
             prohibited_fields
         )
-    monkeypatch.chdir(tmp_path)
-    empty_before = tuple(tmp_path.iterdir())
-    importlib.reload(subject)
-    assert tuple(tmp_path.iterdir()) == empty_before
+
+    parent_subject = subject
+    parent_root_type = subject.E6ServiceCompositionRootV1
+    parent_request_type = subject.E6ServiceCycleRequestV1
+    parent_result_type = subject.E6ServiceCycleResultV1
+    parent_runner = subject.run_e6_service_cycle_v1
+    repository_root = Path(__file__).resolve().parents[1]
+    child_workdir = tmp_path / "isolated-child-cwd"
+    child_workdir.mkdir()
+    child_program = (
+        "import pathlib, sys\n"
+        "repository_root = pathlib.Path(sys.argv[1]).resolve()\n"
+        "expected_working_directory = pathlib.Path(sys.argv[2]).resolve()\n"
+        "if pathlib.Path.cwd().resolve() != expected_working_directory:\n"
+        "    raise SystemExit(3)\n"
+        "sys.path.insert(0, str(repository_root))\n"
+        "import engine.e6_service_composition_root_v1\n"
+    )
+
+    child = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            child_program,
+            str(repository_root),
+            str(child_workdir),
+        ],
+        cwd=child_workdir,
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert child.returncode == 0
+    assert child.stdout == ""
+    assert child.stderr == ""
+    assert tuple(child_workdir.iterdir()) == ()
+    assert subject is parent_subject
+    assert subject.E6ServiceCompositionRootV1 is parent_root_type
+    assert subject.E6ServiceCycleRequestV1 is parent_request_type
+    assert subject.E6ServiceCycleResultV1 is parent_result_type
+    assert subject.run_e6_service_cycle_v1 is parent_runner
 
 
 @pytest.mark.parametrize("field, reason", controlled._GATES)
