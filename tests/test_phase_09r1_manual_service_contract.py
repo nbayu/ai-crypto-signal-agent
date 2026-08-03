@@ -20,6 +20,7 @@ AUTHORIZED_E6_TIMER = Path(
 F4_INSTALLER = Path(
     "deploy/operational_v1/bin/ai-crypto-signal-agent-install"
 )
+E6_README = Path("deploy/e6_operational_v1/README.md")
 
 
 def _unit_text():
@@ -47,26 +48,53 @@ def _assert_phase09r1_and_f4_timer_scope(root):
     assert historical_phase09r1_timers == []
 
     timer_files = sorted(deploy_root.rglob("*.timer"))
-    authorized_timers = {
-        root / AUTHORIZED_F4_TIMER: "ai-crypto-signal-agent.service",
-        root / AUTHORIZED_E6_TIMER: "ai-crypto-signal-agent-e6.service",
-    }
-    assert timer_files == sorted(authorized_timers)
+    f4_timer = root / AUTHORIZED_F4_TIMER
+    e6_timer = root / AUTHORIZED_E6_TIMER
+    assert timer_files == sorted((f4_timer, e6_timer))
 
-    for authorized_timer, expected_service in authorized_timers.items():
-        timer_text = authorized_timer.read_text(encoding="utf-8")
-        assert _directives(timer_text, "Unit") == [expected_service]
-        assert _directives(timer_text, "OnActiveSec") == ["30min"]
-        assert _directives(timer_text, "OnUnitInactiveSec") == ["30min"]
-        assert _directives(timer_text, "AccuracySec") == ["1min"]
-        assert _directives(timer_text, "Persistent") == ["false"]
-        for forbidden_schedule in (
-            "OnBootSec",
-            "OnStartupSec",
-            "OnUnitActiveSec",
-            "OnCalendar",
-        ):
-            assert _directives(timer_text, forbidden_schedule) == []
+    f4_timer_text = f4_timer.read_text(encoding="utf-8")
+    assert _directives(f4_timer_text, "Unit") == [
+        "ai-crypto-signal-agent.service"
+    ]
+    assert _directives(f4_timer_text, "OnActiveSec") == ["30min"]
+    assert _directives(f4_timer_text, "OnUnitInactiveSec") == ["30min"]
+    assert _directives(f4_timer_text, "AccuracySec") == ["1min"]
+    assert _directives(f4_timer_text, "Persistent") == ["false"]
+    for forbidden_schedule in (
+        "OnBootSec",
+        "OnStartupSec",
+        "OnUnitActiveSec",
+        "OnCalendar",
+        "RandomizedDelaySec",
+    ):
+        assert _directives(f4_timer_text, forbidden_schedule) == []
+
+    e6_timer_text = e6_timer.read_text(encoding="utf-8")
+    assert _directives(e6_timer_text, "Unit") == [
+        "ai-crypto-signal-agent-e6.service"
+    ]
+    assert _directives(e6_timer_text, "OnCalendar") == [
+        "*-*-* *:*:00 UTC"
+    ]
+    assert _directives(e6_timer_text, "AccuracySec") == ["1s"]
+    assert _directives(e6_timer_text, "Persistent") == ["false"]
+    for forbidden_schedule in (
+        "OnActiveSec",
+        "OnBootSec",
+        "OnStartupSec",
+        "OnUnitActiveSec",
+        "OnUnitInactiveSec",
+        "RandomizedDelaySec",
+    ):
+        assert _directives(e6_timer_text, forbidden_schedule) == []
+    for mode in ("SWING", "INTRADAY", "SCALP"):
+        assert mode not in e6_timer_text.upper()
+
+    e6_readme_text = (root / E6_README).read_text(encoding="utf-8")
+    assert (
+        "Python mode profiles and the due-window dispatcher are the sole "
+        "cadence policy."
+    ) in e6_readme_text
 
     installer_text = (root / F4_INSTALLER).read_text(encoding="utf-8")
     assert re.search(

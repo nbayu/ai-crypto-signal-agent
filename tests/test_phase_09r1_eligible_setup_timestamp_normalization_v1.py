@@ -411,7 +411,8 @@ def test_unsupported_object_stays_in_setup_stage_and_entrypoint_exit7(
 
     captured = capsys.readouterr()
     assert exit_code == 7
-    assert config_loader_calls == [environment]
+    assert len(config_loader_calls) == 0
+    assert config_loader_calls == []
     assert len(adapter_constructor_calls) == 0
     assert adapter_constructor_calls == []
     assert captured.out == ""
