@@ -6,7 +6,10 @@ readonly SERVICE_USER="ai-crypto-signal-agent"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
 readonly ROOT_USER="root"
 readonly ROOT_GROUP="root"
+readonly LEGACY_SERVICE_NAME="ai-crypto-signal-agent.service"
 readonly LEGACY_TIMER_NAME="ai-crypto-signal-agent.timer"
+readonly OLD_E6_TIMER_NAME="ai-crypto-signal-agent-e6.timer"
+readonly CANDIDATE_TIMER_PATTERN="ai-crypto-signal-agent-e6-candidate-*.timer"
 readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"
 readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"
 
@@ -169,9 +172,24 @@ if [[ -n "$release_root" && -f "$timer_path" && ! -L "$timer_path" &&
     timer_match=YES
 fi
 
-candidate_state_valid=YES
+loadcredential_parity=FAIL
+loadcredential_row="$(sed -n 's/^LoadCredential=//p' "$service_path" 2>/dev/null || true)"
+if [[ "$(grep -c '^LoadCredential=' "$service_path" 2>/dev/null || true)" -eq 1 &&
+      "$loadcredential_row" == "accepted_e6_release_commit:$accepted_marker" ]]; then
+    loadcredential_parity=PASS
+fi
+launcher_credential_valid=NO
+launcher_path="$release_root/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
+if [[ -f "$launcher_path" && ! -L "$launcher_path" ]] &&
+   grep -Fq 'accepted_release_credential="${credentials_directory}/accepted_e6_release_commit"' "$launcher_path" &&
+   grep -Fq 'mapfile -t accepted_release_credential_lines < "$accepted_release_credential"' "$launcher_path" &&
+   ! grep -Fq '$(cat "$accepted_marker")' "$launcher_path" &&
+   ! grep -Fq '< "$accepted_marker"' "$launcher_path"; then
+    launcher_credential_valid=YES
+fi
+
+state_authority_valid=NO
 if [[ "$profile" == CANDIDATE_CANARY ]]; then
-    candidate_state_valid=NO
     if metadata_is "$state_root" "$SERVICE_USER" "$SERVICE_GROUP" 750 &&
        metadata_is "$owner_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
        metadata_is "$publication_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
@@ -191,7 +209,22 @@ if [[ "$profile" == CANDIDATE_CANARY ]]; then
        grep -q '"signals":{}' "$active_ledger" &&
        grep -q '"transitions":{}' "$active_ledger" &&
        grep -q '"publication_transactions":{}' "$active_ledger"; then
-        candidate_state_valid=YES
+        state_authority_valid=YES
+    fi
+else
+    if { metadata_is "$state_root" "$SERVICE_USER" "$SERVICE_GROUP" 750 ||
+         metadata_is "$state_root" "$SERVICE_USER" "$SERVICE_GROUP" 700; } &&
+       metadata_is "$owner_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
+       metadata_is "$publication_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
+       metadata_is "$operational_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
+       metadata_is "$cache_root" "$SERVICE_USER" "$SERVICE_GROUP" 700 &&
+       metadata_is "$owner_state" "$SERVICE_USER" "$SERVICE_GROUP" 600 &&
+       metadata_is "$active_ledger" "$SERVICE_USER" "$SERVICE_GROUP" 600 &&
+       grep -q '"schema_name":"telegram-owner-control-state"' "$owner_state" &&
+       grep -q '"schema_version":1' "$owner_state" &&
+       grep -q '"schema_name":"active-signal-ledger"' "$active_ledger" &&
+       grep -q '"schema_version":2' "$active_ledger"; then
+        state_authority_valid=YES
     fi
 fi
 
@@ -217,19 +250,113 @@ fi
 
 service_active="$(systemctl is-active "$service_unit" 2>/dev/null || true)"
 service_enabled="$(systemctl is-enabled "$service_unit" 2>/dev/null || true)"
+service_substate="$(systemctl show "$service_unit" -p SubState --value 2>/dev/null || true)"
 timer_active="$(systemctl is-active "$timer_unit" 2>/dev/null || true)"
 timer_enabled="$(systemctl is-enabled "$timer_unit" 2>/dev/null || true)"
+timer_substate="$(systemctl show "$timer_unit" -p SubState --value 2>/dev/null || true)"
+legacy_service_active="$(systemctl is-active "$LEGACY_SERVICE_NAME" 2>/dev/null || true)"
+legacy_service_substate="$(systemctl show "$LEGACY_SERVICE_NAME" -p SubState --value 2>/dev/null || true)"
 legacy_active="$(systemctl is-active "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
 legacy_enabled="$(systemctl is-enabled "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
 legacy_substate="$(systemctl show "$LEGACY_TIMER_NAME" -p SubState --value 2>/dev/null || true)"
-disabled_inactive=NO
-if [[ "$service_active" == inactive && ( "$service_enabled" == disabled || "$service_enabled" == static ) &&
-      "$timer_active" == inactive && "$timer_enabled" == disabled ]]; then
-    disabled_inactive=YES
+
+authoritative_scheduler_count=0
+authoritative_scheduler="NONE"
+consider_scheduler_authority() {
+    local unit="$1"
+    local active="$2"
+    local enabled="$3"
+    if [[ "$active" == active || "$enabled" == enabled ]]; then
+        authoritative_scheduler_count=$((authoritative_scheduler_count + 1))
+        if [[ "$authoritative_scheduler_count" -eq 1 ]]; then
+            authoritative_scheduler="$unit"
+        else
+            authoritative_scheduler="MULTIPLE"
+        fi
+    fi
+}
+
+profile_units_valid=NO
+legacy_service_valid=NO
+legacy_authority_valid=NO
+production_timer_valid=NO
+legacy_transfer_valid=NO
+candidate_timers_valid=YES
+candidate_timer_inventory_valid=YES
+old_e6_timer_valid=NO
+
+if [[ "$legacy_service_active" == inactive && "$legacy_service_substate" == dead ]]; then
+    legacy_service_valid=YES
 fi
-legacy_authority=NO
-if [[ "$legacy_active" == active && "$legacy_enabled" == enabled && "$legacy_substate" == waiting ]]; then
-    legacy_authority=YES
+
+consider_scheduler_authority "$LEGACY_TIMER_NAME" "$legacy_active" "$legacy_enabled"
+consider_scheduler_authority "$timer_unit" "$timer_active" "$timer_enabled"
+
+if [[ "$profile" == CANDIDATE_CANARY ]]; then
+    if [[ "$service_active" == inactive &&
+          ( "$service_enabled" == disabled || "$service_enabled" == static ) &&
+          "$timer_active" == inactive && "$timer_enabled" == disabled ]]; then
+        profile_units_valid=YES
+    fi
+    if [[ "$legacy_active" == active && "$legacy_enabled" == enabled &&
+          "$legacy_substate" == waiting ]]; then
+        legacy_authority_valid=YES
+    fi
+else
+    if [[ "$service_active" == inactive && "$service_substate" == dead &&
+          ( "$service_enabled" == disabled || "$service_enabled" == static ) ]]; then
+        profile_units_valid=YES
+    fi
+    if [[ "$timer_active" == active && "$timer_enabled" == enabled &&
+          "$timer_substate" == waiting ]]; then
+        production_timer_valid=YES
+    fi
+    if [[ "$legacy_active" == inactive && "$legacy_enabled" == disabled ]]; then
+        legacy_transfer_valid=YES
+    fi
+
+    candidate_timer_inventory=""
+    if ! candidate_timer_inventory="$(systemctl list-unit-files --type=timer --no-legend --no-pager "$CANDIDATE_TIMER_PATTERN" 2>/dev/null)"; then
+        candidate_timer_inventory_valid=NO
+        candidate_timers_valid=NO
+    fi
+    while read -r candidate_timer _; do
+        [[ -n "$candidate_timer" ]] || continue
+        if [[ ! "$candidate_timer" =~ ^ai-crypto-signal-agent-e6-candidate-[0-9a-f]{40}\.timer$ ]]; then
+            candidate_timer_inventory_valid=NO
+            candidate_timers_valid=NO
+            continue
+        fi
+        candidate_active="$(systemctl is-active "$candidate_timer" 2>/dev/null || true)"
+        candidate_enabled="$(systemctl is-enabled "$candidate_timer" 2>/dev/null || true)"
+        if [[ "$candidate_active" != inactive || "$candidate_enabled" != disabled ]]; then
+            candidate_timers_valid=NO
+        fi
+        consider_scheduler_authority "$candidate_timer" "$candidate_active" "$candidate_enabled"
+    done <<< "$candidate_timer_inventory"
+
+    old_e6_active="$(systemctl is-active "$OLD_E6_TIMER_NAME" 2>/dev/null || true)"
+    old_e6_enabled="$(systemctl is-enabled "$OLD_E6_TIMER_NAME" 2>/dev/null || true)"
+    if [[ "$old_e6_active" == inactive && "$old_e6_enabled" == disabled ]]; then
+        old_e6_timer_valid=YES
+    fi
+    consider_scheduler_authority "$OLD_E6_TIMER_NAME" "$old_e6_active" "$old_e6_enabled"
+fi
+
+authoritative_scheduler_valid=NO
+authoritative_scheduler_reason="SCHEDULER_AUTHORITY_COUNT_INVALID"
+if [[ "$authoritative_scheduler_count" -eq 0 ]]; then
+    authoritative_scheduler_reason="SCHEDULER_AUTHORITY_COUNT_ZERO"
+elif [[ "$authoritative_scheduler_count" -gt 1 ]]; then
+    authoritative_scheduler_reason="SCHEDULER_AUTHORITY_COUNT_MULTIPLE"
+elif [[ "$profile" == CANDIDATE_CANARY &&
+        "$authoritative_scheduler" == "$LEGACY_TIMER_NAME" ]]; then
+    authoritative_scheduler_valid=YES
+elif [[ "$profile" == PRODUCTION &&
+        "$authoritative_scheduler" == "$timer_unit" ]]; then
+    authoritative_scheduler_valid=YES
+else
+    authoritative_scheduler_reason="SCHEDULER_AUTHORITY_IDENTITY_INVALID"
 fi
 
 record_check IMMUTABLE_RELEASE_MATCH "$release_match" RELEASE_IDENTITY_MISMATCH
@@ -237,21 +364,56 @@ record_check RELEASE_BYTE_IDENTITY "$release_bytes_match" RELEASE_BYTE_IDENTITY_
 record_check ACTIVATION_BINDING_VALID "$activation_binding_valid" ACTIVATION_BINDING_INVALID
 record_check SERVICE_UNIT_MATCH "$service_match" SERVICE_UNIT_IDENTITY_MISMATCH
 record_check TIMER_UNIT_MATCH "$timer_match" TIMER_UNIT_IDENTITY_MISMATCH
-record_check CANDIDATE_STATE_VALID_EMPTY "$candidate_state_valid" CANDIDATE_STATE_INVALID
+record_check LOADCREDENTIAL_ROW_PARITY "$loadcredential_parity" LOADCREDENTIAL_MAPPING_INVALID
+record_check SYSTEMD_CREDENTIAL_RUNTIME_SOURCE "$launcher_credential_valid" SYSTEMD_CREDENTIAL_RUNTIME_SOURCE_INVALID
 record_check ACCEPTED_RELEASE_MARKER_VALID "$marker_valid" ACCEPTED_RELEASE_MARKER_INVALID
 record_check SECRET_ENVIRONMENT_METADATA_VALID "$secret_metadata_valid" SECRET_ENVIRONMENT_METADATA_INVALID
 record_check KILL_SWITCH_INACTIVE "$kill_switch_valid" KILL_SWITCH_ACTIVE_OR_INVALID
 record_check OPERATIONAL_LOCK_ABSENT_OR_UNHELD "$lock_valid" OPERATIONAL_LOCK_HELD_OR_INVALID
-record_check PROFILE_UNITS_DISABLED_INACTIVE "$disabled_inactive" PROFILE_UNIT_AUTHORITY_INVALID
-record_check LEGACY_PRODUCTION_AUTHORITY "$legacy_authority" LEGACY_PRODUCTION_AUTHORITY_INVALID
+if [[ "$profile" == CANDIDATE_CANARY ]]; then
+    record_check CANDIDATE_STATE_VALID_EMPTY "$state_authority_valid" CANDIDATE_STATE_INVALID
+    record_check PROFILE_UNITS_DISABLED_INACTIVE "$profile_units_valid" PROFILE_UNIT_AUTHORITY_INVALID
+    record_check LEGACY_SERVICE_INACTIVE "$legacy_service_valid" LEGACY_SERVICE_AUTHORITY_INVALID
+    record_check LEGACY_PRODUCTION_AUTHORITY "$legacy_authority_valid" LEGACY_PRODUCTION_AUTHORITY_INVALID
+else
+    record_check PRODUCTION_STATE_AUTHORITY_VALID "$state_authority_valid" PRODUCTION_STATE_AUTHORITY_INVALID
+    record_check PRODUCTION_SERVICE_INACTIVE "$profile_units_valid" PRODUCTION_SERVICE_AUTHORITY_INVALID
+    record_check PRODUCTION_TIMER_ACTIVE "$production_timer_valid" PRODUCTION_TIMER_AUTHORITY_INVALID
+    record_check LEGACY_SERVICE_INACTIVE "$legacy_service_valid" LEGACY_SERVICE_AUTHORITY_INVALID
+    record_check LEGACY_TIMER_AUTHORITY_TRANSFERRED "$legacy_transfer_valid" LEGACY_TIMER_AUTHORITY_NOT_TRANSFERRED
+    record_check CANDIDATE_TIMER_INACTIVITY "$candidate_timers_valid" CANDIDATE_TIMER_AUTHORITY_INVALID
+    record_check CANDIDATE_TIMER_INVENTORY_VALID "$candidate_timer_inventory_valid" CANDIDATE_TIMER_INVENTORY_INVALID
+    record_check OLD_E6_TIMER_INACTIVITY "$old_e6_timer_valid" OLD_E6_TIMER_AUTHORITY_INVALID
+fi
+record_check AUTHORITATIVE_SCHEDULER_EXACTLY_ONE "$authoritative_scheduler_valid" "$authoritative_scheduler_reason"
+printf 'AUTHORITATIVE_SCHEDULER_COUNT=%d\n' "$authoritative_scheduler_count"
+printf 'AUTHORITATIVE_SCHEDULER=%s\n' "$authoritative_scheduler"
 printf '%s\n' "SECRET_VALUE_EXPOSURE_COUNT=0"
+printf '%s\n' "SECRET_CONTENT_OPEN_COUNT=0"
+printf '%s\n' "SECRET_CONTENT_READ_COUNT=0"
+printf '%s\n' "SECRET_CONTENT_HASH_COUNT=0"
+printf '%s\n' "SECRET_CONTENT_OUTPUT_COUNT=0"
+printf '%s\n' "SERVICE_CONTROL_COMMAND_COUNT=0"
 printf '%s\n' "SERVICE_CYCLE_INVOCATION_COUNT=0"
 printf '%s\n' "PROVIDER_ATTEMPT_COUNT=0"
+printf '%s\n' "REAL_PROVIDER_CALL_COUNT=0"
 printf '%s\n' "TELEGRAM_ATTEMPT_COUNT=0"
+printf '%s\n' "REAL_TELEGRAM_SEND_COUNT=0"
+printf '%s\n' "EXCHANGE_ORDER_COUNT=0"
+printf '%s\n' "STATE_MUTATION_COUNT=0"
 printf '%s\n' "AUTOMATIC_RETRY_COUNT=0"
 
 if [[ "$failure_count" -eq 0 ]]; then
-    printf '%s\n' "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED"
+    printf '%s\n' "DIRECT_HOST_MARKER_RUNTIME_READ_COUNT=0"
+    printf '%s\n' "SYSTEMD_CREDENTIAL_RUNTIME_READ_COUNT=1"
+    if [[ "$profile" == CANDIDATE_CANARY ]]; then
+        printf '%s\n' "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED"
+    else
+        printf '%s\n' "PROFILE_UNIT_AUTHORITY=ACTIVE_PRODUCTION_VALID"
+        printf '%s\n' "LEGACY_PRODUCTION_AUTHORITY=TRANSFERRED_TO_E6_PRODUCTION"
+        printf '%s\n' "HEALTH_STATUS=PASS_ACTIVE_PRODUCTION"
+        printf '%s\n' "PRODUCTION_HEALTH_STATUS=PASS_ACTIVE_PRODUCTION"
+    fi
     exit 0
 fi
 for reason in "${failure_reasons[@]}"; do

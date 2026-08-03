@@ -52,9 +52,9 @@ def _directives(text: str, name: str) -> list[str]:
     return [line.split("=", 1)[1] for line in text.splitlines() if line.startswith(f"{name}=")]
 
 
-def _render_candidate(text: str) -> str:
+def _render_profile(text: str, deployment_profile: str) -> str:
     binding = build_e6_deployment_state_binding_v1(
-        deployment_profile="CANDIDATE_CANARY", release_commit=COMMIT
+        deployment_profile=deployment_profile, release_commit=COMMIT
     )
     replacements = {
         "@@RELEASE_ROOT@@": binding.release_root,
@@ -76,6 +76,10 @@ def _render_candidate(text: str) -> str:
     return text
 
 
+def _render_candidate(text: str) -> str:
+    return _render_profile(text, "CANDIDATE_CANARY")
+
+
 def _fixture_identity() -> tuple[str, str]:
     import pwd
 
@@ -88,14 +92,27 @@ def _write(path: Path, text: str, mode: int) -> None:
     path.chmod(mode)
 
 
-def _fixture_authority(tmp_path: Path) -> dict[str, str]:
-    identity = f"ai-crypto-signal-agent-e6-candidate-{COMMIT}"
-    state = tmp_path / "state" / identity
+def _fixture_authority(
+    tmp_path: Path, deployment_profile: str = "CANDIDATE_CANARY"
+) -> dict[str, str]:
+    if deployment_profile == "CANDIDATE_CANARY":
+        identity = f"ai-crypto-signal-agent-e6-candidate-{COMMIT}"
+        state = tmp_path / "state" / identity
+        publication = state / "publication-evidence"
+        operational = state / "operational-artifacts"
+        control = tmp_path / "control" / COMMIT
+        configuration = tmp_path / "config" / COMMIT
+    else:
+        assert deployment_profile == "PRODUCTION"
+        identity = "ai-crypto-signal-agent-e6-production"
+        state = tmp_path / "state" / "phase09r1"
+        publication = state / "production-signals"
+        operational = tmp_path / "state" / "operational-artifacts"
+        control = tmp_path / "control" / "production"
+        configuration = tmp_path / "config" / "production"
     owner = state / "owner-blueprint"
     runtime = tmp_path / "run" / identity
     cache = tmp_path / "cache" / identity
-    control = tmp_path / "control" / COMMIT
-    configuration = tmp_path / "config" / COMMIT
     return {
         "service_unit": f"{identity}.service",
         "timer_unit": f"{identity}.timer",
@@ -106,8 +123,8 @@ def _fixture_authority(tmp_path: Path) -> dict[str, str]:
         "owner_state_path": str(
             owner / "telegram-owner-control-state-v1.json"
         ),
-        "publication_root": str(state / "publication-evidence"),
-        "operational_artifact_root": str(state / "operational-artifacts"),
+        "publication_root": str(publication),
+        "operational_artifact_root": str(operational),
         "runtime_root": str(runtime),
         "runtime_lock": str(runtime / "e6-operational.lock"),
         "cache_root": str(cache),
@@ -123,12 +140,15 @@ def _fixture_authority(tmp_path: Path) -> dict[str, str]:
 
 
 def _activation_mapping(
-    authority: dict[str, str], *, release_root: Path
+    authority: dict[str, str],
+    *,
+    release_root: Path,
+    deployment_profile: str = "CANDIDATE_CANARY",
 ) -> dict[str, str]:
     values = {
         "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
         "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
-        "E6_DEPLOYMENT_PROFILE": "CANDIDATE_CANARY",
+        "E6_DEPLOYMENT_PROFILE": deployment_profile,
         "E6_RELEASE_COMMIT": COMMIT,
         "E6_RELEASE_TREE": TREE,
         "E6_TRUSTED_CHECKPOINT_COMMIT": TRUSTED,
@@ -214,12 +234,16 @@ def _replace_fixture_authority(
         'readonly ROOT_USER="root"': f'readonly ROOT_USER="{user}"',
         'readonly ROOT_GROUP="root"': f'readonly ROOT_GROUP="{group}"',
         'state_root="/var/lib/$identity"': f'state_root="{tmp_path}/state/$identity"',
-        'runtime_root="/run/$identity"': f'runtime_root="{tmp_path}/run/$identity"',
-        'cache_root="/var/cache/$identity"': f'cache_root="{tmp_path}/cache/$identity"',
+        'runtime_root="/run/$identity"': f'runtime_root="{authority["runtime_root"]}"',
+        'cache_root="/var/cache/$identity"': f'cache_root="{authority["cache_root"]}"',
         'control_root="/var/lib/ai-crypto-signal-agent-e6-installations/$source_commit"': f'control_root="{tmp_path}/control/$source_commit"',
         'control_root="/var/lib/ai-crypto-signal-agent-e6-installations/$release_commit"': f'control_root="{tmp_path}/control/$release_commit"',
         'configuration_root="/etc/ai-crypto-signal-agent/e6-candidates/$source_commit"': f'configuration_root="{tmp_path}/config/$source_commit"',
         'configuration_root="/etc/ai-crypto-signal-agent/e6-candidates/$release_commit"': f'configuration_root="{tmp_path}/config/$release_commit"',
+        'state_root="/var/lib/ai-crypto-signal-agent/phase09r1"': f'state_root="{authority["state_root"]}"',
+        'operational_root="/var/lib/ai-crypto-signal-agent/operational-artifacts"': f'operational_root="{authority["operational_artifact_root"]}"',
+        'control_root="/var/lib/ai-crypto-signal-agent-e6-production-control"': f'control_root="{authority["control_root"]}"',
+        'configuration_root="/etc/ai-crypto-signal-agent/e6-production"': f'configuration_root="{authority["configuration_root"]}"',
         '"root:root:400"': f'"{user}:{group}:400"',
     }
     for old, new in replacements.items():
@@ -308,6 +332,236 @@ def _run_once_fixture(tmp_path: Path) -> dict[str, object]:
         "credentials_directory": credentials_directory,
         "accepted_release_credential": accepted_release_credential,
         "environment": environment,
+    }
+
+
+def _health_fixture(
+    tmp_path: Path,
+    *,
+    deployment_profile: str,
+    state_overrides: dict[str, tuple[str, str, str]] | None = None,
+    activation_profile_override: str | None = None,
+    service_unit_matches: bool = True,
+    state_schema_valid: bool = True,
+    runtime_lock_mode: int | None = None,
+) -> dict[str, object]:
+    authority = _fixture_authority(tmp_path, deployment_profile)
+    release = tmp_path / "releases" / COMMIT
+    units = tmp_path / "units"
+    telegram_environment = tmp_path / "telegram.env"
+    provider_environment = tmp_path / "provider.env"
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-health"),
+        authority=authority,
+        tmp_path=tmp_path,
+    )
+    source = source.replace(
+        'readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"',
+        f'readonly TELEGRAM_ENVIRONMENT="{telegram_environment}"',
+    ).replace(
+        'readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"',
+        f'readonly PROVIDER_ENVIRONMENT="{provider_environment}"',
+    ).replace(
+        'service_path="/etc/systemd/system/$service_unit"',
+        f'service_path="{units}/$service_unit"',
+    ).replace(
+        'timer_path="/etc/systemd/system/$timer_unit"',
+        f'timer_path="{units}/$timer_unit"',
+    ).replace(
+        '"/opt/ai-crypto-signal-agent-releases/$release_commit"',
+        f'"{tmp_path}/releases/$release_commit"',
+    )
+    health = tmp_path / "health"
+    _write(health, source, 0o755)
+
+    for key, mode in (
+        ("state_root", 0o750),
+        ("owner_state_root", 0o700),
+        ("publication_root", 0o700),
+        ("operational_artifact_root", 0o700),
+        ("cache_root", 0o700),
+        ("control_root", 0o750),
+        ("configuration_root", 0o750),
+    ):
+        path = Path(authority[key])
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(mode)
+
+    owner_document = {
+        "schema_name": (
+            "telegram-owner-control-state"
+            if state_schema_valid
+            else "invalid-owner-state"
+        ),
+        "schema_version": 1,
+        "revision": 0,
+        "updated_at": "2026-08-03T00:00:00Z",
+        "last_update_id": -1,
+        "processed_updates": {},
+        "processed_commands": {},
+        "signal_message_bindings": {},
+    }
+    ledger_document = {
+        "schema_name": "active-signal-ledger",
+        "schema_version": 2,
+        "ledger_revision": 0,
+        "created_at": "2026-08-03T00:00:00Z",
+        "updated_at": "2026-08-03T00:00:00Z",
+        "capacity_policy": {},
+        "signals": {},
+        "transitions": {},
+        "publication_transactions": {},
+    }
+    _write(
+        Path(authority["owner_state_path"]),
+        json.dumps(owner_document, separators=(",", ":")) + "\n",
+        0o600,
+    )
+    _write(
+        Path(authority["active_ledger_path"]),
+        json.dumps(ledger_document, separators=(",", ":")) + "\n",
+        0o600,
+    )
+    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
+    _write(Path(authority["accepted_marker"]), f"{COMMIT}\n", 0o400)
+    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
+    _write(telegram_environment, "not-read\n", 0o600)
+    _write(provider_environment, "not-read\n", 0o600)
+    if runtime_lock_mode is not None:
+        _write(Path(authority["runtime_lock"]), "not-locked\n", runtime_lock_mode)
+    configuration = _activation_mapping(
+        authority,
+        release_root=release,
+        deployment_profile=deployment_profile,
+    )
+    if activation_profile_override is not None:
+        configuration["E6_DEPLOYMENT_PROFILE"] = activation_profile_override
+    _write(
+        Path(authority["activation_configuration_path"]),
+        _configuration_text(configuration),
+        0o640,
+    )
+
+    if deployment_profile == "CANDIDATE_CANARY":
+        service_template = "ai-crypto-signal-agent-e6.service.in"
+        timer_template = "ai-crypto-signal-agent-e6.timer"
+    else:
+        service_template = "ai-crypto-signal-agent-e6-production.service.in"
+        timer_template = "ai-crypto-signal-agent-e6-production.timer"
+    rendered_service = _render_profile(
+        _text(SYSTEMD / service_template), deployment_profile
+    )
+    rendered_timer = _render_profile(
+        _text(SYSTEMD / timer_template), deployment_profile
+    )
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile=deployment_profile, release_commit=COMMIT
+    )
+    rendered_service = rendered_service.replace(
+        binding.accepted_marker, authority["accepted_marker"]
+    )
+    rendered = release / ".e6-rendered"
+    _write(rendered / authority["service_unit"], rendered_service, 0o444)
+    _write(rendered / authority["timer_unit"], rendered_timer, 0o444)
+    _write(
+        release
+        / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once",
+        _text(BIN / "ai-crypto-signal-agent-e6-run-once"),
+        0o555,
+    )
+    _release_manifest(release)
+    installed_service = rendered_service
+    if not service_unit_matches:
+        installed_service += "# identity-mismatch\n"
+    _write(units / authority["service_unit"], installed_service, 0o644)
+    _write(units / authority["timer_unit"], rendered_timer, 0o644)
+
+    candidate_timer_1 = (
+        "ai-crypto-signal-agent-e6-candidate-"
+        f"{'d' * 40}.timer"
+    )
+    candidate_timer_2 = (
+        "ai-crypto-signal-agent-e6-candidate-"
+        f"{'e' * 40}.timer"
+    )
+    state_keys = {
+        "profile_service": authority["service_unit"],
+        "profile_timer": authority["timer_unit"],
+        "legacy_service": "ai-crypto-signal-agent.service",
+        "legacy_timer": "ai-crypto-signal-agent.timer",
+        "old_e6_timer": "ai-crypto-signal-agent-e6.timer",
+        "candidate_timer_1": candidate_timer_1,
+        "candidate_timer_2": candidate_timer_2,
+    }
+    if deployment_profile == "CANDIDATE_CANARY":
+        states = {
+            "profile_service": ("inactive", "static", "dead"),
+            "profile_timer": ("inactive", "disabled", "dead"),
+            "legacy_service": ("inactive", "static", "dead"),
+            "legacy_timer": ("active", "enabled", "waiting"),
+            "old_e6_timer": ("inactive", "disabled", "dead"),
+            "candidate_timer_1": ("inactive", "disabled", "dead"),
+            "candidate_timer_2": ("inactive", "disabled", "dead"),
+        }
+    else:
+        states = {
+            "profile_service": ("inactive", "static", "dead"),
+            "profile_timer": ("active", "enabled", "waiting"),
+            "legacy_service": ("inactive", "static", "dead"),
+            "legacy_timer": ("inactive", "disabled", "dead"),
+            "old_e6_timer": ("inactive", "disabled", "dead"),
+            "candidate_timer_1": ("inactive", "disabled", "dead"),
+            "candidate_timer_2": ("inactive", "disabled", "dead"),
+        }
+    states.update(state_overrides or {})
+
+    mock_bin = tmp_path / "mock-bin"
+    systemctl = mock_bin / "systemctl"
+    script_lines = [
+        "#!/usr/bin/env bash",
+        'if [[ "$1" == list-unit-files ]]; then',
+        f"  echo '{candidate_timer_1} disabled enabled'",
+        f"  echo '{candidate_timer_2} disabled enabled'",
+        "  exit 0",
+        "fi",
+        'case "$1:$2" in',
+    ]
+    for key, unit in state_keys.items():
+        active, enabled, substate = states[key]
+        script_lines.extend(
+            (
+                f"is-active:{unit}) echo {active} ;;",
+                f"is-enabled:{unit}) echo {enabled} ;;",
+                f"show:{unit}) echo {substate} ;;",
+            )
+        )
+    script_lines.extend(("*) exit 1 ;;", "esac"))
+    _write(systemctl, "\n".join(script_lines) + "\n", 0o755)
+
+    state_preimage = {
+        path: path.read_bytes()
+        for path in sorted(Path(authority["state_root"]).rglob("*"))
+        if path.is_file()
+    }
+    environment = dict(os.environ)
+    environment["PATH"] = f"{mock_bin}:{environment['PATH']}"
+    result = subprocess.run(
+        [
+            str(health),
+            "--deployment-profile",
+            deployment_profile,
+            "--release-commit",
+            COMMIT,
+        ],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return {
+        "authority": authority,
+        "result": result,
+        "state_preimage": state_preimage,
     }
 
 
@@ -609,12 +863,24 @@ def test_health_is_profile_bound_read_only_and_cannot_invoke_effect_paths() -> N
         'grep -q \'"signals":{}\' "$active_ledger"',
         'grep -q \'"signal_message_bindings":{}\' "$owner_state"',
         "PROFILE_UNITS_DISABLED_INACTIVE",
+        "PRODUCTION_STATE_AUTHORITY_VALID",
+        "PRODUCTION_TIMER_ACTIVE",
+        "CANDIDATE_TIMER_INACTIVITY",
+        "OLD_E6_TIMER_INACTIVITY",
+        "AUTHORITATIVE_SCHEDULER_EXACTLY_ONE",
         "OPERATIONAL_LOCK_ABSENT_OR_UNHELD",
         "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED",
+        "HEALTH_STATUS=PASS_ACTIVE_PRODUCTION",
+        "PRODUCTION_HEALTH_STATUS=PASS_ACTIVE_PRODUCTION",
+        "LOADCREDENTIAL_ROW_PARITY",
+        "SYSTEMD_CREDENTIAL_RUNTIME_SOURCE",
+        "DIRECT_HOST_MARKER_RUNTIME_READ_COUNT=0",
+        "SYSTEMD_CREDENTIAL_RUNTIME_READ_COUNT=1",
+        "SERVICE_CONTROL_COMMAND_COUNT=0",
+        "STATE_MUTATION_COUNT=0",
     ):
         assert marker in health
     for command in (
-        "ai-crypto-signal-agent-e6-run-once",
         "engine.run_production_signal_v1",
         "run_e6_service_cycle_v1",
         "mark_entry_active",
@@ -624,156 +890,206 @@ def test_health_is_profile_bound_read_only_and_cannot_invoke_effect_paths() -> N
         "curl ",
     ):
         assert command not in health
+    assert 'exec "$launcher_path"' not in health
+    assert 'bash "$launcher_path"' not in health
     assert re.search(r"\b(touch|mkdir|mktemp|install|chmod|chown|mv|unlink)\b", health) is None
+    assert re.search(
+        r"systemctl\s+(start|stop|restart|enable|disable|preset)", health
+    ) is None
 
 
 def test_candidate_health_fixture_passes_disabled_inactive_without_mutation(
     tmp_path: Path,
 ) -> None:
-    authority = _fixture_authority(tmp_path)
-    user, group = _fixture_identity()
-    release = tmp_path / "releases" / COMMIT
-    units = tmp_path / "units"
-    telegram_environment = tmp_path / "telegram.env"
-    provider_environment = tmp_path / "provider.env"
-    source = _replace_fixture_authority(
-        _text(BIN / "ai-crypto-signal-agent-e6-health"),
-        authority=authority,
-        tmp_path=tmp_path,
+    fixture = _health_fixture(
+        tmp_path, deployment_profile="CANDIDATE_CANARY"
     )
-    source = source.replace(
-        'readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"',
-        f'readonly TELEGRAM_ENVIRONMENT="{telegram_environment}"',
-    ).replace(
-        'readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"',
-        f'readonly PROVIDER_ENVIRONMENT="{provider_environment}"',
-    ).replace(
-        'service_path="/etc/systemd/system/$service_unit"',
-        f'service_path="{units}/$service_unit"',
-    ).replace(
-        'timer_path="/etc/systemd/system/$timer_unit"',
-        f'timer_path="{units}/$timer_unit"',
-    ).replace(
-        '"/opt/ai-crypto-signal-agent-releases/$release_commit"',
-        f'"{tmp_path}/releases/$release_commit"',
-    )
-    health = tmp_path / "health"
-    _write(health, source, 0o755)
-
-    for key, mode in (
-        ("state_root", 0o750),
-        ("owner_state_root", 0o700),
-        ("publication_root", 0o700),
-        ("operational_artifact_root", 0o700),
-        ("cache_root", 0o700),
-        ("control_root", 0o750),
-        ("configuration_root", 0o750),
-    ):
-        path = Path(authority[key])
-        path.mkdir(parents=True, exist_ok=True)
-        path.chmod(mode)
-    owner_document = {
-        "schema_name": "telegram-owner-control-state",
-        "schema_version": 1,
-        "revision": 0,
-        "updated_at": "2026-08-03T00:00:00Z",
-        "last_update_id": -1,
-        "processed_updates": {},
-        "processed_commands": {},
-        "signal_message_bindings": {},
-    }
-    ledger_document = {
-        "schema_name": "active-signal-ledger",
-        "schema_version": 2,
-        "ledger_revision": 0,
-        "created_at": "2026-08-03T00:00:00Z",
-        "updated_at": "2026-08-03T00:00:00Z",
-        "capacity_policy": {},
-        "signals": {},
-        "transitions": {},
-        "publication_transactions": {},
-    }
-    _write(
-        Path(authority["owner_state_path"]),
-        json.dumps(owner_document, separators=(",", ":")) + "\n",
-        0o600,
-    )
-    _write(
-        Path(authority["active_ledger_path"]),
-        json.dumps(ledger_document, separators=(",", ":")) + "\n",
-        0o600,
-    )
-    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
-    _write(Path(authority["accepted_marker"]), f"{COMMIT}\n", 0o400)
-    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
-    _write(telegram_environment, "not-read\n", 0o600)
-    _write(provider_environment, "not-read\n", 0o600)
-    configuration = _activation_mapping(authority, release_root=release)
-    _write(
-        Path(authority["activation_configuration_path"]),
-        _configuration_text(configuration),
-        0o640,
-    )
-
-    rendered = release / ".e6-rendered"
-    candidate_service = _render_candidate(
-        _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
-    )
-    candidate_timer = _render_candidate(
-        _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
-    )
-    _write(rendered / authority["service_unit"], candidate_service, 0o444)
-    _write(rendered / authority["timer_unit"], candidate_timer, 0o444)
-    _release_manifest(release)
-    _write(units / authority["service_unit"], candidate_service, 0o644)
-    _write(units / authority["timer_unit"], candidate_timer, 0o644)
-
-    mock_bin = tmp_path / "mock-bin"
-    systemctl = mock_bin / "systemctl"
-    _write(
-        systemctl,
-        "#!/usr/bin/env bash\n"
-        "case \"$1:$2\" in\n"
-        f"is-active:{authority['service_unit']}) echo inactive ;;\n"
-        f"is-enabled:{authority['service_unit']}) echo disabled ;;\n"
-        f"is-active:{authority['timer_unit']}) echo inactive ;;\n"
-        f"is-enabled:{authority['timer_unit']}) echo disabled ;;\n"
-        "is-active:ai-crypto-signal-agent.timer) echo active ;;\n"
-        "is-enabled:ai-crypto-signal-agent.timer) echo enabled ;;\n"
-        "show:ai-crypto-signal-agent.timer) echo waiting ;;\n"
-        "*) exit 1 ;;\n"
-        "esac\n",
-        0o755,
-    )
-    before = {
-        Path(authority["owner_state_path"]): Path(
-            authority["owner_state_path"]
-        ).read_bytes(),
-        Path(authority["active_ledger_path"]): Path(
-            authority["active_ledger_path"]
-        ).read_bytes(),
-    }
-    environment = dict(os.environ)
-    environment["PATH"] = f"{mock_bin}:{environment['PATH']}"
-    result = subprocess.run(
-        [
-            str(health),
-            "--deployment-profile",
-            "CANDIDATE_CANARY",
-            "--release-commit",
-            COMMIT,
-        ],
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    result = fixture["result"]
     assert result.returncode == 0, result.stdout + result.stderr
     assert "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED" in result.stdout
+    assert "AUTHORITATIVE_SCHEDULER_COUNT=1" in result.stdout
+    assert "AUTHORITATIVE_SCHEDULER=ai-crypto-signal-agent.timer" in result.stdout
     assert "SERVICE_CYCLE_INVOCATION_COUNT=0" in result.stdout
     assert "AUTOMATIC_RETRY_COUNT=0" in result.stdout
-    assert all(path.read_bytes() == content for path, content in before.items())
-    assert user and group
+    assert all(
+        path.read_bytes() == content
+        for path, content in fixture["state_preimage"].items()
+    )
+
+
+@pytest.mark.parametrize(
+    ("state_overrides", "expected_reason"),
+    (
+        (
+            {"profile_timer": ("active", "disabled", "running")},
+            "PROFILE_UNIT_AUTHORITY_INVALID",
+        ),
+        (
+            {"legacy_timer": ("inactive", "disabled", "dead")},
+            "LEGACY_PRODUCTION_AUTHORITY_INVALID",
+        ),
+        (
+            {"legacy_service": ("active", "static", "running")},
+            "LEGACY_SERVICE_AUTHORITY_INVALID",
+        ),
+    ),
+)
+def test_candidate_health_rejects_scheduler_authority_drift(
+    tmp_path: Path,
+    state_overrides: dict[str, tuple[str, str, str]],
+    expected_reason: str,
+) -> None:
+    result = _health_fixture(
+        tmp_path,
+        deployment_profile="CANDIDATE_CANARY",
+        state_overrides=state_overrides,
+    )["result"]
+    assert result.returncode == 1
+    assert f"HEALTH_REASON={expected_reason}" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
+
+
+def test_production_health_fixture_passes_active_single_scheduler_without_mutation(
+    tmp_path: Path,
+) -> None:
+    fixture = _health_fixture(tmp_path, deployment_profile="PRODUCTION")
+    result = fixture["result"]
+    assert result.returncode == 0, result.stdout + result.stderr
+    for marker in (
+        "PROFILE_UNIT_AUTHORITY=ACTIVE_PRODUCTION_VALID",
+        "LEGACY_PRODUCTION_AUTHORITY=TRANSFERRED_TO_E6_PRODUCTION",
+        "HEALTH_STATUS=PASS_ACTIVE_PRODUCTION",
+        "PRODUCTION_HEALTH_STATUS=PASS_ACTIVE_PRODUCTION",
+        "AUTHORITATIVE_SCHEDULER_COUNT=1",
+        "AUTHORITATIVE_SCHEDULER=ai-crypto-signal-agent-e6-production.timer",
+        "LOADCREDENTIAL_ROW_PARITY=PASS",
+        "SYSTEMD_CREDENTIAL_RUNTIME_SOURCE=YES",
+        "DIRECT_HOST_MARKER_RUNTIME_READ_COUNT=0",
+        "SYSTEMD_CREDENTIAL_RUNTIME_READ_COUNT=1",
+        "SERVICE_CONTROL_COMMAND_COUNT=0",
+        "SERVICE_CYCLE_INVOCATION_COUNT=0",
+        "STATE_MUTATION_COUNT=0",
+    ):
+        assert marker in result.stdout
+    assert all(
+        path.read_bytes() == content
+        for path, content in fixture["state_preimage"].items()
+    )
+
+
+@pytest.mark.parametrize(
+    ("state_overrides", "expected_reason"),
+    (
+        (
+            {"profile_timer": ("active", "disabled", "waiting")},
+            "PRODUCTION_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"profile_timer": ("inactive", "enabled", "waiting")},
+            "PRODUCTION_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"profile_timer": ("active", "enabled", "running")},
+            "PRODUCTION_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"legacy_timer": ("active", "disabled", "waiting")},
+            "LEGACY_TIMER_AUTHORITY_NOT_TRANSFERRED",
+        ),
+        (
+            {"legacy_timer": ("active", "enabled", "waiting")},
+            "SCHEDULER_AUTHORITY_COUNT_MULTIPLE",
+        ),
+        (
+            {"legacy_service": ("active", "static", "running")},
+            "LEGACY_SERVICE_AUTHORITY_INVALID",
+        ),
+        (
+            {"profile_timer": ("inactive", "disabled", "dead")},
+            "SCHEDULER_AUTHORITY_COUNT_ZERO",
+        ),
+        (
+            {"candidate_timer_1": ("active", "disabled", "running")},
+            "CANDIDATE_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"candidate_timer_1": ("inactive", "enabled", "waiting")},
+            "CANDIDATE_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"old_e6_timer": ("active", "disabled", "running")},
+            "OLD_E6_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"old_e6_timer": ("inactive", "enabled", "waiting")},
+            "OLD_E6_TIMER_AUTHORITY_INVALID",
+        ),
+        (
+            {"profile_service": ("failed", "static", "failed")},
+            "PRODUCTION_SERVICE_AUTHORITY_INVALID",
+        ),
+    ),
+)
+def test_production_health_rejects_scheduler_authority_drift(
+    tmp_path: Path,
+    state_overrides: dict[str, tuple[str, str, str]],
+    expected_reason: str,
+) -> None:
+    result = _health_fixture(
+        tmp_path,
+        deployment_profile="PRODUCTION",
+        state_overrides=state_overrides,
+    )["result"]
+    assert result.returncode == 1
+    assert f"HEALTH_REASON={expected_reason}" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("fixture_options", "expected_reason"),
+    (
+        ({"service_unit_matches": False}, "SERVICE_UNIT_IDENTITY_MISMATCH"),
+        (
+            {"activation_profile_override": "CANDIDATE_CANARY"},
+            "ACTIVATION_BINDING_INVALID",
+        ),
+    ),
+)
+def test_production_health_rejects_profile_or_unit_identity_drift(
+    tmp_path: Path,
+    fixture_options: dict[str, object],
+    expected_reason: str,
+) -> None:
+    result = _health_fixture(
+        tmp_path,
+        deployment_profile="PRODUCTION",
+        **fixture_options,
+    )["result"]
+    assert result.returncode == 1
+    assert f"HEALTH_REASON={expected_reason}" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("fixture_options", "expected_reason"),
+    (
+        ({"state_schema_valid": False}, "PRODUCTION_STATE_AUTHORITY_INVALID"),
+        ({"runtime_lock_mode": 0o644}, "OPERATIONAL_LOCK_HELD_OR_INVALID"),
+    ),
+)
+def test_production_health_rejects_state_or_lock_authority_drift(
+    tmp_path: Path,
+    fixture_options: dict[str, object],
+    expected_reason: str,
+) -> None:
+    result = _health_fixture(
+        tmp_path,
+        deployment_profile="PRODUCTION",
+        **fixture_options,
+    )["result"]
+    assert result.returncode == 1
+    assert f"HEALTH_REASON={expected_reason}" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
 
 
 def test_rollback_is_profile_closed_and_never_touches_state_or_old_e6_pointer() -> None:
