@@ -8,6 +8,8 @@ import json
 import re
 import subprocess
 
+import pytest
+
 from engine.e5_technical_review_payload_v1 import (
     E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
     E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
@@ -225,6 +227,90 @@ def _replace_fixture_authority(
     return source
 
 
+def _run_once_fixture(tmp_path: Path) -> dict[str, object]:
+    authority = _fixture_authority(tmp_path)
+    release = tmp_path / "releases" / COMMIT
+    script_path = (
+        release
+        / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
+    )
+    invoked = tmp_path / "python-invoked"
+    python_stub = tmp_path / "python-stub"
+    _write(
+        python_stub,
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$TEST_INVOKED"\n',
+        0o755,
+    )
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-run-once"),
+        authority=authority,
+        tmp_path=tmp_path,
+    ).replace(
+        'readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"',
+        f'readonly PYTHON_BIN="{python_stub}"',
+    )
+    _write(script_path, source, 0o755)
+    _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
+
+    for key, mode in (
+        ("state_root", 0o750),
+        ("owner_state_root", 0o700),
+        ("publication_root", 0o700),
+        ("operational_artifact_root", 0o700),
+        ("runtime_root", 0o750),
+        ("cache_root", 0o700),
+        ("control_root", 0o750),
+        ("configuration_root", 0o750),
+    ):
+        path = Path(authority[key])
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(mode)
+    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
+    _write(
+        Path(authority["accepted_marker"]),
+        "host-marker-content-is-never-runtime-authority\n",
+        0o400,
+    )
+    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
+    _write(Path(authority["owner_state_path"]), "{}\n", 0o600)
+    _write(Path(authority["active_ledger_path"]), "{}\n", 0o600)
+    configuration = _activation_mapping(authority, release_root=release)
+    _write(
+        Path(authority["activation_configuration_path"]),
+        _configuration_text(configuration),
+        0o640,
+    )
+    _release_manifest(release)
+
+    credentials_directory = tmp_path / "systemd-credentials"
+    credentials_directory.mkdir(mode=0o700)
+    accepted_release_credential = (
+        credentials_directory / "accepted_e6_release_commit"
+    )
+    _write(accepted_release_credential, f"{COMMIT}\n", 0o400)
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "E6_ACTIVATION_CONFIGURATION_PATH": authority[
+                "activation_configuration_path"
+            ],
+            "ACTIVE_SIGNAL_LEDGER_PATH": authority["active_ledger_path"],
+            "TELEGRAM_OWNER_CONTROL_STATE_PATH": authority["owner_state_path"],
+            "CREDENTIALS_DIRECTORY": str(credentials_directory),
+            "TEST_INVOKED": str(invoked),
+        }
+    )
+    return {
+        "authority": authority,
+        "release": release,
+        "script_path": script_path,
+        "invoked": invoked,
+        "credentials_directory": credentials_directory,
+        "accepted_release_credential": accepted_release_credential,
+        "environment": environment,
+    }
+
+
 def test_exact_package_inventory_manifest_and_modes() -> None:
     actual = {
         path.relative_to(PACKAGE).as_posix(): f"0{path.stat().st_mode & 0o777:o}"
@@ -308,6 +394,13 @@ def test_candidate_service_rendering_is_exact_and_has_no_shared_writable_path() 
         "/etc/ai-crypto-signal-agent/phase09r1.env",
         "/etc/ai-crypto-signal-agent/deepseek.env",
     ]
+    assert _directives(rendered, "User") == ["ai-crypto-signal-agent"]
+    assert _directives(rendered, "Group") == ["ai-crypto-signal-agent"]
+    assert _directives(rendered, "SupplementaryGroups") == []
+    assert _directives(rendered, "LoadCredential") == [
+        f"accepted_e6_release_commit:{binding.accepted_marker}"
+    ]
+    assert "accepted_e6_release_commit=" not in rendered
     assert _directives(rendered, "ExecStart") == [
         f"{binding.release_root}/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
     ]
@@ -350,6 +443,15 @@ def test_stable_production_templates_rebind_state_without_candidate_namespace() 
     assert _directives(service, "CacheDirectory") == [
         "ai-crypto-signal-agent-e6-production"
     ]
+    assert _directives(service, "User") == ["ai-crypto-signal-agent"]
+    assert _directives(service, "Group") == ["ai-crypto-signal-agent"]
+    assert _directives(service, "SupplementaryGroups") == []
+    assert _directives(service, "LoadCredential") == [
+        "accepted_e6_release_commit:"
+        "/var/lib/ai-crypto-signal-agent-e6-production-control/"
+        "accepted-release.marker"
+    ]
+    assert "accepted_e6_release_commit=" not in service
     assert "candidate-" not in service.lower()
     assert "[Install]" not in service
     assert _directives(timer, "Unit") == [
@@ -373,8 +475,17 @@ def test_run_once_rederives_profile_authority_and_uses_only_profile_lock() -> No
         "E6_ACTIVE_SIGNAL_LEDGER_PATH",
         "E6_OWNER_CONTROL_STATE_PATH",
         "E6_RUNTIME_LOCK_PATH",
+        'credentials_directory="${CREDENTIALS_DIRECTORY:-}"',
+        'accepted_release_credential="${credentials_directory}/accepted_e6_release_commit"',
+        'mapfile -t accepted_release_credential_lines < "$accepted_release_credential"',
     ):
         assert marker in script
+    assert script.count(
+        'mapfile -t accepted_release_credential_lines < "$accepted_release_credential"'
+    ) == 1
+    assert '$(cat "$accepted_marker")' not in script
+    assert '< "$accepted_marker"' not in script
+    assert '"root:root:400"' in script
     assert 'readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"' not in script
     assert "/var/lib/ai-crypto-signal-agent/e6-installed-release.path" not in script
     assert "while true" not in script
@@ -384,68 +495,12 @@ def test_run_once_rederives_profile_authority_and_uses_only_profile_lock() -> No
 def test_candidate_run_once_fixture_uses_only_bound_paths_and_one_python_call(
     tmp_path: Path,
 ) -> None:
-    authority = _fixture_authority(tmp_path)
-    release = tmp_path / "releases" / COMMIT
-    script_path = (
-        release
-        / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
-    )
-    invoked = tmp_path / "python-invoked"
-    python_stub = tmp_path / "python-stub"
-    _write(
-        python_stub,
-        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$TEST_INVOKED"\n',
-        0o755,
-    )
-    source = _replace_fixture_authority(
-        _text(BIN / "ai-crypto-signal-agent-e6-run-once"),
-        authority=authority,
-        tmp_path=tmp_path,
-    ).replace(
-        'readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"',
-        f'readonly PYTHON_BIN="{python_stub}"',
-    )
-    _write(script_path, source, 0o755)
-    _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
-
+    fixture = _run_once_fixture(tmp_path)
+    authority = fixture["authority"]
+    script_path = fixture["script_path"]
+    invoked = fixture["invoked"]
+    environment = fixture["environment"]
     user, group = _fixture_identity()
-    for key, mode in (
-        ("state_root", 0o750),
-        ("owner_state_root", 0o700),
-        ("publication_root", 0o700),
-        ("operational_artifact_root", 0o700),
-        ("runtime_root", 0o750),
-        ("cache_root", 0o700),
-        ("control_root", 0o750),
-        ("configuration_root", 0o750),
-    ):
-        path = Path(authority[key])
-        path.mkdir(parents=True, exist_ok=True)
-        path.chmod(mode)
-    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
-    _write(Path(authority["accepted_marker"]), f"{COMMIT}\n", 0o400)
-    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
-    _write(Path(authority["owner_state_path"]), "{}\n", 0o600)
-    _write(Path(authority["active_ledger_path"]), "{}\n", 0o600)
-    configuration = _activation_mapping(authority, release_root=release)
-    _write(
-        Path(authority["activation_configuration_path"]),
-        _configuration_text(configuration),
-        0o640,
-    )
-    _release_manifest(release)
-
-    environment = dict(os.environ)
-    environment.update(
-        {
-            "E6_ACTIVATION_CONFIGURATION_PATH": authority[
-                "activation_configuration_path"
-            ],
-            "ACTIVE_SIGNAL_LEDGER_PATH": authority["active_ledger_path"],
-            "TELEGRAM_OWNER_CONTROL_STATE_PATH": authority["owner_state_path"],
-            "TEST_INVOKED": str(invoked),
-        }
-    )
     result = subprocess.run(
         [str(script_path)],
         env=environment,
@@ -472,6 +527,77 @@ def test_candidate_run_once_fixture_uses_only_bound_paths_and_one_python_call(
     assert blocked.returncode == 75
     assert "KILL_SWITCH_ACTIVE" in blocked.stderr
     assert not invoked.exists()
+
+
+@pytest.mark.parametrize(
+    "failure_case",
+    (
+        "credentials_directory_absent",
+        "credentials_directory_relative",
+        "credential_absent",
+        "credential_symlink",
+        "credential_unreadable",
+        "credential_blank",
+        "credential_multiple_lines",
+        "credential_uppercase",
+        "credential_non_hex",
+        "credential_commit_mismatch",
+    ),
+)
+def test_run_once_credential_copy_failures_are_closed_and_sanitized(
+    tmp_path: Path, failure_case: str
+) -> None:
+    fixture = _run_once_fixture(tmp_path)
+    script_path = fixture["script_path"]
+    invoked = fixture["invoked"]
+    credential = fixture["accepted_release_credential"]
+    environment = fixture["environment"].copy()
+    sensitive_value = ""
+
+    if failure_case == "credentials_directory_absent":
+        environment.pop("CREDENTIALS_DIRECTORY")
+        expected_code = "CREDENTIALS_DIRECTORY_INVALID"
+    elif failure_case == "credentials_directory_relative":
+        environment["CREDENTIALS_DIRECTORY"] = "relative-credentials"
+        expected_code = "CREDENTIALS_DIRECTORY_INVALID"
+    elif failure_case == "credential_absent":
+        credential.unlink()
+        expected_code = "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+    elif failure_case == "credential_symlink":
+        credential.unlink()
+        target = tmp_path / "credential-target"
+        _write(target, f"{COMMIT}\n", 0o400)
+        credential.symlink_to(target)
+        expected_code = "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+    elif failure_case == "credential_unreadable":
+        credential.chmod(0o000)
+        expected_code = "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+    else:
+        values = {
+            "credential_blank": "\n",
+            "credential_multiple_lines": f"{COMMIT}\n{COMMIT}\n",
+            "credential_uppercase": f"{COMMIT.upper()}\n",
+            "credential_non_hex": f"{'g' * 40}\n",
+            "credential_commit_mismatch": f"{'d' * 40}\n",
+        }
+        sensitive_value = values[failure_case].strip()
+        credential.unlink()
+        _write(credential, values[failure_case], 0o400)
+        expected_code = "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+
+    result = subprocess.run(
+        [str(script_path)],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 78
+    assert result.stdout == ""
+    assert result.stderr.strip() == f"E6_LAUNCH_BLOCKED={expected_code}"
+    assert not invoked.exists()
+    if sensitive_value:
+        assert sensitive_value not in result.stdout + result.stderr
 
 
 def test_health_is_profile_bound_read_only_and_cannot_invoke_effect_paths() -> None:

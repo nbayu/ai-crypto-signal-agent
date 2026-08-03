@@ -173,8 +173,25 @@ require_configuration_value E6_AUTOMATED_EXCHANGE_TRADING_ENABLED false
    "$(stat -Lc '%U:%G:%a' "$active_ledger")" == "$SERVICE_USER:$SERVICE_GROUP:600" ]] ||
     fail_closed "ACTIVE_LEDGER_METADATA_INVALID"
 [[ -f "$accepted_marker" && ! -L "$accepted_marker" &&
-   "$(stat -Lc '%U:%G:%a' "$accepted_marker")" == "root:root:400" &&
-   "$(cat "$accepted_marker")" == "$source_commit" ]] || fail_closed "ACCEPTED_MARKER_INVALID"
+   "$(stat -Lc '%U:%G:%a' "$accepted_marker")" == "root:root:400" ]] ||
+    fail_closed "ACCEPTED_MARKER_INVALID"
+
+credentials_directory="${CREDENTIALS_DIRECTORY:-}"
+[[ "$credentials_directory" = /* ]] ||
+    fail_closed "CREDENTIALS_DIRECTORY_INVALID"
+accepted_release_credential="${credentials_directory}/accepted_e6_release_commit"
+[[ -f "$accepted_release_credential" &&
+   ! -L "$accepted_release_credential" &&
+   -r "$accepted_release_credential" ]] ||
+    fail_closed "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+accepted_release_credential_lines=()
+mapfile -t accepted_release_credential_lines < "$accepted_release_credential" ||
+    fail_closed "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+[[ "${#accepted_release_credential_lines[@]}" -eq 1 &&
+   "${accepted_release_credential_lines[0]}" =~ ^[0-9a-f]{40}$ &&
+   "${accepted_release_credential_lines[0]}" == "$source_commit" ]] ||
+    fail_closed "ACCEPTED_RELEASE_CREDENTIAL_INVALID"
+unset accepted_release_credential_lines
 
 if [[ -e "$kill_switch" || -L "$kill_switch" ]]; then
     [[ -f "$kill_switch" && ! -L "$kill_switch" && -r "$kill_switch" ]] || fail_closed "KILL_SWITCH_STATE"
