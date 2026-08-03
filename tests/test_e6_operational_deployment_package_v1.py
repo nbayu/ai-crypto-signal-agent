@@ -355,13 +355,30 @@ def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> 
     assert _directives(service, "Group") == ["ai-crypto-signal-agent"]
     assert _directives(service, "Restart") == ["no"]
     assert "[Install]" not in service
-    timer = _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
+    timer_candidates = (
+        SYSTEMD / "ai-crypto-signal-agent-e6.timer",
+        SYSTEMD / "ai-crypto-signal-agent-e6.timer.in",
+    )
+    resolved = [path for path in timer_candidates if path.is_file()]
+    assert resolved == [SYSTEMD / "ai-crypto-signal-agent-e6.timer"]
+    timer = _text(resolved[0])
     assert _directives(timer, "Unit") == ["ai-crypto-signal-agent-e6.service"]
-    assert _directives(timer, "OnActiveSec") == ["30min"]
-    assert _directives(timer, "OnUnitInactiveSec") == ["30min"]
-    assert _directives(timer, "AccuracySec") == ["1min"]
+    assert _directives(timer, "OnCalendar") == ["*-*-* *:*:00 UTC"]
+    assert _directives(timer, "AccuracySec") == ["1s"]
     assert _directives(timer, "Persistent") == ["false"]
-    assert not any(_directives(timer, key) for key in ("OnBootSec", "OnStartupSec", "OnUnitActiveSec"))
+    assert not any(
+        _directives(timer, key)
+        for key in (
+            "OnActiveSec",
+            "OnBootSec",
+            "OnStartupSec",
+            "OnUnitActiveSec",
+            "OnUnitInactiveSec",
+            "RandomizedDelaySec",
+        )
+    )
+    assert "30min" not in timer
+    assert not any(mode in timer for mode in ("SWING", "INTRADAY", "SCALP"))
 
 
 def test_host_access_contract_is_exact_nonsecret_and_documented() -> None:
@@ -627,6 +644,11 @@ case "$1:$2" in
       exit 64
     fi
     ;;
+  is-active:ai-crypto-signal-agent.timer) printf '%s\n' "$MOCK_LEGACY_TIMER_ACTIVE" ;;
+  is-enabled:ai-crypto-signal-agent.timer) printf '%s\n' "$MOCK_LEGACY_TIMER_ENABLED" ;;
+  show:ai-crypto-signal-agent.timer)
+    [[ "$*" == *SubState* ]] && printf '%s\n' "$MOCK_LEGACY_TIMER_SUBSTATE" || exit 64
+    ;;
   *) exit 64 ;;
 esac
 """,
@@ -664,6 +686,9 @@ fi
         "MOCK_TIMER_ENABLED": "disabled",
         "MOCK_TIMER_SUBSTATE": "dead",
         "MOCK_TIMER_NEXT": "0",
+        "MOCK_LEGACY_TIMER_ACTIVE": "active",
+        "MOCK_LEGACY_TIMER_ENABLED": "enabled",
+        "MOCK_LEGACY_TIMER_SUBSTATE": "waiting",
         "MOCK_CONFIG_DIRECTORY_PATH": str(metadata),
         "MOCK_RELEASE_REFERENCE_PATH": str(release_ref),
         "MOCK_ACCEPTED_MARKER_PATH": str(marker),
@@ -703,6 +728,10 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
     assert "INSTALLED_RELEASE_REFERENCE_METADATA_VALID=YES" in disabled.stdout
     assert "ACCEPTED_RELEASE_MARKER_METADATA_VALID=YES" in disabled.stdout
     assert "SECRET_ENVIRONMENT_METADATA_VALID=YES" in disabled.stdout
+    assert "TIMER_CONTRACT_VALID=YES" in disabled.stdout
+    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=YES" in disabled.stdout
+    assert "LEGACY_TIMER_ACTIVE=active" in disabled.stdout
+    assert "LEGACY_TIMER_ENABLED=enabled" in disabled.stdout
     assert "fixture-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
     assert "telegram-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
     assert "provider-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
@@ -729,10 +758,14 @@ def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) ->
         MOCK_TIMER_ENABLED="enabled",
         MOCK_TIMER_SUBSTATE="waiting",
         MOCK_TIMER_NEXT="2800000000",
+        MOCK_LEGACY_TIMER_ACTIVE="inactive",
+        MOCK_LEGACY_TIMER_ENABLED="disabled",
+        MOCK_LEGACY_TIMER_SUBSTATE="dead",
     )
     active = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
     assert active.returncode == 0, active.stdout + active.stderr
     assert "HEALTH_STATUS=READY_AND_AUTOMATION_ENABLED" in active.stdout
+    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=YES" in active.stdout
 
     health, environment, _paths = _make_health_fixture(
         tmp_path / "active-infinity", authorized=True
@@ -934,6 +967,71 @@ def test_health_rejects_identity_timer_credential_kill_and_lock_defects_read_onl
                 held.close()
         assert rejected.returncode == 1, case
         assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, case
+
+
+def test_health_rejects_every_minute_heartbeat_and_authority_drift(
+    tmp_path: Path,
+) -> None:
+    timer_mutations = {
+        "calendar": ("OnCalendar=*-*-* *:*:00 UTC", "OnCalendar=*-*-* *:30:00 UTC"),
+        "accuracy": ("AccuracySec=1s", "AccuracySec=2s"),
+        "relative": ("OnCalendar=*-*-* *:*:00 UTC", "OnUnitInactiveSec=30min"),
+        "random-delay": ("Persistent=false", "RandomizedDelaySec=10s\nPersistent=false"),
+        "catch-up": ("Persistent=false", "Persistent=true"),
+    }
+    for name, (original, replacement) in timer_mutations.items():
+        health, environment, paths = _make_health_fixture(tmp_path / name)
+        timer = paths["timer"]
+        before = timer.read_text(encoding="utf-8")
+        after = before.replace(original, replacement)
+        assert after != before
+        timer.write_text(after, encoding="utf-8")
+        rejected = subprocess.run(
+            [str(health)],
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert rejected.returncode == 1, name
+        assert "TIMER_CONTRACT_VALID=NO" in rejected.stdout, name
+        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, name
+
+    health, environment, _paths = _make_health_fixture(tmp_path / "dual-authority")
+    environment.update(
+        MOCK_TIMER_ACTIVE="active",
+        MOCK_TIMER_ENABLED="enabled",
+        MOCK_TIMER_SUBSTATE="waiting",
+        MOCK_TIMER_NEXT="2800000000",
+    )
+    rejected = subprocess.run(
+        [str(health)],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert rejected.returncode == 1
+    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=NO" in rejected.stdout
+    assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
+
+
+def test_readme_freezes_python_cadence_and_separate_activation_authority() -> None:
+    readme = _text(PACKAGE / "README.md")
+    for required in (
+        "once-per-minute UTC wake-up",
+        "OnCalendar=*-*-* *:*:00 UTC",
+        "Python mode profiles and the due-window dispatcher are the sole cadence policy",
+        "at most one selected mode job",
+        "catch-up, parallel mode execution, and automatic retry are prohibited",
+        "replay-suppressed",
+        "Ordinary no-work and NO_TRADE outcomes",
+        "healthy process exit 0",
+        "legacy `ai-crypto-signal-agent.timer` remains the sole production schedule",
+        "A canary does not imply activation",
+        "Activation requires separate, exact owner authorization",
+    ):
+        assert required in readme
 
 
 def _make_rollback_release(parent: Path, commit: str, trusted: str = TRUSTED) -> Path:

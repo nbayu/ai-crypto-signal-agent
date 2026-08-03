@@ -709,6 +709,53 @@ def build_e5_claude_provider_request_v1(
         _fail()
 
 
+def measure_e5_deepseek_canonical_input_upper_bound_v1(
+    payload: E5TechnicalReviewPayloadV1,
+) -> int:
+    """Return the conservative UTF-8 byte upper bound for the exact D6 input."""
+
+    try:
+        verified = _validate_active_payload(payload)
+        return len(_canonical_json(verified.to_mapping()).encode("utf-8"))
+    except Exception:
+        _fail()
+
+
+def measure_e5_claude_canonical_input_upper_bound_v1(
+    *,
+    payload: E5TechnicalReviewPayloadV1,
+    deepseek_review: E5DeepSeekStructuredReviewV1,
+    deepseek_adjudication: E5DeepSeekTechnicalReviewAdjudicationV1,
+    route_result: E5ClaudeReviewRouteResultV1,
+) -> int:
+    """Measure the exact escalation input only after a real route exists."""
+
+    try:
+        verified = _validate_active_payload(payload)
+        review, adjudication, route = _validate_claude_lineage(
+            payload=verified,
+            deepseek_review=deepseek_review,
+            deepseek_adjudication=deepseek_adjudication,
+            route_result=route_result,
+        )
+        _require(
+            route.decision_code
+            in {
+                ROUTE_L1_CLAUDE_REVIEW_REQUIRED,
+                ROUTE_L2_CLAUDE_REVIEW_REQUIRED_DEEPSEEK_HOLD_PRESERVED,
+            }
+        )
+        canonical_input = {
+            "payload": verified.to_mapping(),
+            "deepseek_review": review.to_mapping(),
+            "deepseek_adjudication": adjudication.to_mapping(),
+            "claude_route_result": route.to_mapping(),
+        }
+        return len(_canonical_json(canonical_input).encode("utf-8"))
+    except Exception:
+        _fail()
+
+
 def _observation_preimage(
     observation: "E5ProviderAttemptObservationV1",
 ) -> dict[str, object]:
@@ -1858,6 +1905,8 @@ __all__ = (
     "E5ProviderAcceptedResponseExecutionV1",
     "build_e5_deepseek_provider_request_v1",
     "build_e5_claude_provider_request_v1",
+    "measure_e5_deepseek_canonical_input_upper_bound_v1",
+    "measure_e5_claude_canonical_input_upper_bound_v1",
     "build_e5_provider_attempt_observation_v1",
     "reconstruct_e5_claude_escalation_review_v1",
     "execute_e5_deepseek_review_once_v1",

@@ -22,8 +22,13 @@ from engine.e5_provider_invocation_boundary_v1 import (
     ACTIVE_PROVIDER_BINDING_SHA256,
     E5ProviderAttemptObservationV1,
     E5ProviderRequestV1,
+    measure_e5_claude_canonical_input_upper_bound_v1,
+    measure_e5_deepseek_canonical_input_upper_bound_v1,
 )
-from engine.e5_technical_review_payload_v1 import E5TechnicalReviewPayloadV1
+from engine.e5_technical_review_payload_v1 import (
+    E5TechnicalReviewPayloadV1,
+    get_owner_frozen_e5_provider_model_price_binding_v4,
+)
 from engine.e6_claude_daily_usage_store_v1 import (
     E6ClaudeDailyUsageStorePortV1,
     E6ClaudeDailyUsageStoreRecordV1,
@@ -312,8 +317,8 @@ def execute_e6_durable_review_v1(
     mode_score_floor: int,
     usage_store: E6ClaudeDailyUsageStorePortV1,
     commit_timestamp: str,
-    deepseek_measured_input_tokens: int,
-    deepseek_requested_output_tokens: int,
+    deepseek_measured_input_tokens: int | None,
+    deepseek_requested_output_tokens: int | None,
     deepseek_transport: Callable[
         [E5ProviderRequestV1], E5ProviderAttemptObservationV1
     ],
@@ -330,6 +335,15 @@ def execute_e6_durable_review_v1(
         _require(type(deterministic_hard_gates_passed) is bool)
         _require(type(pre_review_score) is int)
         _require(type(mode_score_floor) is int)
+        binding = get_owner_frozen_e5_provider_model_price_binding_v4()
+        if deepseek_measured_input_tokens is None:
+            deepseek_measured_input_tokens = (
+                measure_e5_deepseek_canonical_input_upper_bound_v1(payload)
+            )
+        if deepseek_requested_output_tokens is None:
+            deepseek_requested_output_tokens = (
+                binding.deepseek_output_hard_limit_tokens
+            )
         _require(
             type(deepseek_measured_input_tokens) is int
             and deepseek_measured_input_tokens >= 0
@@ -383,6 +397,25 @@ def execute_e6_durable_review_v1(
 
         committed_record = None
         if prepared.pre_claude_outcome_code in _RESERVATION_CODES:
+            if claude_measured_input_tokens is None:
+                _require(
+                    prepared.accepted_deepseek_review is not None
+                    and prepared.deepseek_adjudication is not None
+                    and prepared.claude_route_result is not None
+                )
+                claude_measured_input_tokens = (
+                    measure_e5_claude_canonical_input_upper_bound_v1(
+                        payload=payload,
+                        deepseek_review=prepared.accepted_deepseek_review,
+                        deepseek_adjudication=prepared.deepseek_adjudication,
+                        route_result=prepared.claude_route_result,
+                    )
+                )
+                claude_requested_output_tokens = (
+                    binding.claude_l1_output_hard_limit_tokens
+                    if prepared.claude_route_result.route == "L1"
+                    else binding.claude_l2_output_hard_limit_tokens
+                )
             committed_record = usage_store.compare_and_commit(
                 utc_day=utc_day,
                 expected_store_generation=(

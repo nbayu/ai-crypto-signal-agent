@@ -10,6 +10,19 @@ from engine import active_signal_ledger_v1 as active
 from engine import controlled_production_signal_cycle_v1 as controlled
 from engine import e6_service_composition_root_v1 as service_root
 from engine.e6_service_composition_root_v1 import E6ServiceCycleRequestV1
+from engine.phase09r_observability_v1 import (
+    E6_PRODUCTION_CONFIGURATION_BLOCKED_V1,
+    E6_PRODUCTION_IDEMPOTENT_REPLAY_V1,
+    E6_PRODUCTION_NO_TRADE_V1,
+    E6_PRODUCTION_NO_WORK_DUE_V1,
+    E6_PRODUCTION_OBSERVABILITY_SCHEMA_V1,
+    E6_PRODUCTION_STAGE_CONFIGURATION_V1,
+    E6_PRODUCTION_STAGE_DISPATCH_V1,
+    E6_PRODUCTION_STAGE_PRODUCTION_INPUT_V1,
+    E6ProductionObservabilityEventV1,
+    E6ProductionObservabilityValidationErrorV1,
+    emit_e6_production_observability_event_v1,
+)
 from engine.production_signal_contract_v1 import build_delivery_id
 from engine.run_production_signal_v1 import main
 from engine.telegram_owner_control_state_v1 import initialize_state, load_state
@@ -536,3 +549,182 @@ def test_unclassified_exception_event_schema_and_secret_leak_barrier(
     assert stdout == ""
     for marker in SECRET_MARKERS:
         assert marker not in stdout + stderr
+
+
+def _production_event(event_name, **changes):
+    values = {
+        "schema_version": E6_PRODUCTION_OBSERVABILITY_SCHEMA_V1,
+        "event_name": event_name,
+        "outcome_invocation_id": IDENTITY,
+        "observed_at": "2026-08-03T08:00:00Z",
+        "mode": None,
+        "due_window_occurrence_id": None,
+        "stage": E6_PRODUCTION_STAGE_DISPATCH_V1,
+        "reason_code": "NO_MODE_JOB_DUE",
+        "source_reason_code": None,
+        "evidence_sha256": "a" * 64,
+        "provider_attempt_count": 0,
+        "telegram_attempt_count": 0,
+        "retry_count": 0,
+    }
+    if event_name == E6_PRODUCTION_CONFIGURATION_BLOCKED_V1:
+        values.update(
+            stage=E6_PRODUCTION_STAGE_CONFIGURATION_V1,
+            reason_code="ACTIVATION_CONFIGURATION_INVALID",
+        )
+    elif event_name == E6_PRODUCTION_IDEMPOTENT_REPLAY_V1:
+        values.update(
+            mode="SWING",
+            due_window_occurrence_id="e6dw1:" + "b" * 64,
+            reason_code="DUE_WINDOW_ALREADY_HANDLED",
+        )
+    elif event_name == E6_PRODUCTION_NO_TRADE_V1:
+        values.update(
+            mode="INTRADAY",
+            due_window_occurrence_id="e6dw1:" + "a" * 64,
+            stage=E6_PRODUCTION_STAGE_PRODUCTION_INPUT_V1,
+            reason_code="E2_NO_ELIGIBLE_CANDIDATE",
+            source_reason_code="SCANNER_ELIGIBLE_SET_EMPTY",
+        )
+    values.update(changes)
+    return E6ProductionObservabilityEventV1(**values)
+
+
+@pytest.mark.parametrize(
+    ("event_name", "route"),
+    (
+        (E6_PRODUCTION_CONFIGURATION_BLOCKED_V1, "stderr"),
+        (E6_PRODUCTION_NO_WORK_DUE_V1, "stdout"),
+        (E6_PRODUCTION_NO_TRADE_V1, "stdout"),
+        (E6_PRODUCTION_IDEMPOTENT_REPLAY_V1, "stdout"),
+    ),
+)
+def test_production_observability_emits_one_canonical_record_to_fixed_route(
+    event_name, route, capsys
+):
+    event = _production_event(event_name)
+    emit_e6_production_observability_event_v1(event)
+    captured = capsys.readouterr()
+    selected = captured.err if route == "stderr" else captured.out
+    other = captured.out if route == "stderr" else captured.err
+    assert selected == event.canonical_json() + "\n"
+    assert other == ""
+    assert len(selected.splitlines()) == 1
+    assert json.loads(selected) == event.to_mapping()
+    assert event.canonical_json() == event.canonical_json()
+
+
+def test_production_observability_schema_contains_only_fixed_nonsecret_fields(
+    capsys,
+):
+    event = _production_event(E6_PRODUCTION_NO_TRADE_V1)
+    assert list(event.to_mapping()) == [
+        "schema_version",
+        "event_name",
+        "outcome_invocation_id",
+        "observed_at",
+        "mode",
+        "due_window_occurrence_id",
+        "stage",
+        "reason_code",
+        "source_reason_code",
+        "evidence_sha256",
+        "provider_attempt_count",
+        "telegram_attempt_count",
+        "retry_count",
+    ]
+    assert event.provider_attempt_count == 0
+    assert event.telegram_attempt_count == 0
+    assert event.retry_count == 0
+    forbidden = {
+        "destination_id",
+        "token",
+        "credential",
+        "path",
+        "request",
+        "response",
+        "prompt",
+        "exception",
+    }
+    assert forbidden.isdisjoint(event.to_mapping())
+
+    replay = _production_event(E6_PRODUCTION_IDEMPOTENT_REPLAY_V1)
+    no_work = _production_event(E6_PRODUCTION_NO_WORK_DUE_V1)
+    assert event.due_window_occurrence_id == "e6dw1:" + "a" * 64
+    assert replay.due_window_occurrence_id == "e6dw1:" + "b" * 64
+    assert no_work.due_window_occurrence_id is None
+
+    invalid_occurrences = (
+        "E6DW1:" + "a" * 64,
+        "e6dw1:" + "A" * 64,
+        "e6dw1:" + "a" * 63,
+        "e6dw1:" + "a" * 65,
+        "e6dw2:" + "a" * 64,
+        " e6dw1:" + "a" * 64,
+        "e6dw1:" + "a" * 64 + " ",
+        "e6dw1:" + "a" * 64 + "X",
+        "",
+        0,
+    )
+    for event_name in (
+        E6_PRODUCTION_NO_TRADE_V1,
+        E6_PRODUCTION_IDEMPOTENT_REPLAY_V1,
+    ):
+        for occurrence_id in invalid_occurrences:
+            with pytest.raises(E6ProductionObservabilityValidationErrorV1):
+                _production_event(
+                    event_name,
+                    due_window_occurrence_id=occurrence_id,
+                )
+
+    for change in (
+        {"stage": "production_input"},
+        {"reason_code": "e2_no_eligible_candidate"},
+        {"source_reason_code": "scanner_eligible_set_empty"},
+    ):
+        with pytest.raises(E6ProductionObservabilityValidationErrorV1):
+            _production_event(E6_PRODUCTION_NO_TRADE_V1, **change)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        {"schema_version": "wrong"},
+        {"outcome_invocation_id": "A" * 32},
+        {"observed_at": "2026-08-03T08:00:00.1Z"},
+        {"evidence_sha256": "A" * 64},
+        {"provider_attempt_count": 1},
+        {"telegram_attempt_count": True},
+        {"retry_count": -1},
+        {"stage": "UNKNOWN"},
+        {"reason_code": "UNKNOWN"},
+    ),
+)
+def test_invalid_production_event_fields_are_rejected(change):
+    with pytest.raises(E6ProductionObservabilityValidationErrorV1):
+        _production_event(E6_PRODUCTION_NO_TRADE_V1, **change)
+
+
+def test_secret_like_source_reason_is_rejected_without_rendering_value(capsys):
+    marker = "PRIVATE_KEY_SECRET_MARKER"
+    with pytest.raises(E6ProductionObservabilityValidationErrorV1) as raised:
+        _production_event(
+            E6_PRODUCTION_NO_TRADE_V1,
+            source_reason_code=marker,
+        )
+    assert marker not in str(raised.value) + repr(raised.value)
+    captured = capsys.readouterr()
+    assert marker not in captured.out + captured.err
+
+
+def test_emitter_revalidates_mutated_event_and_does_not_convert_failure_to_success(
+    capsys,
+):
+    event = _production_event(E6_PRODUCTION_NO_WORK_DUE_V1)
+    object.__setattr__(event, "retry_count", 1)
+    with pytest.raises(E6ProductionObservabilityValidationErrorV1):
+        emit_e6_production_observability_event_v1(event)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""

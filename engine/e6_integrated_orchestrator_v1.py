@@ -56,6 +56,12 @@ from engine.mode_scan_execution_evidence_v1 import (
 from engine.news_event_contract_v1 import NormalizedNewsEventV1
 from engine.news_risk_object_v1 import NewsRiskObjectV1
 from engine.production_candidate_authority_v1 import ProductionCandidateAuthorityV1
+from engine.outcome_tracker_v4 import validate_outcome_invocation_id
+from engine.e6_production_news_evidence_v1 import (
+    NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE,
+    RELEVANT_NEWS_PRESENT,
+    E6ProductionNewsEvidenceV1,
+)
 
 
 E6_INTEGRATED_ORCHESTRATOR_VERSION = "e6-integrated-orchestrator-v1"
@@ -65,6 +71,7 @@ E6_INTEGRATED_ORCHESTRATOR_SCHEMA = (
 
 COMPLETE = "COMPLETE"
 HOLD = "HOLD"
+NO_TRADE = "NO_TRADE"
 
 STAGE_1_VALIDATE_REQUEST_AND_LINEAGE = "STAGE_1_VALIDATE_REQUEST_AND_LINEAGE"
 STAGE_2_E3_ACTIONABLE_ADMISSION = "STAGE_2_E3_ACTIONABLE_ADMISSION"
@@ -155,14 +162,14 @@ class E6IntegratedOrchestratorRequestV1:
         ModeOiExecutionEvidenceV1,
     ]
     normalized_news_events: tuple[NormalizedNewsEventV1, ...]
-    news_risk_object: NewsRiskObjectV1
+    news_risk_object: NewsRiskObjectV1 | None
     price_exited_zone: bool
     deterministic_hard_gates_passed: bool
     pre_review_score: int
     mode_score_floor: int
     commit_timestamp: str
-    deepseek_measured_input_tokens: int
-    deepseek_requested_output_tokens: int
+    deepseek_measured_input_tokens: int | None
+    deepseek_requested_output_tokens: int | None
     claude_measured_input_tokens: int | None
     claude_requested_output_tokens: int | None
     publication_signal_id: str
@@ -173,6 +180,11 @@ class E6IntegratedOrchestratorRequestV1:
     publication_content_hash: str | None
     publication_symbol: str
     publication_mode: str
+    news_evidence: E6ProductionNewsEvidenceV1 | None = None
+    production_outcome_invocation_id: str | None = None
+    production_due_window_occurrence_id: str | None = None
+    production_observed_at: str | None = None
+    production_evidence_sha256: str | None = None
     request_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -186,23 +198,38 @@ class E6IntegratedOrchestratorRequestV1:
             _require(type(self.mode_execution_evidence) is tuple)
             _require(len(self.mode_execution_evidence) == 3)
             _require(type(self.normalized_news_events) is tuple)
-            _require(bool(self.normalized_news_events))
             _require(
                 all(type(item) is NormalizedNewsEventV1 for item in self.normalized_news_events)
             )
-            _require(type(self.news_risk_object) is NewsRiskObjectV1)
+            if self.news_evidence is None:
+                _require(bool(self.normalized_news_events))
+                _require(type(self.news_risk_object) is NewsRiskObjectV1)
+            else:
+                _require(type(self.news_evidence) is E6ProductionNewsEvidenceV1)
+                self.news_evidence.__post_init__()
+                _require(
+                    self.normalized_news_events
+                    == self.news_evidence.normalized_news_events
+                    and self.news_risk_object == self.news_evidence.news_risk_object
+                )
             for value in (
                 self.price_exited_zone,
                 self.deterministic_hard_gates_passed,
             ):
                 _require(type(value) is bool)
-            for value in (
-                self.pre_review_score,
-                self.mode_score_floor,
-                self.deepseek_measured_input_tokens,
-                self.deepseek_requested_output_tokens,
-            ):
+            for value in (self.pre_review_score, self.mode_score_floor):
                 _require(type(value) is int and value >= 0)
+            deepseek_none = (
+                self.deepseek_measured_input_tokens is None
+                and self.deepseek_requested_output_tokens is None
+            )
+            deepseek_ints = (
+                type(self.deepseek_measured_input_tokens) is int
+                and self.deepseek_measured_input_tokens >= 0
+                and type(self.deepseek_requested_output_tokens) is int
+                and self.deepseek_requested_output_tokens >= 0
+            )
+            _require(deepseek_none or deepseek_ints)
             claude_none = (
                 self.claude_measured_input_tokens is None
                 and self.claude_requested_output_tokens is None
@@ -229,6 +256,29 @@ class E6IntegratedOrchestratorRequestV1:
             )
             _require(type(self.publication_symbol) is str and bool(self.publication_symbol))
             _require(self.publication_mode in active.STYLES)
+            production_context = (
+                self.production_outcome_invocation_id,
+                self.production_due_window_occurrence_id,
+                self.production_observed_at,
+                self.production_evidence_sha256,
+            )
+            _require(
+                all(value is None for value in production_context)
+                or all(type(value) is str and bool(value) for value in production_context)
+            )
+            if self.production_outcome_invocation_id is not None:
+                validate_outcome_invocation_id(
+                    self.production_outcome_invocation_id
+                )
+                _require(
+                    re.fullmatch(
+                        r"e6dw1:[0-9a-f]{64}",
+                        self.production_due_window_occurrence_id,
+                    )
+                    is not None
+                )
+                _require(_UTC.fullmatch(self.production_observed_at) is not None)
+                _require(_valid_sha256(self.production_evidence_sha256))
             object.__setattr__(self, "request_sha256", _hash(_request_preimage(self)))
         except Exception:
             _fail()
@@ -304,7 +354,7 @@ class E6IntegratedOrchestratorResultV1:
         try:
             _require(self.result_version == E6_INTEGRATED_ORCHESTRATOR_VERSION)
             _require(self.result_schema == E6_INTEGRATED_ORCHESTRATOR_SCHEMA)
-            _require(self.disposition in {COMPLETE, HOLD})
+            _require(self.disposition in {COMPLETE, HOLD, NO_TRADE})
             _require(self.terminal_stage in _STAGES)
             _require(type(self.reason_code) is str and bool(self.reason_code))
             _require(_valid_sha256(self.request_sha256))
@@ -340,8 +390,13 @@ class E6IntegratedOrchestratorResultV1:
                 ):
                     _require(value is not None)
                 _require(self.owner_lifecycle_binding.classification != HOLD_CONFLICT)
+            elif self.disposition == HOLD:
+                _require(self.terminal_stage != STAGE_10_COMPLETE)
             else:
                 _require(self.terminal_stage != STAGE_10_COMPLETE)
+                _require(self.publication_envelope is None)
+                _require(self.rendered_message is None)
+                _require(self.owner_lifecycle_binding is None)
             _require(_valid_sha256(self.correlation_sha256))
             _require(self.correlation_sha256 == _hash(_correlation_preimage(self)))
             _require(_valid_sha256(self.result_sha256))
@@ -510,7 +565,12 @@ def _validate_request_lineage(request: E6IntegratedOrchestratorRequestV1) -> Non
         _require(item.mode == geometry.mode)
         _require(item.mode_lineage_sha256 == geometry.mode_lineage_sha256)
         _require(active.normalize_pair(item.canonical_symbol) == fingerprint.canonical_pair)
-    _require(request.news_risk_object.event_snapshot_id in {item.event_snapshot_id for item in request.normalized_news_events})
+    if request.news_evidence is None or request.news_evidence.status == RELEVANT_NEWS_PRESENT:
+        _require(request.news_risk_object is not None)
+        _require(request.news_risk_object.event_snapshot_id in {item.event_snapshot_id for item in request.normalized_news_events})
+    else:
+        _require(request.normalized_news_events == ())
+        _require(request.news_risk_object is None)
     _require(request.publication_mode == geometry.mode)
     _require(active.normalize_pair(request.publication_symbol) == fingerprint.canonical_pair)
     _require(request.publication_source_payload_hash == authority.source_payload_hash)
@@ -541,9 +601,20 @@ def run_e6_integrated_orchestrator_v1(
     if not request.actionable_admission.actionable_admitted:
         return _finish(
             request=request,
-            disposition=HOLD,
+            disposition=NO_TRADE,
             terminal_stage=STAGE_2_E3_ACTIONABLE_ADMISSION,
             reason_code=request.actionable_admission.reason_code,
+        )
+
+    if (
+        request.news_evidence is not None
+        and request.news_evidence.status == NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE
+    ):
+        return _finish(
+            request=request,
+            disposition=NO_TRADE,
+            terminal_stage=STAGE_4_DURABLE_E5_EXECUTION,
+            reason_code=NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE,
         )
 
     try:
@@ -564,7 +635,7 @@ def run_e6_integrated_orchestrator_v1(
     if not duplicate.publication_intent_allowed:
         return _finish(
             request=request,
-            disposition=HOLD,
+            disposition=NO_TRADE,
             terminal_stage=STAGE_3_E4_DUPLICATE_PROTECTION,
             reason_code=duplicate.decision_code,
             duplicate=duplicate,
@@ -585,6 +656,7 @@ def run_e6_integrated_orchestrator_v1(
             mode_execution_evidence=request.mode_execution_evidence,
             normalized_news_events=request.normalized_news_events,
             news_risk_object=request.news_risk_object,
+            news_evidence=request.news_evidence,
         )
     except Exception:
         return _finish(
@@ -641,7 +713,11 @@ def run_e6_integrated_orchestrator_v1(
     if not durable.final_composition.may_continue_to_python_final_gate:
         return _finish(
             request=request,
-            disposition=HOLD,
+            disposition=(
+                NO_TRADE
+                if durable.final_composition.underlying_d8_cause is None
+                else HOLD
+            ),
             terminal_stage=STAGE_4_DURABLE_E5_EXECUTION,
             reason_code=durable.final_composition.final_outcome_code,
             duplicate=duplicate,
@@ -661,7 +737,7 @@ def run_e6_integrated_orchestrator_v1(
     if not gate.may_proceed_to_publication_eligibility:
         return _finish(
             request=request,
-            disposition=HOLD,
+            disposition=NO_TRADE,
             terminal_stage=STAGE_5_PYTHON_FINAL_GATE,
             reason_code=gate.final_gate_decision_code,
             duplicate=duplicate,
@@ -681,7 +757,7 @@ def run_e6_integrated_orchestrator_v1(
     if not eligibility.eligible_to_build_publication_envelope:
         return _finish(
             request=request,
-            disposition=HOLD,
+            disposition=NO_TRADE,
             terminal_stage=STAGE_6_PUBLICATION_ELIGIBILITY,
             reason_code=eligibility.publication_eligibility_decision_code,
             duplicate=duplicate,

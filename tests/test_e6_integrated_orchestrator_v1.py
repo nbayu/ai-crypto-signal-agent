@@ -19,6 +19,9 @@ from engine.e5_provider_invocation_boundary_v1 import (
 from engine.e6_claude_daily_usage_store_v1 import (
     E6ClaudeDailyUsageFileStoreV1,
 )
+from engine.e6_production_news_evidence_v1 import (
+    build_e6_production_unavailable_news_evidence_v1,
+)
 from test_e5_bounded_final_review_composition_v1 import _transports
 from test_e5_technical_review_payload_v1 import (
     _bundle as _payload_bundle,
@@ -333,7 +336,7 @@ def test_e3_non_actionable_terminates_before_e4_and_providers(tmp_path):
         ports=scenario["ports"],
     )
 
-    assert result.disposition == subject.HOLD
+    assert result.disposition == subject.NO_TRADE
     assert result.terminal_stage == subject.STAGE_2_E3_ACTIONABLE_ADMISSION
     assert result.duplicate_protection_result is None
     assert result.deepseek_provider_attempt_count == 0
@@ -383,7 +386,7 @@ def test_e4_same_thesis_different_signal_is_suppressed_before_providers(tmp_path
     )
 
     assert first.disposition == subject.COMPLETE
-    assert second.disposition == subject.HOLD
+    assert second.disposition == subject.NO_TRADE
     assert second.terminal_stage == subject.STAGE_3_E4_DUPLICATE_PROTECTION
     assert second.duplicate_protection_result is not None
     assert second.duplicate_protection_result.publication_intent_allowed is False
@@ -432,7 +435,7 @@ def test_d6_d7_route_matrix_is_bounded(
     assert len(scenario["claude_calls"]) == claude_count
     assert result.retry_count == 0
     if decision == "HOLD":
-        assert result.disposition == subject.HOLD
+        assert result.disposition == subject.NO_TRADE
         assert result.terminal_stage == subject.STAGE_4_DURABLE_E5_EXECUTION
         assert result.publication_envelope is None
         assert result.rendered_message is None
@@ -513,7 +516,7 @@ def test_python_final_gate_hold_prevents_all_publication_stages(tmp_path):
     )
     result = _run(scenario)
 
-    assert result.disposition == subject.HOLD
+    assert result.disposition == subject.NO_TRADE
     assert result.terminal_stage == subject.STAGE_5_PYTHON_FINAL_GATE
     assert result.python_final_gate.final_gate_decision_code == (
         "BLOCK_FINAL_SCORE_AT_OR_BELOW_MODE_FLOOR"
@@ -552,7 +555,7 @@ def test_ineligible_result_prevents_envelope_message_and_registration(
     )
     result = _run(scenario)
 
-    assert result.disposition == subject.HOLD
+    assert result.disposition == subject.NO_TRADE
     assert result.terminal_stage == subject.STAGE_6_PUBLICATION_ELIGIBILITY
     assert result.publication_eligibility is not None
     assert result.publication_eligibility.eligible_to_build_publication_envelope is False
@@ -560,6 +563,39 @@ def test_ineligible_result_prevents_envelope_message_and_registration(
     assert result.rendered_message is None
     assert result.owner_lifecycle_binding is None
     assert active.load_ledger(scenario["ports"].active_ledger_path)["signals"] == {}
+    _assert_no_authority(result)
+
+
+def test_unavailable_optional_news_is_healthy_no_trade_before_providers(tmp_path):
+    scenario = _scenario(tmp_path, name="news-unavailable")
+    fingerprint = scenario["payload"].to_mapping()["thesis_fingerprint"]
+    evidence = build_e6_production_unavailable_news_evidence_v1(
+        candidate_identity_sha256=fingerprint["identity_sha256"],
+        scan_started_at=NOW,
+        scan_completed_at=NOW,
+        declared_source_count=1,
+        completed_source_count=0,
+    )
+    request = replace(
+        scenario["request"],
+        normalized_news_events=(),
+        news_risk_object=None,
+        news_evidence=evidence,
+    )
+
+    result = subject.run_e6_integrated_orchestrator_v1(
+        request=request,
+        ports=scenario["ports"],
+    )
+
+    assert result.disposition == subject.NO_TRADE
+    assert result.reason_code == "NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE"
+    assert result.terminal_stage == subject.STAGE_4_DURABLE_E5_EXECUTION
+    assert scenario["deep_calls"] == scenario["claude_calls"] == []
+    assert result.deepseek_provider_attempt_count == 0
+    assert result.claude_provider_attempt_count == 0
+    assert result.publication_envelope is None
+    assert result.owner_lifecycle_binding is None
     _assert_no_authority(result)
 
 

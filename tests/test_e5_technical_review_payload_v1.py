@@ -56,6 +56,10 @@ from engine.news_event_contract_v1 import (
     NormalizedNewsEventV1,
 )
 from engine.news_risk_object_v1 import NEWS_RISK_POLICY_VERSION, NewsRiskObjectV1
+from engine.e6_production_news_evidence_v1 import (
+    build_e6_production_unavailable_news_evidence_v1,
+    build_e6_production_zero_source_news_evidence_v1,
+)
 from engine.production_candidate_authority_v1 import (
     ProductionCandidateAuthorityV1,
 )
@@ -937,14 +941,63 @@ def test_payload_public_signature_is_exact_and_excludes_envelope_fields():
         "mode_execution_evidence",
         "normalized_news_events",
         "news_risk_object",
+        "news_evidence",
     )
     assert EXCLUDED_PUBLICATION_FIELDS.isdisjoint(parameters)
     assert "current_price" not in parameters
+    assert all(item.kind is inspect.Parameter.KEYWORD_ONLY for item in parameters.values())
     assert all(
-        item.kind is inspect.Parameter.KEYWORD_ONLY
-        and item.default is inspect.Parameter.empty
-        for item in parameters.values()
+        parameters[name].default is inspect.Parameter.empty
+        for name in tuple(parameters)[:6]
     )
+    assert parameters["normalized_news_events"].default == ()
+    assert parameters["news_risk_object"].default is None
+    assert parameters["news_evidence"].default is None
+
+
+def test_completed_zero_source_news_builds_without_placeholder_or_escalation(
+    tmp_path,
+):
+    _, inputs, _ = _bundle(tmp_path)
+    fingerprint = inputs["duplicate_protection_result"].fingerprint
+    evidence = build_e6_production_zero_source_news_evidence_v1(
+        candidate_identity_sha256=fingerprint.identity_sha256,
+        observed_at=OBSERVED_AT,
+    )
+    inputs.update(
+        normalized_news_events=(),
+        news_risk_object=None,
+        news_evidence=evidence,
+    )
+
+    payload = subject.build_e5_technical_review_payload_v1(**inputs)
+    news = payload.to_mapping()["news_and_contradiction_quality"]
+    assert news["news_status"] == "NO_RELEVANT_NEWS_AFTER_COMPLETED_BOUNDED_SCAN"
+    assert news["event_snapshot_ids"] == []
+    assert news["news_risk_object_id"] is None
+    assert news["news_escalation_allowed"] is False
+    assert news["global_coverage_claimed"] is False
+    assert news["final_contradiction_state"] is None
+    assert "placeholder" not in payload.canonical_payload_json().casefold()
+
+
+def test_unavailable_news_never_builds_a_provider_payload(tmp_path):
+    _, inputs, _ = _bundle(tmp_path)
+    fingerprint = inputs["duplicate_protection_result"].fingerprint
+    evidence = build_e6_production_unavailable_news_evidence_v1(
+        candidate_identity_sha256=fingerprint.identity_sha256,
+        scan_started_at=OBSERVED_AT,
+        scan_completed_at=OBSERVED_AT,
+        declared_source_count=1,
+        completed_source_count=0,
+    )
+    inputs.update(
+        normalized_news_events=(),
+        news_risk_object=None,
+        news_evidence=evidence,
+    )
+    with pytest.raises(ValueError, match="^invalid E5 technical review payload$"):
+        subject.build_e5_technical_review_payload_v1(**inputs)
 
 
 @pytest.mark.parametrize(("mode", "side"), MODES_AND_SIDES)

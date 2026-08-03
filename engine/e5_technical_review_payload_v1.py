@@ -30,6 +30,13 @@ from engine.news_risk_object_v1 import NewsRiskObjectV1
 from engine.production_candidate_authority_v1 import (
     ProductionCandidateAuthorityV1,
 )
+from engine.e6_production_news_evidence_v1 import (
+    NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE,
+    NO_RELEVANT_NEWS_AFTER_COMPLETED_BOUNDED_SCAN,
+    RELEVANT_NEWS_PRESENT,
+    E6ProductionNewsEvidenceV1,
+    build_e6_production_present_news_evidence_v1,
+)
 
 
 E5_PROVIDER_MODEL_PRICE_BINDING_VERSION: Final = (
@@ -282,6 +289,9 @@ _PAYLOAD_MAPPING_KEYS: Final = {
         "period",
     ),
     "news_and_contradiction_quality": (
+        "completed_source_count",
+        "declared_source_count",
+        "evidence_sha256",
         "evidence_refs",
         "event_snapshot_ids",
         "event_version_ids",
@@ -289,9 +299,17 @@ _PAYLOAD_MAPPING_KEYS: Final = {
         "final_evidence_state",
         "final_material_risk_state",
         "final_source_state",
+        "global_coverage_claimed",
+        "news_escalation_allowed",
         "news_risk_object_id",
+        "news_status",
+        "publication_capped",
         "reason_codes",
         "risk_classification",
+        "scan_completed_at",
+        "scan_scope",
+        "scan_started_at",
+        "status_reason_code",
     ),
 }
 
@@ -855,8 +873,9 @@ def build_e5_technical_review_payload_v1(
         tuple[ModeTimeframeExecutionEvidenceV1, ...],
         ModeOiExecutionEvidenceV1,
     ],
-    normalized_news_events: tuple[NormalizedNewsEventV1, ...],
-    news_risk_object: NewsRiskObjectV1,
+    normalized_news_events: tuple[NormalizedNewsEventV1, ...] = (),
+    news_risk_object: NewsRiskObjectV1 | None = None,
+    news_evidence: E6ProductionNewsEvidenceV1 | None = None,
 ) -> E5TechnicalReviewPayloadV1:
     try:
         _require(type(actionable_admission) is E3ActionableAdmissionResultV1)
@@ -946,7 +965,15 @@ def build_e5_technical_review_payload_v1(
             item.timeframe: item for item in timeframe_evidence
         }
         _require(len(evidence_by_timeframe) == len(timeframe_evidence))
-        _require(set(evidence_by_timeframe) == set(relevant_timeframes))
+        supplied_timeframe_set = set(evidence_by_timeframe)
+        critical_timeframe_set = {
+            mode_profile.structure_timeframe,
+            mode_profile.trigger_timeframe,
+        }
+        _require(
+            supplied_timeframe_set
+            in (critical_timeframe_set, set(relevant_timeframes))
+        )
         for item in timeframe_evidence:
             _require(item.mode == geometry.mode)
             _require(item.mode_lineage_sha256 == geometry.mode_lineage_sha256)
@@ -956,17 +983,48 @@ def build_e5_technical_review_payload_v1(
             evidence_by_timeframe[trigger.trigger_timeframe].closed_candle_close_at
             == trigger.trigger_candle_close_at
         )
-        _require(
-            outcome.timeframe_evidence_sha256s
-            == tuple(item.evidence_sha256 for item in timeframe_evidence)
+        supplied_timeframe_hashes = tuple(
+            item.evidence_sha256 for item in timeframe_evidence
         )
+        _require(len(outcome.timeframe_evidence_sha256s) == len(relevant_timeframes))
+        if supplied_timeframe_set == set(relevant_timeframes):
+            _require(outcome.timeframe_evidence_sha256s == supplied_timeframe_hashes)
+        else:
+            _require(
+                set(supplied_timeframe_hashes).issubset(
+                    set(outcome.timeframe_evidence_sha256s)
+                )
+            )
         _require(oi_evidence.mode == geometry.mode)
         _require(oi_evidence.mode_lineage_sha256 == geometry.mode_lineage_sha256)
         _require(normalize_pair(oi_evidence.canonical_symbol) == fingerprint.canonical_pair)
         _require(oi_evidence.observed_at == execution.observed_at)
 
         _require(type(normalized_news_events) is tuple)
-        _require(bool(normalized_news_events))
+        if news_evidence is not None:
+            _require(type(news_evidence) is E6ProductionNewsEvidenceV1)
+            news_evidence.__post_init__()
+            _require(
+                news_evidence.candidate_identity_sha256
+                == fingerprint.identity_sha256
+            )
+            _require(
+                normalized_news_events == news_evidence.normalized_news_events
+                and news_risk_object == news_evidence.news_risk_object
+            )
+            _require(news_evidence.status != NEWS_SOURCE_UNAVAILABLE_OR_INCOMPLETE)
+        elif normalized_news_events and news_risk_object is not None:
+            news_evidence = build_e6_production_present_news_evidence_v1(
+                candidate_identity_sha256=fingerprint.identity_sha256,
+                scan_started_at=execution.observed_at,
+                scan_completed_at=execution.observed_at,
+                declared_source_count=len(normalized_news_events),
+                normalized_news_events=normalized_news_events,
+                news_risk_object=news_risk_object,
+                reason_code="RELEVANT_NEWS_VALIDATED",
+            )
+        else:
+            _fail()
         normalized: list[NormalizedNewsEventV1] = []
         for event in normalized_news_events:
             _require(type(event) is NormalizedNewsEventV1)
@@ -994,9 +1052,18 @@ def build_e5_technical_review_payload_v1(
         _require(
             all(item.normalized_primary_subject == base_asset for item in normalized)
         )
-        risk = _validate_news_risk(news_risk_object)
-        _require(risk.event_snapshot_id == normalized[-1].event_snapshot_id)
-        _require(risk.event_snapshot_id in risk.evidence_refs)
+        if news_evidence.status == RELEVANT_NEWS_PRESENT:
+            _require(bool(normalized))
+            risk = _validate_news_risk(news_risk_object)
+            _require(risk.event_snapshot_id == normalized[-1].event_snapshot_id)
+            _require(risk.event_snapshot_id in risk.evidence_refs)
+        else:
+            _require(
+                news_evidence.status
+                == NO_RELEVANT_NEWS_AFTER_COMPLETED_BOUNDED_SCAN
+            )
+            _require(normalized == [] and news_risk_object is None)
+            risk = None
 
         evaluator_payload = candidate.payload_copy()
         binding = get_owner_frozen_e5_provider_model_price_binding_v4()
@@ -1163,7 +1230,10 @@ def build_e5_technical_review_payload_v1(
             ),
             "news_and_contradiction_quality": _freeze_mapping(
                 {
-                    "evidence_refs": risk.evidence_refs,
+                    "completed_source_count": news_evidence.completed_source_count,
+                    "declared_source_count": news_evidence.declared_source_count,
+                    "evidence_sha256": news_evidence.evidence_sha256,
+                    "evidence_refs": () if risk is None else risk.evidence_refs,
                     "event_snapshot_ids": tuple(
                         item.event_snapshot_id for item in normalized
                     ),
@@ -1171,16 +1241,32 @@ def build_e5_technical_review_payload_v1(
                         item.event_version_id for item in normalized
                     ),
                     "final_contradiction_state": (
-                        risk.final_contradiction_state
+                        None if risk is None else risk.final_contradiction_state
                     ),
-                    "final_evidence_state": risk.final_evidence_state,
+                    "final_evidence_state": (
+                        None if risk is None else risk.final_evidence_state
+                    ),
                     "final_material_risk_state": (
-                        risk.final_material_risk_state
+                        None if risk is None else risk.final_material_risk_state
                     ),
-                    "final_source_state": risk.final_source_state,
-                    "news_risk_object_id": risk.news_risk_object_id,
-                    "reason_codes": risk.reason_codes,
-                    "risk_classification": risk.risk_classification,
+                    "final_source_state": (
+                        None if risk is None else risk.final_source_state
+                    ),
+                    "global_coverage_claimed": news_evidence.global_coverage_claimed,
+                    "news_escalation_allowed": news_evidence.news_escalation_allowed,
+                    "news_risk_object_id": (
+                        None if risk is None else risk.news_risk_object_id
+                    ),
+                    "news_status": news_evidence.status,
+                    "publication_capped": news_evidence.publication_capped,
+                    "reason_codes": () if risk is None else risk.reason_codes,
+                    "risk_classification": (
+                        None if risk is None else risk.risk_classification
+                    ),
+                    "scan_completed_at": news_evidence.scan_completed_at,
+                    "scan_scope": news_evidence.scan_scope,
+                    "scan_started_at": news_evidence.scan_started_at,
+                    "status_reason_code": news_evidence.reason_code,
                 },
                 _PAYLOAD_MAPPING_KEYS["news_and_contradiction_quality"],
             ),

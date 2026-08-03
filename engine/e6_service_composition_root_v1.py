@@ -13,6 +13,7 @@ from engine.controlled_production_signal_cycle_v1 import (
 )
 from engine.e6_integrated_orchestrator_v1 import (
     COMPLETE as ORCHESTRATOR_COMPLETE,
+    NO_TRADE as ORCHESTRATOR_NO_TRADE,
     STAGE_10_COMPLETE,
     E6IntegratedOrchestratorPortsV1,
     E6IntegratedOrchestratorRequestV1,
@@ -39,6 +40,7 @@ E6_SERVICE_CYCLE_SCHEMA = "ai-crypto-signal-agent.e6-service-cycle.v1"
 
 DRY = "DRY"
 HOLD = "HOLD"
+NO_TRADE = "NO_TRADE"
 DELIVERED = "DELIVERED"
 IDEMPOTENT_REPLAY = "IDEMPOTENT_REPLAY"
 
@@ -68,7 +70,7 @@ DELIVERY_COMPLETED = "DELIVERY_COMPLETED"
 IDEMPOTENT_COMPLETED_REPLAY = "IDEMPOTENT_COMPLETED_REPLAY"
 NOT_ATTEMPTED = "NOT_ATTEMPTED"
 
-_DISPOSITIONS = frozenset({DRY, HOLD, DELIVERED, IDEMPOTENT_REPLAY})
+_DISPOSITIONS = frozenset({DRY, HOLD, NO_TRADE, DELIVERED, IDEMPOTENT_REPLAY})
 _STAGES = frozenset(
     {
         STAGE_1_VALIDATE_ROOT_REQUEST_AND_AUTHORIZATION,
@@ -456,12 +458,25 @@ def run_e6_service_cycle_v1(
             terminal_stage=STAGE_2_RUN_CONTROLLED_E6_ORCHESTRATION,
             reason_code=E6_ORCHESTRATOR_FAILED,
         )
+    if raw_orchestrator.disposition == ORCHESTRATOR_NO_TRADE:
+        return _result(
+            root=root,
+            disposition=NO_TRADE,
+            terminal_stage=STAGE_2_RUN_CONTROLLED_E6_ORCHESTRATION,
+            reason_code=raw_orchestrator.reason_code,
+            orchestrator=raw_orchestrator,
+        )
     if raw_orchestrator.disposition != ORCHESTRATOR_COMPLETE:
+        reason = (
+            "QUOTA_EXHAUSTED"
+            if raw_orchestrator.d8_fail_closed_cause == "HOLD_BUDGET_BLOCKED"
+            else E6_ORCHESTRATOR_TERMINAL
+        )
         return _result(
             root=root,
             disposition=HOLD,
             terminal_stage=STAGE_2_RUN_CONTROLLED_E6_ORCHESTRATION,
-            reason_code=E6_ORCHESTRATOR_TERMINAL,
+            reason_code=reason,
             orchestrator=raw_orchestrator,
         )
 
@@ -535,6 +550,7 @@ def run_e6_service_cycle_v1(
 
 
 __all__ = (
+    "NO_TRADE",
     "E6ServiceCompositionRootV1",
     "E6ServiceCycleRequestV1",
     "E6ServiceCycleResultV1",

@@ -214,15 +214,15 @@ def test_each_explicit_e6_authorization_blocks_independently(
     _no_authority(result)
 
 
-def test_orchestrator_hold_and_final_gate_rejection_block_delivery(tmp_path):
+def test_expected_review_and_final_gate_suppression_are_healthy_no_trade(tmp_path):
     hold_scenario = _scenario(tmp_path, name="orchestrator-hold", decision="HOLD")
     hold_deliveries = []
     hold = subject.run_e6_service_cycle_v1(
         root=_root(lambda *_args, **_kwargs: hold_deliveries.append(1)),
         request=_request(hold_scenario),
     )
-    assert hold.disposition == subject.HOLD
-    assert hold.reason_code == subject.E6_ORCHESTRATOR_TERMINAL
+    assert hold.disposition == subject.NO_TRADE
+    assert hold.reason_code == "BLOCK_DEEPSEEK_HOLD_L2_EVIDENCE_COMPLETE"
     assert hold_deliveries == []
     assert hold.telegram_attempt_count == 0
 
@@ -236,8 +236,8 @@ def test_orchestrator_hold_and_final_gate_rejection_block_delivery(tmp_path):
         root=_root(lambda *_args, **_kwargs: gate_deliveries.append(1)),
         request=_request(gate_scenario),
     )
-    assert rejected.disposition == subject.HOLD
-    assert rejected.reason_code == subject.E6_ORCHESTRATOR_TERMINAL
+    assert rejected.disposition == subject.NO_TRADE
+    assert rejected.reason_code == "BLOCK_D6_DETERMINISTIC_POLICY"
     assert gate_deliveries == []
     assert rejected.telegram_attempt_count == 0
     _no_authority(hold)

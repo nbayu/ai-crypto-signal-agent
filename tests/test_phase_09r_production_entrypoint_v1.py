@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,9 +11,27 @@ from engine import controlled_production_signal_cycle_v1 as controlled
 from engine.phase09r_telegram_delivery_adapter_v1 import (
     Phase09RTelegramDeliveryAdapterV1,
 )
-from engine.run_production_signal_v1 import main
+from engine.e6_production_cycle_input_v1 import (
+    DUE_WINDOW_ALREADY_HANDLED,
+    E6_NO_TRADE_CYCLE_POLICY_V1,
+    E6_NO_TRADE_CYCLE_REQUEST_SCHEMA_V1,
+    E6NoTradeCycleRequestV1,
+    MODE_JOB_SELECTED,
+    NO_MODE_JOB_DUE,
+    build_e6_production_dispatch_decision_v1,
+)
+from engine.e6_production_runtime_composition_v1 import (
+    build_e6_production_runtime_composition_v1,
+)
+from engine.phase09r_observability_v1 import (
+    E6_PRODUCTION_IDEMPOTENT_REPLAY_V1,
+    E6_PRODUCTION_NO_TRADE_V1,
+    E6_PRODUCTION_NO_WORK_DUE_V1,
+    E6ProductionObservabilityEventV1,
+)
+from engine.run_production_signal_v1 import _run_production_module_v1, main
 from engine.telegram_owner_control_state_v1 import initialize_state, load_state
-from test_e6_integrated_orchestrator_v1 import _new_ports, _scenario
+from test_e6_integrated_orchestrator_v1 import _new_ports, _run, _scenario
 from engine.e6_service_composition_root_v1 import E6ServiceCycleRequestV1
 
 
@@ -45,8 +64,19 @@ def test_default_invocation_is_e6_disabled_and_reads_no_runtime_or_environment()
     assert calls == []
 
 
-def test_authorized_missing_config_and_destination_return_exact_2():
+def test_authorized_missing_config_and_destination_return_exact_2(tmp_path):
     calls = []
+    scenario = _scenario(tmp_path, name="entrypoint-missing-config")
+
+    def runtime_factory(*, outcome_invocation_id):
+        calls.append(("runtime", outcome_invocation_id))
+        return E6ServiceCycleRequestV1(
+            orchestrator_request=scenario["request"],
+            orchestrator_ports=scenario["ports"],
+            channel="TELEGRAM",
+            destination_id="isolated-owner-state-test",
+        )
+
     common = {
         "outcome_invocation_id": IDENTITY,
         "e6_enabled": True,
@@ -54,7 +84,7 @@ def test_authorized_missing_config_and_destination_return_exact_2():
         "e6_activation_authorized": True,
         "network_authorized": True,
         "publication_authorized": True,
-        "e6_runtime_factory": _bomb(calls, "runtime"),
+        "e6_runtime_factory": runtime_factory,
         "telegram_delivery_adapter_factory": _bomb(calls, "telegram-adapter"),
     }
 
@@ -67,7 +97,7 @@ def test_authorized_missing_config_and_destination_return_exact_2():
         },
         **common,
     ) == 2
-    assert calls == []
+    assert calls == [("runtime", IDENTITY), ("runtime", IDENTITY)]
 
 
 @pytest.mark.parametrize("field, _reason", controlled._GATES)
@@ -534,6 +564,329 @@ def test_entrypoint_has_no_legacy_publication_or_exchange_bypass():
     assert "owner_blueprint_ledger" not in source
     assert "production_signal_service_v1" not in source
     assert "ccxt" not in source
-    assert "binance" not in source
+    assert "build_e6_production_binance_public_market_port_v1" in source
+    assert "create_order" not in source
     assert "mark_entry_active" not in source
     assert "systemctl" not in source
+
+
+def _no_trade_request(*, identity=IDENTITY, **changes):
+    values = {
+        "schema_version": E6_NO_TRADE_CYCLE_REQUEST_SCHEMA_V1,
+        "policy_version": E6_NO_TRADE_CYCLE_POLICY_V1,
+        "source_commit": "a" * 40,
+        "outcome_invocation_id": identity,
+        "mode": "SCALP",
+        "due_job_id": "SCALP:2026-08-03T08:00:00Z",
+        "due_window_occurrence_id": "e6dw1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "mode_lineage_sha256": "1" * 64,
+        "observed_at": "2026-08-03T08:00:00Z",
+        "reason_code": "E3_TRIGGER_NOT_CONFIRMED",
+        "source_reason_code": "CLOSED_TRIGGER_NOT_CONFIRMED",
+        "scan_composition_sha256": "2" * 64,
+        "execution_sha256": "3" * 64,
+        "e3_evidence_sha256": "4" * 64,
+        "audit_manifest_sha256": "5" * 64,
+        "provider_attempt_count": 0,
+        "telegram_attempt_count": 0,
+        "exchange_order_count": 0,
+        "slot_mutation_count": 0,
+        "pair_lock_mutation_count": 0,
+        "entry_active_mutation_count": 0,
+        "retry_count": 0,
+    }
+    values.update(changes)
+    return E6NoTradeCycleRequestV1(**values)
+
+
+def _activation_mapping(**changes):
+    commit = "a" * 40
+    values = {
+        "E6_ACTIVATION_SCHEMA_VERSION": "e6-activation-configuration-v1",
+        "E6_RELEASE_COMMIT": commit,
+        "E6_RELEASE_TREE": "b" * 40,
+        "E6_TRUSTED_CHECKPOINT_COMMIT": "c" * 40,
+        "E6_RELEASE_ROOT": f"/opt/ai-crypto-signal-agent-releases/{commit}",
+        "E6_RELEASE_REFERENCE_PATH": "/var/lib/ai-crypto-signal-agent/e6-installed-release.path",
+        "E6_CREDENTIAL_METADATA_PATH": "/etc/ai-crypto-signal-agent/e6-credentials.metadata",
+        "E6_OWNER_CONTROL_STATE_PATH": "/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json",
+        "E6_SERVICE_USER": "ai-crypto-signal-agent",
+        "E6_SERVICE_GROUP": "ai-crypto-signal-agent",
+        "E6_RUNTIME_ENABLED": "true",
+        "E6_PROVIDER_ENABLED": "true",
+        "E6_ACTIVATION_GATE": "true",
+        "E6_WORKLOAD_GATE": "true",
+        "E6_CREDENTIAL_GATE": "true",
+        "E6_NETWORK_GATE": "true",
+        "E6_PUBLICATION_GATE": "true",
+        "E6_TELEGRAM_PUBLICATION_GATE": "true",
+        "E6_AUTOMATIC_RETRY_COUNT": "0",
+        "E6_PROVIDER_SUBSTITUTION_ENABLED": "false",
+        "E6_PROMPT_REPAIR_ENABLED": "false",
+        "E6_STALE_REVIEW_REUSE_ENABLED": "false",
+        "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED": "false",
+    }
+    values.update(changes)
+    return values
+
+
+def _dispatch(disposition):
+    options = {}
+    if disposition != NO_MODE_JOB_DUE:
+        options = {
+            "mode": "SWING",
+            "due_job_id": "SWING:2026-08-03T08:00:00Z",
+            "due_window_occurrence_id": "e6dw1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "mode_lineage_sha256": "9" * 64,
+        }
+    return build_e6_production_dispatch_decision_v1(
+        source_commit="a" * 40,
+        outcome_invocation_id=IDENTITY,
+        observed_at="2026-08-03T08:00:00Z",
+        disposition=disposition,
+        reason_code=disposition,
+        **options,
+    )
+
+
+def _authorized_main_options(calls, events, *, request):
+    def runtime_factory(*, outcome_invocation_id):
+        calls.append(("runtime", outcome_invocation_id))
+        return request
+
+    return {
+        "outcome_invocation_id": IDENTITY,
+        "e6_enabled": True,
+        "authorization": _authorization(),
+        "e6_activation_authorized": True,
+        "network_authorized": True,
+        "publication_authorized": True,
+        "e6_runtime_factory": runtime_factory,
+        "environment": {},
+        "telegram_config_loader": _bomb(calls, "telegram-config"),
+        "telegram_delivery_adapter_factory": _bomb(calls, "telegram-adapter"),
+        "e6_orchestrator": _bomb(calls, "orchestrator"),
+        "e6_service_cycle_runner": _bomb(calls, "service-runner"),
+        "production_observability_emitter": events.append,
+    }
+
+
+def test_exact_no_trade_union_returns_zero_and_skips_every_external_boundary():
+    calls = []
+    events = []
+    request = _no_trade_request()
+    assert main(**_authorized_main_options(calls, events, request=request)) == 0
+    assert calls == [("runtime", IDENTITY)]
+    assert len(events) == 1
+    event = events[0]
+    assert type(event) is E6ProductionObservabilityEventV1
+    assert event.event_name == E6_PRODUCTION_NO_TRADE_V1
+    assert event.outcome_invocation_id == IDENTITY
+    assert event.reason_code == request.reason_code
+    assert event.provider_attempt_count == event.telegram_attempt_count == 0
+
+
+def test_service_level_duplicate_suppression_returns_zero_and_stays_lazy(
+    tmp_path,
+):
+    scenario = _scenario(tmp_path, name="entrypoint-duplicate-suppression")
+    assert _run(scenario).disposition == "COMPLETE"
+    suppressed_request = replace(
+        scenario["request"],
+        publication_signal_id="PSG-" + "f" * 64,
+        production_outcome_invocation_id=IDENTITY,
+        production_due_window_occurrence_id="e6dw1:" + "d" * 64,
+        production_observed_at="2026-07-30T13:00:00Z",
+        production_evidence_sha256="e" * 64,
+    )
+    cycle = E6ServiceCycleRequestV1(
+        orchestrator_request=suppressed_request,
+        orchestrator_ports=scenario["ports"],
+        channel="TELEGRAM",
+        destination_id="isolated-owner-state-test",
+    )
+    calls = []
+    events = []
+
+    assert main(
+        outcome_invocation_id=IDENTITY,
+        e6_enabled=True,
+        authorization=_authorization(),
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=True,
+        e6_runtime_factory=lambda **_kwargs: cycle,
+        environment={
+            "TELEGRAM_DESTINATION_ID": "isolated-owner-state-test",
+            "TELEGRAM_OWNER_CONTROL_STATE_PATH": str(tmp_path / "owner.json"),
+        },
+        telegram_config_loader=_bomb(calls, "telegram-config"),
+        telegram_delivery_adapter_factory=_bomb(calls, "telegram-adapter"),
+        production_observability_emitter=events.append,
+    ) == 0
+    assert calls == []
+    assert len(events) == 1
+    assert events[0].reason_code == "E4_DUPLICATE_SUPPRESSED"
+    assert events[0].source_reason_code == "SUPPRESS_EXISTING_THESIS"
+
+
+def test_no_trade_invocation_mismatch_and_invalid_object_are_sanitized_exit7(capsys):
+    mismatch_calls = []
+    mismatch_events = []
+    mismatch = _no_trade_request(identity="b" * 32)
+    assert main(
+        **_authorized_main_options(
+            mismatch_calls, mismatch_events, request=mismatch
+        )
+    ) == 7
+    assert mismatch_calls == [("runtime", IDENTITY)]
+    assert mismatch_events == []
+    assert "b" * 32 not in capsys.readouterr().err
+
+    invalid_calls = []
+    invalid_events = []
+    invalid = _no_trade_request()
+    object.__setattr__(invalid, "reason_code", NO_MODE_JOB_DUE)
+    assert main(
+        **_authorized_main_options(invalid_calls, invalid_events, request=invalid)
+    ) == 7
+    assert invalid_calls == [("runtime", IDENTITY)]
+    assert invalid_events == []
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_unsupported_runtime_factory_output_remains_sanitized_exit7(capsys):
+    calls = []
+    events = []
+    assert main(
+        **_authorized_main_options(calls, events, request=SimpleNamespace())
+    ) == 7
+    assert calls == [("runtime", IDENTITY)]
+    assert events == []
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "PHASE09R_EXIT7" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("disposition", "event_name"),
+    (
+        (NO_MODE_JOB_DUE, E6_PRODUCTION_NO_WORK_DUE_V1),
+        (DUE_WINDOW_ALREADY_HANDLED, E6_PRODUCTION_IDEMPOTENT_REPLAY_V1),
+    ),
+)
+def test_private_seam_healthy_dispatch_returns_zero_without_public_main(
+    disposition, event_name
+):
+    configuration = _activation_mapping()
+    calls = []
+    events = []
+
+    def composition_builder(*, configuration):
+        calls.append(("composition", configuration))
+        return build_e6_production_runtime_composition_v1(
+            configuration=configuration
+        )
+
+    def dispatch_provider(*, configuration, composition):
+        calls.append(("dispatch", configuration, composition))
+        return _dispatch(disposition)
+
+    assert _run_production_module_v1(
+        environment=configuration,
+        runtime_composition_builder=composition_builder,
+        dispatch_decision_provider=dispatch_provider,
+        selected_job_runtime_factory_provider=_bomb(calls, "runtime-provider"),
+        production_observability_emitter=events.append,
+        public_main_runner=_bomb(calls, "main"),
+    ) == 0
+    assert [call[0] for call in calls] == ["composition", "dispatch"]
+    assert len(events) == 1
+    assert events[0].event_name == event_name
+
+
+def test_private_seam_selected_job_gets_one_factory_and_calls_main_once():
+    configuration = _activation_mapping()
+    calls = []
+    runtime_factory = lambda *, outcome_invocation_id: _no_trade_request(
+        identity=outcome_invocation_id
+    )
+
+    def dispatch_provider(**_kwargs):
+        calls.append("dispatch")
+        return _dispatch(MODE_JOB_SELECTED)
+
+    def runtime_provider(*, decision, configuration, composition):
+        calls.append(("runtime-provider", decision, configuration, composition))
+        return runtime_factory
+
+    def main_runner(**kwargs):
+        calls.append(("main", kwargs))
+        return 0
+
+    assert _run_production_module_v1(
+        environment=configuration,
+        dispatch_decision_provider=dispatch_provider,
+        selected_job_runtime_factory_provider=runtime_provider,
+        production_observability_emitter=lambda _event: None,
+        public_main_runner=main_runner,
+    ) == 0
+    assert calls[0] == "dispatch"
+    assert calls[1][0] == "runtime-provider"
+    assert calls[2][0] == "main"
+    supplied = calls[2][1]
+    assert supplied["outcome_invocation_id"] == IDENTITY
+    assert supplied["e6_enabled"] is True
+    assert supplied["authorization"] == _authorization()
+    assert supplied["e6_activation_authorized"] is True
+    assert supplied["network_authorized"] is True
+    assert supplied["publication_authorized"] is True
+    assert supplied["e6_runtime_factory"] is runtime_factory
+    assert supplied["environment"] is configuration
+    assert callable(supplied["telegram_config_loader"])
+    assert callable(supplied["telegram_delivery_adapter_factory"])
+    assert callable(supplied["e6_orchestrator"])
+    assert callable(supplied["e6_service_cycle_runner"])
+
+
+@pytest.mark.parametrize(
+    "change",
+    (
+        {"E6_RUNTIME_ENABLED": "false"},
+        {"E6_PROVIDER_ENABLED": "false"},
+        {"E6_WORKLOAD_GATE": "false"},
+        {"E6_CREDENTIAL_GATE": "false"},
+        {"E6_TELEGRAM_PUBLICATION_GATE": "false"},
+    ),
+)
+def test_private_seam_disabled_or_partial_composition_stops_before_dispatch(change):
+    calls = []
+    assert _run_production_module_v1(
+        environment=_activation_mapping(**change),
+        dispatch_decision_provider=_bomb(calls, "dispatch"),
+        selected_job_runtime_factory_provider=_bomb(calls, "runtime-provider"),
+        public_main_runner=_bomb(calls, "main"),
+    ) == 2
+    assert calls == []
+
+
+def test_private_seam_invalid_activation_stops_before_dispatch():
+    calls = []
+    assert _run_production_module_v1(
+        environment={},
+        dispatch_decision_provider=_bomb(calls, "dispatch"),
+        selected_job_runtime_factory_provider=_bomb(calls, "runtime-provider"),
+        public_main_runner=_bomb(calls, "main"),
+    ) == 2
+    assert calls == []
+
+
+def test_module_execution_uses_real_private_dispatcher_without_cli_authority():
+    source = Path(
+        __import__("engine.run_production_signal_v1", fromlist=["x"]).__file__
+    ).read_text(encoding="utf-8")
+    assert source.endswith(
+        '\nif __name__ == "__main__":\n    sys.exit(_run_production_module_v1())\n'
+    )
+    assert "sys.exit(main())" not in source
+    assert "argparse" not in source

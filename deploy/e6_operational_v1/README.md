@@ -62,10 +62,22 @@ previous verified release reference and supports an exact idempotent replay. No
 service-control operation is part of the transaction.
 
 The service is a hardened `Type=oneshot` unit with `Restart=no` and a 20-minute
-timeout. The timer uses the established 30-minute inactive cadence,
-`Persistent=false`, and therefore has no boot catch-up. The overlap lock remains
-the non-overlap authority. Nothing in this package enables or starts either
+timeout. Systemd provides only a policy-independent once-per-minute UTC wake-up
+using `OnCalendar=*-*-* *:*:00 UTC`, `AccuracySec=1s`, and `Persistent=false`.
+It encodes no SWING, INTRADAY, or SCALP cadence and has no relative interval,
+random delay, or boot catch-up. Nothing in this package enables or starts either
 unit.
+
+Python mode profiles and the due-window dispatcher are the sole cadence policy.
+Each invocation admits at most one selected mode job; catch-up, parallel mode execution, and automatic retry are prohibited. The overlap lock remains the
+non-overlap authority. A claimed due-window occurrence is replay-suppressed if
+the process crashes after claiming it. Ordinary no-work and NO_TRADE outcomes
+are healthy process exit 0.
+
+Before activation, the E6 service and timer remain disabled and inactive, and
+the legacy `ai-crypto-signal-agent.timer` remains the sole production schedule
+authority. A canary does not imply activation. Activation requires separate, exact owner authorization and an authority transition that disables the legacy
+timer before enabling the E6 timer.
 
 Publication creates only `PUBLISHED_PENDING_ENTRY` owner state. It does not
 synthesize an owner decision. Owner-confirmed `ENTRY_ACTIVE` remains the sole

@@ -71,6 +71,8 @@ def _execute(
     side="LONG",
     name="durable",
     usage_store=None,
+    deep_measured=100,
+    deep_requested=100,
     claude_measured=100,
     claude_requested=100,
     claude_counts_required=None,
@@ -96,8 +98,8 @@ def _execute(
         mode_score_floor=70,
         usage_store=usage_store,
         commit_timestamp=TIMESTAMP,
-        deepseek_measured_input_tokens=100,
-        deepseek_requested_output_tokens=100,
+        deepseek_measured_input_tokens=deep_measured,
+        deepseek_requested_output_tokens=deep_requested,
         deepseek_transport=deep_transport,
         claude_measured_input_tokens=(
             claude_measured if claude_counts_required else None
@@ -157,6 +159,41 @@ def test_exact_twenty_field_durable_result_hash_and_authority(tmp_path):
     )
     with pytest.raises(FrozenInstanceError):
         result.retry_count = 1
+
+
+def test_production_token_preflight_is_derived_and_claude_is_route_time_only(
+    tmp_path,
+):
+    payload, result, deep_calls, claude_calls = _execute(
+        tmp_path,
+        "CAUTION",
+        name="derived-route-time-preflight",
+        deep_measured=None,
+        deep_requested=None,
+        claude_measured=None,
+        claude_requested=None,
+        claude_counts_required=True,
+    )
+    binding = payload.provider_binding_sha256
+    assert binding == provider.ACTIVE_PROVIDER_BINDING_SHA256
+    expected_deep = provider.measure_e5_deepseek_canonical_input_upper_bound_v1(
+        payload
+    )
+    assert result.final_composition.deepseek_token_preflight.measured_input_tokens == (
+        expected_deep
+    )
+    if expected_deep <= result.final_composition.deepseek_token_preflight.input_hard_limit_tokens:
+        assert len(deep_calls) == 1
+        assert len(claude_calls) in (0, 1)
+        if claude_calls:
+            assert result.final_composition.claude_token_preflight is not None
+            assert (
+                result.final_composition.claude_token_preflight.measured_input_tokens
+                > 0
+            )
+    else:
+        assert deep_calls == claude_calls == []
+    assert result.retry_count == 0
 
 
 class _OrderedStore:

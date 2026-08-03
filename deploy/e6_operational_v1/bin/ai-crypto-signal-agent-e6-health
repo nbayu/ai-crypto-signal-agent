@@ -8,6 +8,7 @@ readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"
 readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"
 readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.service"
 readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.timer"
+readonly LEGACY_TIMER_NAME="ai-crypto-signal-agent.timer"
 readonly CONFIGURATION_DIRECTORY="/etc/ai-crypto-signal-agent"
 readonly ACTIVATION_CONFIGURATION="/etc/ai-crypto-signal-agent/e6-activation-v1.env"
 readonly CREDENTIAL_METADATA="/etc/ai-crypto-signal-agent/e6-credentials.metadata"
@@ -204,10 +205,13 @@ fi
 timer_contract_valid=NO
 if [[ "$timer_match" == YES &&
       "$(unit_directive "$TIMER_UNIT" Unit)" == "ai-crypto-signal-agent-e6.service" &&
-      "$(unit_directive "$TIMER_UNIT" OnActiveSec)" == "30min" &&
-      "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" == "30min" &&
-      "$(unit_directive "$TIMER_UNIT" AccuracySec)" == "1min" &&
-      "$(unit_directive "$TIMER_UNIT" Persistent)" == "false" ]]; then
+      "$(unit_directive "$TIMER_UNIT" OnCalendar)" == "*-*-* *:*:00 UTC" &&
+      "$(unit_directive "$TIMER_UNIT" AccuracySec)" == "1s" &&
+      "$(unit_directive "$TIMER_UNIT" Persistent)" == "false" &&
+      -z "$(unit_directive "$TIMER_UNIT" OnActiveSec)" &&
+      -z "$(unit_directive "$TIMER_UNIT" OnUnitActiveSec)" &&
+      -z "$(unit_directive "$TIMER_UNIT" OnUnitInactiveSec)" &&
+      -z "$(unit_directive "$TIMER_UNIT" RandomizedDelaySec)" ]]; then
     timer_contract_valid=YES
 fi
 
@@ -217,6 +221,9 @@ timer_active_state="$(systemctl is-active ai-crypto-signal-agent-e6.timer 2>/dev
 timer_enabled_state="$(systemctl is-enabled ai-crypto-signal-agent-e6.timer 2>/dev/null || true)"
 timer_substate="$(systemctl show ai-crypto-signal-agent-e6.timer -p SubState --value 2>/dev/null || true)"
 timer_next_monotonic="$(systemctl show ai-crypto-signal-agent-e6.timer -p NextElapseUSecMonotonic --value 2>/dev/null || true)"
+legacy_timer_active_state="$(systemctl is-active "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
+legacy_timer_enabled_state="$(systemctl is-enabled "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
+legacy_timer_substate="$(systemctl show "$LEGACY_TIMER_NAME" -p SubState --value 2>/dev/null || true)"
 
 kill_switch_valid=YES
 kill_switch_active=NO
@@ -290,15 +297,23 @@ printf '%s\n' "AUTOMATIC_RETRY_COUNT=0"
 printf '%s\n' "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO"
 
 health_state=NOT_READY
+legacy_authority_contract_valid=NO
 if [[ "$service_active_state" == inactive &&
       ( "$service_enabled_state" == static || "$service_enabled_state" == disabled ) ]]; then
     if [[ "$timer_active_state" == inactive && "$timer_enabled_state" == disabled &&
           ( "$timer_next_monotonic" == 0 || "$timer_next_monotonic" == infinity ) &&
-          "$activation_defaults_closed" == YES ]]; then
+          "$activation_defaults_closed" == YES &&
+          "$legacy_timer_active_state" == active &&
+          "$legacy_timer_enabled_state" == enabled &&
+          "$legacy_timer_substate" == waiting ]]; then
+        legacy_authority_contract_valid=YES
         health_state=READY_NOT_ENABLED
     elif [[ "$timer_active_state" == active && "$timer_enabled_state" == enabled &&
             "$timer_substate" == waiting && "$timer_next_monotonic" =~ ^[1-9][0-9]*$ &&
-            "$activation_all_authorized" == YES ]]; then
+            "$activation_all_authorized" == YES &&
+            "$legacy_timer_active_state" == inactive &&
+            "$legacy_timer_enabled_state" == disabled ]]; then
+        legacy_authority_contract_valid=YES
         health_state=READY_AND_AUTOMATION_ENABLED
     else
         record_failure SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY
@@ -307,11 +322,16 @@ else
     record_failure SERVICE_STATE_INVALID
 fi
 
+record_check LEGACY_PRODUCTION_AUTHORITY_CONTRACT "$legacy_authority_contract_valid" LEGACY_PRODUCTION_AUTHORITY_INVALID
+
 printf 'SERVICE_ACTIVE=%s\n' "$service_active_state"
 printf 'SERVICE_ENABLED=%s\n' "$service_enabled_state"
 printf 'TIMER_ACTIVE=%s\n' "$timer_active_state"
 printf 'TIMER_ENABLED=%s\n' "$timer_enabled_state"
 printf 'TIMER_SUBSTATE=%s\n' "$timer_substate"
+printf 'LEGACY_TIMER_ACTIVE=%s\n' "$legacy_timer_active_state"
+printf 'LEGACY_TIMER_ENABLED=%s\n' "$legacy_timer_enabled_state"
+printf 'LEGACY_TIMER_SUBSTATE=%s\n' "$legacy_timer_substate"
 
 if [[ "$failure_count" -eq 0 && "$health_state" != NOT_READY ]]; then
     printf 'HEALTH_STATUS=%s\n' "$health_state"

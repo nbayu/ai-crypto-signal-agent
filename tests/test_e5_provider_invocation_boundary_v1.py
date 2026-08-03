@@ -1788,5 +1788,55 @@ def test_no_publication_or_production_authority_in_public_contracts():
     )
 
 
+def test_route_time_measurements_bind_exact_canonical_inputs(tmp_path):
+    payload, review, adjudication, route, _ = _route_chain(
+        tmp_path,
+        "CAUTION",
+        name="route-time-measurement",
+    )
+    deepseek_expected = len(
+        json.dumps(
+            payload.to_mapping(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    claude_expected = len(
+        json.dumps(
+            {
+                "payload": payload.to_mapping(),
+                "deepseek_review": review.to_mapping(),
+                "deepseek_adjudication": adjudication.to_mapping(),
+                "claude_route_result": route.to_mapping(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    assert subject.measure_e5_deepseek_canonical_input_upper_bound_v1(payload) == (
+        deepseek_expected
+    )
+    assert subject.measure_e5_claude_canonical_input_upper_bound_v1(
+        payload=payload,
+        deepseek_review=review,
+        deepseek_adjudication=adjudication,
+        route_result=route,
+    ) == claude_expected
+
+    clear = _route_chain(tmp_path, "CLEAR", name="no-speculative-claude")
+    _assert_invalid(
+        lambda: subject.measure_e5_claude_canonical_input_upper_bound_v1(
+            payload=clear[0],
+            deepseek_review=clear[1],
+            deepseek_adjudication=clear[2],
+            route_result=clear[3],
+        )
+    )
+
+
 def test_injected_fake_transport_call_count_is_exact():
     assert FAKE_TRANSPORT_CALL_COUNT == 60

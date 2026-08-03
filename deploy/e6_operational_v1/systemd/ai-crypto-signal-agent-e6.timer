@@ -1,11 +1,10 @@
 [Unit]
-Description=AI Crypto Signal Agent E6 30-minute inactive cadence
+Description=AI Crypto Signal Agent E6 UTC minute heartbeat
 
 [Timer]
 Unit=ai-crypto-signal-agent-e6.service
-OnActiveSec=30min
-OnUnitInactiveSec=30min
-AccuracySec=1min
+OnCalendar=*-*-* *:*:00 UTC
+AccuracySec=1s
 Persistent=false
 
 [Install]
