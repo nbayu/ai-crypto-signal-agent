@@ -7,23 +7,33 @@ readonly ROOT_GROUP="root"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
 
 usage() {
-    printf '%s\n' "usage: $0 --target-release PATH --destdir PATH" >&2
+    printf '%s\n' "usage: $0 --deployment-profile CANDIDATE_CANARY|PRODUCTION --release-commit COMMIT40 --target-release PATH --destdir PATH" >&2
     exit 64
 }
 
 e6_path_has_no_write_mode_bits() {
-    local path="$1"
     local mode
-
-    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
+    mode="$(stat -Lc '%a' -- "$1" 2>/dev/null)" || return 1
     [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
     (( (8#$mode & 8#222) == 0 ))
 }
 
+profile=""
+release_commit=""
 target_release=""
 destdir=""
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
+        --deployment-profile)
+            [[ "$#" -ge 2 ]] || usage
+            profile="$2"
+            shift 2
+            ;;
+        --release-commit)
+            [[ "$#" -ge 2 ]] || usage
+            release_commit="$2"
+            shift 2
+            ;;
         --target-release)
             [[ "$#" -ge 2 ]] || usage
             target_release="$2"
@@ -34,26 +44,33 @@ while [[ "$#" -gt 0 ]]; do
             destdir="$2"
             shift 2
             ;;
-        *)
-            usage
-            ;;
+        *) usage ;;
     esac
 done
 
-[[ "$target_release" = /* && "$destdir" = /* ]] || usage
+[[ "$release_commit" =~ ^[0-9a-f]{40}$ && "$target_release" = /* && "$destdir" = /* ]] || usage
 [[ -d "$destdir" && ! -L "$destdir" ]] || exit 65
-state_root="$destdir/var/lib/ai-crypto-signal-agent"
-[[ -d "$state_root" && ! -L "$state_root" ]] || exit 65
-current_ref="$state_root/e6-installed-release.path"
-rollback_ref="$state_root/e6-rollback-release.path"
-evidence_path="$state_root/e6-rollback-evidence.txt"
+case "$profile" in
+    CANDIDATE_CANARY)
+        control_relative="var/lib/ai-crypto-signal-agent-e6-installations/$release_commit"
+        ;;
+    PRODUCTION)
+        control_relative="var/lib/ai-crypto-signal-agent-e6-production-control"
+        ;;
+    *) usage ;;
+esac
+control_root="$destdir/$control_relative"
+[[ -d "$control_root" && ! -L "$control_root" ]] || exit 65
+current_ref="$control_root/installed-release.path"
+rollback_ref="$control_root/rollback-release.path"
+evidence_path="$control_root/rollback-evidence.txt"
 
 verify_release() {
     local release="$1"
+    local commit
     [[ "$release" = /* && -d "$release" && ! -L "$release" ]] || return 1
     e6_path_has_no_write_mode_bits "$release" || return 1
     [[ "$(realpath -- "$release")" == "$release" ]] || return 1
-    local commit
     commit="$(basename -- "$release")"
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
     [[ -f "$release/.e6-release-manifest" && ! -L "$release/.e6-release-manifest" ]] || return 1
@@ -65,9 +82,8 @@ verify_release() {
 }
 
 read_reference() {
-    local path="$1"
-    [[ -f "$path" && ! -L "$path" && "$(wc -l < "$path")" -eq 1 ]] || return 1
-    sed -n '1p' "$path"
+    [[ -f "$1" && ! -L "$1" && "$(wc -l < "$1")" -eq 1 ]] || return 1
+    sed -n '1p' "$1"
 }
 
 atomic_write() {
@@ -77,7 +93,7 @@ atomic_write() {
     local group="$4"
     local mode="$5"
     local temporary
-    temporary="$(mktemp "$state_root/.e6-rollback.XXXXXXXX")"
+    temporary="$(mktemp "$control_root/.e6-rollback.XXXXXXXX")"
     if ! { printf '%s\n' "$content" > "$temporary" &&
            chown "$owner:$group" "$temporary" &&
            chmod "$mode" "$temporary" &&
@@ -87,17 +103,13 @@ atomic_write() {
     fi
 }
 
-reference_metadata_matches() {
-    local path="$1"
-    local owner="$2"
-    local group="$3"
-    local mode="$4"
-    [[ "$(stat -Lc '%U:%G:%a' "$path" 2>/dev/null || true)" == "$owner:$group:$mode" ]]
+metadata_is() {
+    [[ "$(stat -Lc '%U:%G:%a' "$1" 2>/dev/null || true)" == "$2:$3:$4" ]]
 }
 
 current_release="$(read_reference "$current_ref")" || exit 65
-reference_metadata_matches "$current_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 65
-[[ -d "$target_release" && ! -L "$target_release" ]] || exit 65
+metadata_is "$current_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 65
+[[ "$(basename -- "$current_release")" == "$release_commit" ]] || exit 65
 resolved_target="$(realpath -- "$target_release" 2>/dev/null)" || exit 65
 [[ "$resolved_target" == "$target_release" ]] || exit 65
 target_release="$resolved_target"
@@ -105,14 +117,12 @@ target_release="$resolved_target"
 if [[ "$current_release" == "$target_release" ]]; then
     prior_release="$(read_reference "$rollback_ref")" || exit 66
     [[ -f "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
-    [[ "$(sed -n 's/^FROM_RELEASE=//p' "$evidence_path")" == "$prior_release" ]] || exit 66
-    [[ "$(sed -n 's/^TO_RELEASE=//p' "$evidence_path")" == "$target_release" ]] || exit 66
-    reference_metadata_matches "$current_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 66
-    reference_metadata_matches "$rollback_ref" "$ROOT_USER" "$ROOT_GROUP" 400 || exit 66
-    reference_metadata_matches "$evidence_path" "$ROOT_USER" "$ROOT_GROUP" 400 || exit 66
+    metadata_is "$rollback_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 || exit 66
+    metadata_is "$evidence_path" "$ROOT_USER" "$ROOT_GROUP" 400 || exit 66
     verify_release "$current_release" || exit 66
     verify_release "$prior_release" || exit 66
     printf '%s\n' "E6_ROLLBACK=IDEMPOTENT_REPLAY"
+    printf '%s\n' "STATE_AUTHORITY_MUTATION=NO"
     printf '%s\n' "SERVICE_OPERATION_EXECUTED=NO"
     exit 0
 fi
@@ -122,13 +132,17 @@ verify_release "$target_release" || exit 65
 [[ ! -e "$rollback_ref" && ! -L "$rollback_ref" ]] || exit 66
 [[ ! -e "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
 
-atomic_write "$rollback_ref" "$current_release" "$ROOT_USER" "$ROOT_GROUP" 0400
-atomic_write "$evidence_path" "FROM_RELEASE=$current_release
+atomic_write "$rollback_ref" "$current_release" "$ROOT_USER" "$SERVICE_GROUP" 0440
+atomic_write "$evidence_path" "DEPLOYMENT_PROFILE=$profile
+BOUND_RELEASE_COMMIT=$release_commit
+FROM_RELEASE=$current_release
 TO_RELEASE=$target_release
-TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT" "$ROOT_USER" "$ROOT_GROUP" 0400
+TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT
+STATE_AUTHORITY_RETAINED_IN_PLACE=YES" "$ROOT_USER" "$ROOT_GROUP" 0400
 atomic_write "$current_ref" "$target_release" "$ROOT_USER" "$SERVICE_GROUP" 0440
 
 printf '%s\n' "E6_ROLLBACK=COMPLETE"
-printf '%s\n' "CURRENT_VERIFIED_RELEASE_RETAINED=YES"
+printf '%s\n' "STATE_AUTHORITY_RETAINED_IN_PLACE=YES"
+printf '%s\n' "CANARY_STATE_PROMOTION_COUNT=0"
 printf '%s\n' "SERVICE_OPERATION_EXECUTED=NO"
 printf '%s\n' "TIMER_ENABLEMENT_OPERATION_EXECUTED=NO"

@@ -9,8 +9,17 @@ import pytest
 
 import engine.e6_production_runtime_composition_v1 as module
 from engine.e6_activation_configuration_v1 import (
+    E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
     E6ActivationConfigurationV1,
     load_e6_activation_configuration_v1,
+)
+from engine.e5_technical_review_payload_v1 import (
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+)
+from engine.e6_deployment_state_binding_v1 import (
+    E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+    build_e6_deployment_state_binding_v1,
 )
 from engine.e6_production_cycle_input_v1 import (
     E6NoTradeCycleRequestV1,
@@ -48,17 +57,42 @@ GATE_KEYS = (
 
 
 def _mapping(**changes: str) -> dict[str, str]:
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile="CANDIDATE_CANARY", release_commit=COMMIT
+    )
     values = {
-        "E6_ACTIVATION_SCHEMA_VERSION": "e6-activation-configuration-v1",
-        "E6_RELEASE_COMMIT": COMMIT,
+        "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+        "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+        "E6_DEPLOYMENT_PROFILE": binding.deployment_profile.value,
+        "E6_RELEASE_COMMIT": binding.release_commit,
         "E6_RELEASE_TREE": TREE,
         "E6_TRUSTED_CHECKPOINT_COMMIT": CHECKPOINT,
-        "E6_RELEASE_ROOT": f"/opt/ai-crypto-signal-agent-releases/{COMMIT}",
-        "E6_RELEASE_REFERENCE_PATH": "/var/lib/ai-crypto-signal-agent/e6-installed-release.path",
-        "E6_CREDENTIAL_METADATA_PATH": "/etc/ai-crypto-signal-agent/e6-credentials.metadata",
-        "E6_OWNER_CONTROL_STATE_PATH": "/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json",
-        "E6_SERVICE_USER": "ai-crypto-signal-agent",
-        "E6_SERVICE_GROUP": "ai-crypto-signal-agent",
+        "E6_RELEASE_ROOT": binding.release_root,
+        "E6_SERVICE_UNIT": binding.service_unit,
+        "E6_TIMER_UNIT": binding.timer_unit,
+        "E6_STATE_ROOT": binding.state_root,
+        "E6_OWNER_STATE_ROOT": binding.owner_state_root,
+        "E6_LEDGER_ROOT": binding.ledger_root,
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH": binding.active_ledger_path,
+        "E6_OWNER_CONTROL_STATE_PATH": binding.owner_state_path,
+        "E6_PUBLICATION_ROOT": binding.publication_root,
+        "E6_OPERATIONAL_ARTIFACT_ROOT": binding.operational_artifact_root,
+        "E6_RUNTIME_ROOT": binding.runtime_root,
+        "E6_RUNTIME_LOCK_PATH": binding.runtime_lock,
+        "E6_CACHE_ROOT": binding.cache_root,
+        "E6_LOG_POLICY": binding.log_policy,
+        "E6_CONTROL_ROOT": binding.control_root,
+        "E6_RELEASE_REFERENCE_PATH": binding.install_pointer,
+        "E6_ROLLBACK_REFERENCE_PATH": binding.rollback_pointer,
+        "E6_ACCEPTED_RELEASE_MARKER_PATH": binding.accepted_marker,
+        "E6_KILL_SWITCH_PATH": binding.kill_switch,
+        "E6_CONFIGURATION_ROOT": binding.configuration_root,
+        "E6_CREDENTIAL_METADATA_PATH": binding.credential_metadata_path,
+        "E6_ACTIVATION_CONFIGURATION_PATH": binding.activation_configuration_path,
+        "E6_SERVICE_USER": binding.service_user,
+        "E6_SERVICE_GROUP": binding.service_group,
+        "E6_PROVIDER_BINDING_VERSION": E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+        "E6_PROVIDER_BINDING_SHA256": E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
         "E6_RUNTIME_ENABLED": "false",
         "E6_PROVIDER_ENABLED": "false",
         "E6_ACTIVATION_GATE": "false",
@@ -106,9 +140,9 @@ def test_module_is_passive_and_has_no_external_constructor_surface() -> None:
         assert marker not in source
 
 
-def test_exact_23_key_loader_runs_once_and_composition_is_immutable(capsys) -> None:
+def test_exact_45_key_loader_runs_once_and_composition_is_immutable(capsys) -> None:
     configuration = _mapping()
-    assert len(configuration) == 23
+    assert len(configuration) == 45
     calls: list[object] = []
 
     def loader(value):
@@ -125,12 +159,14 @@ def test_exact_23_key_loader_runs_once_and_composition_is_immutable(capsys) -> N
     assert "__dict__" not in E6ProductionRuntimeCompositionV1.__slots__
     assert tuple(field.name for field in fields(composition)) == (
         "activation_configuration",
+        "deployment_binding",
         "e6_enabled",
         "authorization",
         "e6_activation_authorized",
         "network_authorized",
         "publication_authorized",
     )
+    assert composition.deployment_binding is composition.activation_configuration.deployment_binding
     with pytest.raises(FrozenInstanceError):
         composition.e6_enabled = True  # type: ignore[misc]
     captured = capsys.readouterr()

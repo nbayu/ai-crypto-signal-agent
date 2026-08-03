@@ -1,41 +1,45 @@
 [Unit]
-Description=AI Crypto Signal Agent E6 bounded operational one-shot
+Description=AI Crypto Signal Agent E6 commit-versioned candidate canary
 Wants=network-online.target
 After=network-online.target
 ConditionPathExists=@@RELEASE_ROOT@@/.e6-release-manifest
-ConditionPathExists=/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker
-ConditionPathExists=/etc/ai-crypto-signal-agent/e6-activation-v1.env
+ConditionPathExists=@@E6_ACCEPTED_RELEASE_MARKER_PATH@@
+ConditionPathExists=@@E6_ACTIVATION_CONFIGURATION_PATH@@
 
 [Service]
 Type=oneshot
 User=ai-crypto-signal-agent
 Group=ai-crypto-signal-agent
-WorkingDirectory=/var/lib/ai-crypto-signal-agent/phase09r1
-EnvironmentFile=/etc/ai-crypto-signal-agent/e6-activation-v1.env
+WorkingDirectory=@@E6_STATE_ROOT@@
+EnvironmentFile=@@E6_ACTIVATION_CONFIGURATION_PATH@@
 EnvironmentFile=/etc/ai-crypto-signal-agent/phase09r1.env
 EnvironmentFile=/etc/ai-crypto-signal-agent/deepseek.env
-Environment=E6_ACTIVATION_CONFIGURATION_PATH=/etc/ai-crypto-signal-agent/e6-activation-v1.env
+Environment=E6_ACTIVATION_CONFIGURATION_PATH=@@E6_ACTIVATION_CONFIGURATION_PATH@@
 Environment=E6_SOURCE_COMMIT=@@E6_SOURCE_COMMIT@@
 Environment=E6_SOURCE_TREE=@@E6_SOURCE_TREE@@
 Environment=E6_TRUSTED_CHECKPOINT_COMMIT=@@TRUSTED_CHECKPOINT_COMMIT@@
-Environment=E6_CREDENTIAL_METADATA_PATH=/etc/ai-crypto-signal-agent/e6-credentials.metadata
-Environment=ACTIVE_SIGNAL_LEDGER_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json
-Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json
-LoadCredential=accepted_e6_release_commit:/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker
-RuntimeDirectory=ai-crypto-signal-agent
+Environment=E6_CREDENTIAL_METADATA_PATH=@@E6_CREDENTIAL_METADATA_PATH@@
+Environment=ACTIVE_SIGNAL_LEDGER_PATH=@@E6_ACTIVE_SIGNAL_LEDGER_PATH@@
+Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=@@E6_OWNER_CONTROL_STATE_PATH@@
+LoadCredential=accepted_e6_release_commit:@@E6_ACCEPTED_RELEASE_MARKER_PATH@@
+StateDirectory=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@
+StateDirectoryMode=0750
+RuntimeDirectory=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=no
+CacheDirectory=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@
+CacheDirectoryMode=0700
 ExecStart=@@RELEASE_ROOT@@/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once
 TimeoutStartSec=20min
 Restart=no
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ai-crypto-signal-agent-e6
+SyslogIdentifier=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/ai-crypto-signal-agent/phase09r1 /var/lib/ai-crypto-signal-agent/operational-artifacts /run/ai-crypto-signal-agent
+ReadWritePaths=@@E6_STATE_ROOT@@ @@E6_OPERATIONAL_ARTIFACT_ROOT@@ @@E6_RUNTIME_ROOT@@ @@E6_CACHE_ROOT@@
 ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

@@ -1,0 +1,11 @@
+[Unit]
+Description=AI Crypto Signal Agent E6 production UTC minute heartbeat
+
+[Timer]
+Unit=ai-crypto-signal-agent-e6-production.service
+OnCalendar=*-*-* *:*:00 UTC
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

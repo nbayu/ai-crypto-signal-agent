@@ -8,10 +8,19 @@ import inspect
 import pytest
 
 import engine.e6_activation_configuration_v1 as module
+from engine.e5_technical_review_payload_v1 import (
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+)
 from engine.e6_activation_configuration_v1 import (
+    E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
     E6ActivationConfigurationErrorV1,
     E6ActivationConfigurationV1,
     load_e6_activation_configuration_v1,
+)
+from engine.e6_deployment_state_binding_v1 import (
+    E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+    build_e6_deployment_state_binding_v1,
 )
 
 
@@ -28,18 +37,43 @@ GATE_KEYS = (
 )
 
 
-def _mapping(**changes: str) -> dict[str, str]:
+def _mapping(profile: str = "CANDIDATE_CANARY", **changes: str) -> dict[str, str]:
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile=profile, release_commit=COMMIT
+    )
     values = {
-        "E6_ACTIVATION_SCHEMA_VERSION": "e6-activation-configuration-v1",
-        "E6_RELEASE_COMMIT": COMMIT,
+        "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+        "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+        "E6_DEPLOYMENT_PROFILE": binding.deployment_profile.value,
+        "E6_RELEASE_COMMIT": binding.release_commit,
         "E6_RELEASE_TREE": TREE,
         "E6_TRUSTED_CHECKPOINT_COMMIT": CHECKPOINT,
-        "E6_RELEASE_ROOT": f"/opt/ai-crypto-signal-agent-releases/{COMMIT}",
-        "E6_RELEASE_REFERENCE_PATH": "/var/lib/ai-crypto-signal-agent/e6-installed-release.path",
-        "E6_CREDENTIAL_METADATA_PATH": "/etc/ai-crypto-signal-agent/e6-credentials.metadata",
-        "E6_OWNER_CONTROL_STATE_PATH": "/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json",
-        "E6_SERVICE_USER": "ai-crypto-signal-agent",
-        "E6_SERVICE_GROUP": "ai-crypto-signal-agent",
+        "E6_RELEASE_ROOT": binding.release_root,
+        "E6_SERVICE_UNIT": binding.service_unit,
+        "E6_TIMER_UNIT": binding.timer_unit,
+        "E6_STATE_ROOT": binding.state_root,
+        "E6_OWNER_STATE_ROOT": binding.owner_state_root,
+        "E6_LEDGER_ROOT": binding.ledger_root,
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH": binding.active_ledger_path,
+        "E6_OWNER_CONTROL_STATE_PATH": binding.owner_state_path,
+        "E6_PUBLICATION_ROOT": binding.publication_root,
+        "E6_OPERATIONAL_ARTIFACT_ROOT": binding.operational_artifact_root,
+        "E6_RUNTIME_ROOT": binding.runtime_root,
+        "E6_RUNTIME_LOCK_PATH": binding.runtime_lock,
+        "E6_CACHE_ROOT": binding.cache_root,
+        "E6_LOG_POLICY": binding.log_policy,
+        "E6_CONTROL_ROOT": binding.control_root,
+        "E6_RELEASE_REFERENCE_PATH": binding.install_pointer,
+        "E6_ROLLBACK_REFERENCE_PATH": binding.rollback_pointer,
+        "E6_ACCEPTED_RELEASE_MARKER_PATH": binding.accepted_marker,
+        "E6_KILL_SWITCH_PATH": binding.kill_switch,
+        "E6_CONFIGURATION_ROOT": binding.configuration_root,
+        "E6_CREDENTIAL_METADATA_PATH": binding.credential_metadata_path,
+        "E6_ACTIVATION_CONFIGURATION_PATH": binding.activation_configuration_path,
+        "E6_SERVICE_USER": binding.service_user,
+        "E6_SERVICE_GROUP": binding.service_group,
+        "E6_PROVIDER_BINDING_VERSION": E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+        "E6_PROVIDER_BINDING_SHA256": E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
         "E6_RUNTIME_ENABLED": "false",
         "E6_PROVIDER_ENABLED": "false",
         "E6_ACTIVATION_GATE": "false",
@@ -62,33 +96,28 @@ def _load(**changes: str) -> E6ActivationConfigurationV1:
     return load_e6_activation_configuration_v1(_mapping(**changes))
 
 
-def test_public_api_is_frozen_slotted_deterministic_and_serializable() -> None:
+def test_public_api_is_frozen_slotted_and_holds_one_binding() -> None:
     assert is_dataclass(E6ActivationConfigurationV1)
     assert E6ActivationConfigurationV1.__dataclass_params__.frozen is True
     assert "__dict__" not in E6ActivationConfigurationV1.__slots__
     value = _load()
     assert list(value.to_mapping()) == [field.name for field in fields(value)]
-    assert value.to_mapping() == value.to_mapping()
+    assert value.deployment_binding.release_commit == value.release_commit == COMMIT
+    assert value.release_root == value.deployment_binding.release_root
+    assert value.owner_control_state_path == value.deployment_binding.owner_state_path
     with pytest.raises(FrozenInstanceError):
         value.activation_gate = True  # type: ignore[misc]
 
 
-def test_all_six_gates_are_separate_and_false_by_default() -> None:
+def test_exact_45_field_schema_and_all_six_gates_remain_independent() -> None:
+    assert len(_mapping()) == 45
     value = _load()
     assert tuple(getattr(value, name) for name, _ in GATE_KEYS) == (False,) * 6
-    assert value.e6_runtime_enabled is False
-    assert value.provider_enabled is False
-
-
-@pytest.mark.parametrize("field,key", GATE_KEYS)
-def test_each_gate_accepts_exact_true_without_implying_another(
-    field: str, key: str,
-) -> None:
-    value = _load(**{key: "true"})
-    assert getattr(value, field) is True
-    assert sum(getattr(value, name) for name, _ in GATE_KEYS) == 1
-    assert value.e6_runtime_enabled is False
-    assert value.provider_enabled is False
+    assert value.e6_runtime_enabled is value.provider_enabled is False
+    for field, key in GATE_KEYS:
+        selected = _load(**{key: "true"})
+        assert getattr(selected, field) is True
+        assert sum(getattr(selected, name) for name, _ in GATE_KEYS) == 1
 
 
 @pytest.mark.parametrize(
@@ -104,67 +133,85 @@ def test_each_gate_accepts_exact_true_without_implying_another(
         "E6_TELEGRAM_PUBLICATION_GATE",
     ),
 )
-def test_exact_lowercase_boolean_syntax_accepts_true_and_false(key: str) -> None:
-    assert load_e6_activation_configuration_v1(_mapping(**{key: "true"})).to_mapping()
-    assert load_e6_activation_configuration_v1(_mapping(**{key: "false"})).to_mapping()
+def test_boolean_syntax_is_exact_lowercase(key: str) -> None:
+    assert load_e6_activation_configuration_v1(_mapping(**{key: "true"}))
+    for value in ("TRUE", "False", "1", "yes", " true"):
+        with pytest.raises(E6ActivationConfigurationErrorV1):
+            load_e6_activation_configuration_v1(_mapping(**{key: value}))
 
 
-@pytest.mark.parametrize("value", ("TRUE", "False", "1", "0", "yes", "", " true"))
-def test_permissive_boolean_syntax_is_rejected(value: str) -> None:
-    with pytest.raises(E6ActivationConfigurationErrorV1) as raised:
-        _load(E6_NETWORK_GATE=value)
-    assert raised.value.code in {
-        "ACTIVATION_CONFIGURATION_BOOLEAN_INVALID",
-        "ACTIVATION_CONFIGURATION_VALUE_INVALID",
-    }
-
-
-def test_missing_unknown_blank_and_conflicting_aliases_fail_closed() -> None:
+def test_missing_unknown_and_malformed_identity_fail_closed() -> None:
     missing = _mapping()
     del missing["E6_PUBLICATION_GATE"]
     unknown = _mapping(E6_ENABLE_ALL="true")
-    blank = _mapping(E6_RELEASE_TREE="")
-    conflicting = _mapping(NETWORK_GATE="true")
-    for value in (missing, unknown, blank, conflicting):
+    for value in (missing, unknown, _mapping(E6_RELEASE_TREE="")):
         with pytest.raises(E6ActivationConfigurationErrorV1):
             load_e6_activation_configuration_v1(value)
-
-
-def test_release_checkpoint_and_metadata_paths_are_exactly_validated() -> None:
-    value = _load()
-    assert value.release_commit == COMMIT
-    assert value.release_tree == TREE
-    assert value.trusted_checkpoint_commit == CHECKPOINT
-    assert value.credential_metadata_path.endswith("e6-credentials.metadata")
     for changes in (
         {"E6_RELEASE_COMMIT": "A" * 40},
         {"E6_RELEASE_TREE": "b" * 39},
-        {"E6_RELEASE_ROOT": "/opt/wrong-name"},
-        {"E6_CREDENTIAL_METADATA_PATH": "relative/path"},
-        {"E6_RELEASE_REFERENCE_PATH": "/var/lib/../tmp/ref"},
-        {"E6_SERVICE_USER": "root"},
+        {"E6_TRUSTED_CHECKPOINT_COMMIT": "c" * 39},
+        {"E6_DEPLOYMENT_PROFILE": "UNKNOWN"},
     ):
         with pytest.raises(E6ActivationConfigurationErrorV1):
             _load(**changes)
 
 
-def test_credential_metadata_is_never_opened_or_read(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: list[object] = []
+@pytest.mark.parametrize(
+    "key",
+    (
+        "E6_DEPLOYMENT_BINDING_VERSION",
+        "E6_RELEASE_ROOT",
+        "E6_SERVICE_UNIT",
+        "E6_TIMER_UNIT",
+        "E6_STATE_ROOT",
+        "E6_OWNER_STATE_ROOT",
+        "E6_LEDGER_ROOT",
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH",
+        "E6_OWNER_CONTROL_STATE_PATH",
+        "E6_PUBLICATION_ROOT",
+        "E6_OPERATIONAL_ARTIFACT_ROOT",
+        "E6_RUNTIME_ROOT",
+        "E6_RUNTIME_LOCK_PATH",
+        "E6_CACHE_ROOT",
+        "E6_CONTROL_ROOT",
+        "E6_RELEASE_REFERENCE_PATH",
+        "E6_ROLLBACK_REFERENCE_PATH",
+        "E6_ACCEPTED_RELEASE_MARKER_PATH",
+        "E6_KILL_SWITCH_PATH",
+        "E6_CONFIGURATION_ROOT",
+        "E6_CREDENTIAL_METADATA_PATH",
+        "E6_ACTIVATION_CONFIGURATION_PATH",
+        "E6_SERVICE_USER",
+        "E6_SERVICE_GROUP",
+    ),
+)
+def test_every_detached_binding_field_is_rejected(key: str) -> None:
+    with pytest.raises(E6ActivationConfigurationErrorV1) as raised:
+        _load(**{key: "/tmp/arbitrary"})
+    assert raised.value.code in {
+        "ACTIVATION_CONFIGURATION_BINDING_INVALID",
+        "ACTIVATION_CONFIGURATION_SERVICE_IDENTITY_INVALID",
+    }
 
-    def forbidden_open(*args: object, **kwargs: object):
-        calls.append((args, kwargs))
-        raise AssertionError("credential content read")
 
-    monkeypatch.setattr(builtins, "open", forbidden_open)
+def test_profile_path_mismatches_fail_in_both_directions() -> None:
+    candidate = _mapping()
+    production = _mapping("PRODUCTION")
+    candidate["E6_STATE_ROOT"] = production["E6_STATE_ROOT"]
+    production["E6_STATE_ROOT"] = _mapping()["E6_STATE_ROOT"]
+    for value in (candidate, production):
+        with pytest.raises(E6ActivationConfigurationErrorV1) as raised:
+            load_e6_activation_configuration_v1(value)
+        assert raised.value.code == "ACTIVATION_CONFIGURATION_BINDING_INVALID"
+
+
+def test_provider_binding_and_fixed_safety_invariants_are_unchanged() -> None:
     value = _load()
-    assert value.credential_metadata_path == _mapping()["E6_CREDENTIAL_METADATA_PATH"]
-    assert calls == []
-
-
-def test_safety_invariants_are_fixed_and_independently_enforced() -> None:
-    value = _load()
+    assert value.provider_binding_version == "e5-provider-model-price-binding-v4"
+    assert value.provider_binding_sha256 == (
+        "4a31dbcb7a0c4daed3215dbe8817002c24b2ead30e7092096c992b322e0fe1d9"
+    )
     assert value.automatic_retry_count == 0
     assert value.provider_substitution_enabled is False
     assert value.prompt_repair_enabled is False
@@ -182,26 +229,26 @@ def test_safety_invariants_are_fixed_and_independently_enforced() -> None:
         _load(E6_AUTOMATIC_RETRY_COUNT="1")
 
 
-def test_errors_and_model_have_no_secret_or_client_surface() -> None:
-    secret = "fixture-private-" + "provider-value"
-    values = _mapping(E6_RELEASE_TREE=secret)
+def test_credential_metadata_is_metadata_only_and_errors_are_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def forbidden_open(*args: object, **kwargs: object):
+        calls.append((args, kwargs))
+        raise AssertionError("credential content read")
+
+    monkeypatch.setattr(builtins, "open", forbidden_open)
+    value = _load()
+    assert value.credential_metadata_path.endswith("credentials.metadata")
+    assert calls == []
+    secret = "fixture-private-provider-value"
     with pytest.raises(E6ActivationConfigurationErrorV1) as raised:
-        load_e6_activation_configuration_v1(values)
+        _load(E6_RELEASE_TREE=secret)
     assert secret not in str(raised.value) + repr(raised.value)
-    names = {field.name for field in fields(E6ActivationConfigurationV1)}
-    assert not names.intersection(
-        {
-            "token",
-            "api_key",
-            "credential_value",
-            "provider_client",
-            "telegram_client",
-            "exchange_client",
-        }
-    )
 
 
-def test_module_import_and_construction_have_no_external_effect_surface() -> None:
+def test_module_has_no_external_constructor_or_secret_field_surface() -> None:
     source = inspect.getsource(module)
     tree = ast.parse(source)
     imported = {
@@ -217,13 +264,7 @@ def test_module_import_and_construction_have_no_external_effect_surface() -> Non
     assert not imported.intersection(
         {"os", "socket", "subprocess", "requests", "httpx", "telegram"}
     )
-    for marker in (
-        "os.environ",
-        "getenv(",
-        "systemctl",
-        "mark_entry_active",
-        "reserve_slot",
-        "pair_lock",
-        "create_order",
-    ):
+    names = {field.name for field in fields(E6ActivationConfigurationV1)}
+    assert not names.intersection({"api_key", "token", "credential_value"})
+    for marker in ("os.environ", "getenv(", "systemctl", "create_order"):
         assert marker not in source

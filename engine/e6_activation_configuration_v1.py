@@ -1,32 +1,64 @@
-"""Immutable, non-secret activation metadata for the E6 operational package."""
+"""Immutable, profile-closed nonsecret activation metadata for E6."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
-import posixpath
 import re
 from typing import Final
 
+from engine.e5_technical_review_payload_v1 import (
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+)
+from engine.e6_deployment_state_binding_v1 import (
+    E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+    E6_SERVICE_GROUP_V1,
+    E6_SERVICE_USER_V1,
+    E6DeploymentStateBindingErrorV1,
+    E6DeploymentStateBindingV1,
+    build_e6_deployment_state_binding_v1,
+)
+
 
 E6_ACTIVATION_CONFIGURATION_SCHEMA_V1: Final = (
-    "e6-activation-configuration-v1"
+    "e6-activation-configuration-v2"
 )
-E6_SERVICE_USER_V1: Final = "ai-crypto-signal-agent"
-E6_SERVICE_GROUP_V1: Final = "ai-crypto-signal-agent"
 
 _SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 _EXPECTED_KEYS = (
     "E6_ACTIVATION_SCHEMA_VERSION",
+    "E6_DEPLOYMENT_BINDING_VERSION",
+    "E6_DEPLOYMENT_PROFILE",
     "E6_RELEASE_COMMIT",
     "E6_RELEASE_TREE",
     "E6_TRUSTED_CHECKPOINT_COMMIT",
     "E6_RELEASE_ROOT",
-    "E6_RELEASE_REFERENCE_PATH",
-    "E6_CREDENTIAL_METADATA_PATH",
+    "E6_SERVICE_UNIT",
+    "E6_TIMER_UNIT",
+    "E6_STATE_ROOT",
+    "E6_OWNER_STATE_ROOT",
+    "E6_LEDGER_ROOT",
+    "E6_ACTIVE_SIGNAL_LEDGER_PATH",
     "E6_OWNER_CONTROL_STATE_PATH",
+    "E6_PUBLICATION_ROOT",
+    "E6_OPERATIONAL_ARTIFACT_ROOT",
+    "E6_RUNTIME_ROOT",
+    "E6_RUNTIME_LOCK_PATH",
+    "E6_CACHE_ROOT",
+    "E6_LOG_POLICY",
+    "E6_CONTROL_ROOT",
+    "E6_RELEASE_REFERENCE_PATH",
+    "E6_ROLLBACK_REFERENCE_PATH",
+    "E6_ACCEPTED_RELEASE_MARKER_PATH",
+    "E6_KILL_SWITCH_PATH",
+    "E6_CONFIGURATION_ROOT",
+    "E6_CREDENTIAL_METADATA_PATH",
+    "E6_ACTIVATION_CONFIGURATION_PATH",
     "E6_SERVICE_USER",
     "E6_SERVICE_GROUP",
+    "E6_PROVIDER_BINDING_VERSION",
+    "E6_PROVIDER_BINDING_SHA256",
     "E6_RUNTIME_ENABLED",
     "E6_PROVIDER_ENABLED",
     "E6_ACTIVATION_GATE",
@@ -41,7 +73,49 @@ _EXPECTED_KEYS = (
     "E6_STALE_REVIEW_REUSE_ENABLED",
     "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED",
 )
-_BOOLEAN_KEYS = _EXPECTED_KEYS[10:18] + _EXPECTED_KEYS[19:]
+_BOOLEAN_KEYS = (
+    "E6_RUNTIME_ENABLED",
+    "E6_PROVIDER_ENABLED",
+    "E6_ACTIVATION_GATE",
+    "E6_WORKLOAD_GATE",
+    "E6_CREDENTIAL_GATE",
+    "E6_NETWORK_GATE",
+    "E6_PUBLICATION_GATE",
+    "E6_TELEGRAM_PUBLICATION_GATE",
+    "E6_PROVIDER_SUBSTITUTION_ENABLED",
+    "E6_PROMPT_REPAIR_ENABLED",
+    "E6_STALE_REVIEW_REUSE_ENABLED",
+    "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED",
+)
+_BINDING_KEY_TO_FIELD = (
+    ("E6_DEPLOYMENT_BINDING_VERSION", "binding_version"),
+    ("E6_DEPLOYMENT_PROFILE", "deployment_profile"),
+    ("E6_RELEASE_COMMIT", "release_commit"),
+    ("E6_RELEASE_ROOT", "release_root"),
+    ("E6_SERVICE_UNIT", "service_unit"),
+    ("E6_TIMER_UNIT", "timer_unit"),
+    ("E6_STATE_ROOT", "state_root"),
+    ("E6_OWNER_STATE_ROOT", "owner_state_root"),
+    ("E6_LEDGER_ROOT", "ledger_root"),
+    ("E6_ACTIVE_SIGNAL_LEDGER_PATH", "active_ledger_path"),
+    ("E6_OWNER_CONTROL_STATE_PATH", "owner_state_path"),
+    ("E6_PUBLICATION_ROOT", "publication_root"),
+    ("E6_OPERATIONAL_ARTIFACT_ROOT", "operational_artifact_root"),
+    ("E6_RUNTIME_ROOT", "runtime_root"),
+    ("E6_RUNTIME_LOCK_PATH", "runtime_lock"),
+    ("E6_CACHE_ROOT", "cache_root"),
+    ("E6_LOG_POLICY", "log_policy"),
+    ("E6_CONTROL_ROOT", "control_root"),
+    ("E6_RELEASE_REFERENCE_PATH", "install_pointer"),
+    ("E6_ROLLBACK_REFERENCE_PATH", "rollback_pointer"),
+    ("E6_ACCEPTED_RELEASE_MARKER_PATH", "accepted_marker"),
+    ("E6_KILL_SWITCH_PATH", "kill_switch"),
+    ("E6_CONFIGURATION_ROOT", "configuration_root"),
+    ("E6_CREDENTIAL_METADATA_PATH", "credential_metadata_path"),
+    ("E6_ACTIVATION_CONFIGURATION_PATH", "activation_configuration_path"),
+    ("E6_SERVICE_USER", "service_user"),
+    ("E6_SERVICE_GROUP", "service_group"),
+)
 _ERROR_CODES = frozenset(
     {
         "ACTIVATION_CONFIGURATION_TYPE_INVALID",
@@ -49,8 +123,9 @@ _ERROR_CODES = frozenset(
         "ACTIVATION_CONFIGURATION_VALUE_INVALID",
         "ACTIVATION_CONFIGURATION_SCHEMA_INVALID",
         "ACTIVATION_CONFIGURATION_IDENTITY_INVALID",
-        "ACTIVATION_CONFIGURATION_PATH_INVALID",
+        "ACTIVATION_CONFIGURATION_BINDING_INVALID",
         "ACTIVATION_CONFIGURATION_SERVICE_IDENTITY_INVALID",
+        "ACTIVATION_CONFIGURATION_PROVIDER_BINDING_INVALID",
         "ACTIVATION_CONFIGURATION_BOOLEAN_INVALID",
         "ACTIVATION_CONFIGURATION_RETRY_INVALID",
         "ACTIVATION_CONFIGURATION_SAFETY_INVARIANT_INVALID",
@@ -75,22 +150,6 @@ def _fail(code: str) -> None:
     raise E6ActivationConfigurationErrorV1(code) from None
 
 
-def _absolute_metadata_path(value: object) -> str:
-    if (
-        type(value) is not str
-        or not value
-        or value != value.strip()
-        or "\x00" in value
-        or "\n" in value
-        or "\r" in value
-        or not value.startswith("/")
-        or value == "/"
-        or posixpath.normpath(value) != value
-    ):
-        _fail("ACTIVATION_CONFIGURATION_PATH_INVALID")
-    return value
-
-
 def _boolean(value: object) -> bool:
     if value == "true":
         return True
@@ -101,16 +160,14 @@ def _boolean(value: object) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class E6ActivationConfigurationV1:
-    """Serializable activation metadata; every effect gate defaults closed."""
+    """One immutable deployment binding plus independently closed effect gates."""
 
     schema_version: str
-    release_commit: str
+    deployment_binding: E6DeploymentStateBindingV1
     release_tree: str
     trusted_checkpoint_commit: str
-    release_root: str
-    release_reference_path: str
-    credential_metadata_path: str
-    owner_control_state_path: str
+    provider_binding_version: str
+    provider_binding_sha256: str
     service_user: str
     service_group: str
     e6_runtime_enabled: bool = False
@@ -130,27 +187,29 @@ class E6ActivationConfigurationV1:
     def __post_init__(self) -> None:
         if self.schema_version != E6_ACTIVATION_CONFIGURATION_SCHEMA_V1:
             _fail("ACTIVATION_CONFIGURATION_SCHEMA_INVALID")
-        for identity in (
-            self.release_commit,
-            self.release_tree,
-            self.trusted_checkpoint_commit,
-        ):
+        if type(self.deployment_binding) is not E6DeploymentStateBindingV1:
+            _fail("ACTIVATION_CONFIGURATION_BINDING_INVALID")
+        try:
+            self.deployment_binding.__post_init__()
+        except Exception:
+            _fail("ACTIVATION_CONFIGURATION_BINDING_INVALID")
+        for identity in (self.release_tree, self.trusted_checkpoint_commit):
             if type(identity) is not str or _SHA1.fullmatch(identity) is None:
                 _fail("ACTIVATION_CONFIGURATION_IDENTITY_INVALID")
-        release_root = _absolute_metadata_path(self.release_root)
-        if posixpath.basename(release_root) != self.release_commit:
-            _fail("ACTIVATION_CONFIGURATION_IDENTITY_INVALID")
-        for path in (
-            self.release_reference_path,
-            self.credential_metadata_path,
-            self.owner_control_state_path,
-        ):
-            _absolute_metadata_path(path)
         if (
             self.service_user != E6_SERVICE_USER_V1
             or self.service_group != E6_SERVICE_GROUP_V1
+            or self.service_user != self.deployment_binding.service_user
+            or self.service_group != self.deployment_binding.service_group
         ):
             _fail("ACTIVATION_CONFIGURATION_SERVICE_IDENTITY_INVALID")
+        if (
+            self.provider_binding_version
+            != E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION
+            or self.provider_binding_sha256
+            != E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256
+        ):
+            _fail("ACTIVATION_CONFIGURATION_PROVIDER_BINDING_INVALID")
         for name in (
             "e6_runtime_enabled",
             "provider_enabled",
@@ -167,9 +226,7 @@ class E6ActivationConfigurationV1:
         ):
             if type(getattr(self, name)) is not bool:
                 _fail("ACTIVATION_CONFIGURATION_BOOLEAN_INVALID")
-        if type(self.automatic_retry_count) is not int:
-            _fail("ACTIVATION_CONFIGURATION_RETRY_INVALID")
-        if self.automatic_retry_count != 0:
+        if type(self.automatic_retry_count) is not int or self.automatic_retry_count != 0:
             _fail("ACTIVATION_CONFIGURATION_RETRY_INVALID")
         if any(
             (
@@ -181,16 +238,38 @@ class E6ActivationConfigurationV1:
         ):
             _fail("ACTIVATION_CONFIGURATION_SAFETY_INVARIANT_INVALID")
 
-    def to_mapping(self) -> dict[str, object]:
-        """Return deterministic plain data without reading any external state."""
+    @property
+    def release_commit(self) -> str:
+        return self.deployment_binding.release_commit
 
-        return {field.name: getattr(self, field.name) for field in fields(self)}
+    @property
+    def release_root(self) -> str:
+        return self.deployment_binding.release_root
+
+    @property
+    def release_reference_path(self) -> str:
+        return self.deployment_binding.install_pointer
+
+    @property
+    def credential_metadata_path(self) -> str:
+        return self.deployment_binding.credential_metadata_path
+
+    @property
+    def owner_control_state_path(self) -> str:
+        return self.deployment_binding.owner_state_path
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return deterministic plain nonsecret data without external reads."""
+
+        result = {field.name: getattr(self, field.name) for field in fields(self)}
+        result["deployment_binding"] = self.deployment_binding.to_mapping()
+        return result
 
 
 def load_e6_activation_configuration_v1(
     configuration: Mapping[str, str],
 ) -> E6ActivationConfigurationV1:
-    """Validate one exact injected metadata mapping without reading secrets."""
+    """Derive one binding and reject every detached supplied authority value."""
 
     if not isinstance(configuration, Mapping):
         _fail("ACTIVATION_CONFIGURATION_TYPE_INVALID")
@@ -219,18 +298,36 @@ def load_e6_activation_configuration_v1(
         _fail("ACTIVATION_CONFIGURATION_VALUE_INVALID")
     if values["E6_ACTIVATION_SCHEMA_VERSION"] != E6_ACTIVATION_CONFIGURATION_SCHEMA_V1:
         _fail("ACTIVATION_CONFIGURATION_SCHEMA_INVALID")
+    try:
+        binding = build_e6_deployment_state_binding_v1(
+            deployment_profile=values["E6_DEPLOYMENT_PROFILE"],
+            release_commit=values["E6_RELEASE_COMMIT"],
+        )
+    except E6DeploymentStateBindingErrorV1:
+        _fail("ACTIVATION_CONFIGURATION_BINDING_INVALID")
+    for key, field_name in _BINDING_KEY_TO_FIELD:
+        expected = getattr(binding, field_name)
+        if hasattr(expected, "value"):
+            expected = expected.value
+        if values[key] != expected:
+            _fail("ACTIVATION_CONFIGURATION_BINDING_INVALID")
+    if (
+        values["E6_PROVIDER_BINDING_VERSION"]
+        != E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION
+        or values["E6_PROVIDER_BINDING_SHA256"]
+        != E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256
+    ):
+        _fail("ACTIVATION_CONFIGURATION_PROVIDER_BINDING_INVALID")
     parsed_booleans = {key: _boolean(values[key]) for key in _BOOLEAN_KEYS}
     if values["E6_AUTOMATIC_RETRY_COUNT"] != "0":
         _fail("ACTIVATION_CONFIGURATION_RETRY_INVALID")
     return E6ActivationConfigurationV1(
         schema_version=values["E6_ACTIVATION_SCHEMA_VERSION"],
-        release_commit=values["E6_RELEASE_COMMIT"],
+        deployment_binding=binding,
         release_tree=values["E6_RELEASE_TREE"],
         trusted_checkpoint_commit=values["E6_TRUSTED_CHECKPOINT_COMMIT"],
-        release_root=values["E6_RELEASE_ROOT"],
-        release_reference_path=values["E6_RELEASE_REFERENCE_PATH"],
-        credential_metadata_path=values["E6_CREDENTIAL_METADATA_PATH"],
-        owner_control_state_path=values["E6_OWNER_CONTROL_STATE_PATH"],
+        provider_binding_version=values["E6_PROVIDER_BINDING_VERSION"],
+        provider_binding_sha256=values["E6_PROVIDER_BINDING_SHA256"],
         service_user=values["E6_SERVICE_USER"],
         service_group=values["E6_SERVICE_GROUP"],
         e6_runtime_enabled=parsed_booleans["E6_RUNTIME_ENABLED"],

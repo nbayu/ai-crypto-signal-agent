@@ -1,1210 +1,769 @@
 from __future__ import annotations
 
-import fcntl
-import hashlib
 import os
 from pathlib import Path
+import grp
+import hashlib
+import json
 import re
-import shutil
 import subprocess
+
+from engine.e5_technical_review_payload_v1 import (
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+)
+from engine.e6_activation_configuration_v1 import (
+    E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+    _EXPECTED_KEYS,
+)
+from engine.e6_deployment_state_binding_v1 import (
+    E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+    build_e6_deployment_state_binding_v1,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "deploy/e6_operational_v1"
 BIN = PACKAGE / "bin"
 SYSTEMD = PACKAGE / "systemd"
-COMMIT = "a" * 40
+COMMIT = "ee332b790e2be56ae309be9af12dabc2427f0ab1"
 TREE = "b" * 40
 TRUSTED = "c" * 40
-STATIC_ACTIVATION_PATH_BINDING = (
-    "E6_ACTIVATION_CONFIGURATION_PATH="
-    "/etc/ai-crypto-signal-agent/e6-activation-v1.env"
-)
-HOST_ACCESS_CONTRACT = {
-    "/etc/ai-crypto-signal-agent": "root:ai-crypto-signal-agent:0750",
-    "/etc/ai-crypto-signal-agent/e6-activation-v1.env": (
-        "ai-crypto-signal-agent:ai-crypto-signal-agent:0640"
-    ),
-    "/etc/ai-crypto-signal-agent/e6-credentials.metadata": (
-        "ai-crypto-signal-agent:ai-crypto-signal-agent:0640"
-    ),
-    "/etc/ai-crypto-signal-agent/phase09r1.env": "root:root:0600",
-    "/etc/ai-crypto-signal-agent/deepseek.env": "root:root:0600",
-    "/var/lib/ai-crypto-signal-agent/e6-installed-release.path": (
-        "root:ai-crypto-signal-agent:0440"
-    ),
-    "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker": "root:root:0400",
-}
-
-TEN_PATHS = {
-    "engine/e6_activation_configuration_v1.py",
-    "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once",
-    "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-health",
-    "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-rollback",
-    "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.service.in",
-    "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer",
-    "deploy/e6_operational_v1/README.md",
-    "deploy/e6_operational_v1/deployment-package-manifest.txt",
-    "tests/test_e6_activation_configuration_v1.py",
-    "tests/test_e6_operational_deployment_package_v1.py",
-}
-PACKAGE_PAYLOAD = {
+PAYLOAD = {
     "README.md": "0644",
     "bin/ai-crypto-signal-agent-e6-health": "0755",
     "bin/ai-crypto-signal-agent-e6-rollback": "0755",
     "bin/ai-crypto-signal-agent-e6-run-once": "0755",
     "deployment-package-manifest.txt": "0644",
+    "systemd/ai-crypto-signal-agent-e6-production.service.in": "0644",
+    "systemd/ai-crypto-signal-agent-e6-production.timer": "0644",
     "systemd/ai-crypto-signal-agent-e6.service.in": "0644",
     "systemd/ai-crypto-signal-agent-e6.timer": "0644",
 }
-CONFIGURATION_KEYS = (
-    "E6_ACTIVATION_SCHEMA_VERSION",
-    "E6_RELEASE_COMMIT",
-    "E6_RELEASE_TREE",
-    "E6_TRUSTED_CHECKPOINT_COMMIT",
-    "E6_RELEASE_ROOT",
-    "E6_RELEASE_REFERENCE_PATH",
-    "E6_CREDENTIAL_METADATA_PATH",
-    "E6_OWNER_CONTROL_STATE_PATH",
-    "E6_SERVICE_USER",
-    "E6_SERVICE_GROUP",
-    "E6_RUNTIME_ENABLED",
-    "E6_PROVIDER_ENABLED",
-    "E6_ACTIVATION_GATE",
-    "E6_WORKLOAD_GATE",
-    "E6_CREDENTIAL_GATE",
-    "E6_NETWORK_GATE",
-    "E6_PUBLICATION_GATE",
-    "E6_TELEGRAM_PUBLICATION_GATE",
-    "E6_AUTOMATIC_RETRY_COUNT",
-    "E6_PROVIDER_SUBSTITUTION_ENABLED",
-    "E6_PROMPT_REPAIR_ENABLED",
-    "E6_STALE_REVIEW_REUSE_ENABLED",
-    "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED",
-)
-ROOT_SAFE_IMMUTABILITY_HELPER = """e6_path_has_no_write_mode_bits() {
-    local path="$1"
-    local mode
-
-    mode="$(stat -Lc '%a' -- "$path" 2>/dev/null)" || return 1
-    [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
-    (( (8#$mode & 8#222) == 0 ))
-}
-"""
 
 
 def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _directives(text: str, key: str) -> list[str]:
-    prefix = f"{key}="
-    return [line[len(prefix) :] for line in text.splitlines() if line.startswith(prefix)]
+def _directives(text: str, name: str) -> list[str]:
+    return [line.split("=", 1)[1] for line in text.splitlines() if line.startswith(f"{name}=")]
 
 
-def _metadata(path: Path) -> tuple[str, str, str]:
-    return path.owner(), path.group(), f"{path.stat().st_mode & 0o777:04o}"
-
-
-def _render(value: str, *, release: Path, commit: str, tree: str, trusted: str) -> str:
-    return (
-        value.replace("@@RELEASE_ROOT@@", str(release))
-        .replace("@@E6_SOURCE_COMMIT@@", commit)
-        .replace("@@E6_SOURCE_TREE@@", tree)
-        .replace("@@TRUSTED_CHECKPOINT_COMMIT@@", trusted)
+def _render_candidate(text: str) -> str:
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile="CANDIDATE_CANARY", release_commit=COMMIT
     )
+    replacements = {
+        "@@RELEASE_ROOT@@": binding.release_root,
+        "@@E6_SOURCE_COMMIT@@": COMMIT,
+        "@@E6_SOURCE_TREE@@": TREE,
+        "@@TRUSTED_CHECKPOINT_COMMIT@@": TRUSTED,
+        "@@E6_STATE_ROOT@@": binding.state_root,
+        "@@E6_OPERATIONAL_ARTIFACT_ROOT@@": binding.operational_artifact_root,
+        "@@E6_RUNTIME_ROOT@@": binding.runtime_root,
+        "@@E6_CACHE_ROOT@@": binding.cache_root,
+        "@@E6_ACCEPTED_RELEASE_MARKER_PATH@@": binding.accepted_marker,
+        "@@E6_ACTIVATION_CONFIGURATION_PATH@@": binding.activation_configuration_path,
+        "@@E6_CREDENTIAL_METADATA_PATH@@": binding.credential_metadata_path,
+        "@@E6_ACTIVE_SIGNAL_LEDGER_PATH@@": binding.active_ledger_path,
+        "@@E6_OWNER_CONTROL_STATE_PATH@@": binding.owner_state_path,
+    }
+    for placeholder, value in replacements.items():
+        text = text.replace(placeholder, value)
+    return text
 
 
-def _refresh_hashes(release: Path) -> None:
-    manifest = release / ".e6-sha256-manifest"
-    manifest.unlink(missing_ok=True)
-    lines = []
-    for path in sorted(release.rglob("*")):
-        if path.is_file() and not path.is_symlink() and path != manifest:
-            lines.append(
-                f"{hashlib.sha256(path.read_bytes()).hexdigest()}  "
-                f"{path.relative_to(release).as_posix()}\n"
-            )
-    manifest.write_text("".join(lines), encoding="ascii")
+def _fixture_identity() -> tuple[str, str]:
+    import pwd
+
+    return pwd.getpwuid(os.getuid()).pw_name, grp.getgrgid(os.getgid()).gr_name
 
 
-def _make_release(
-    tmp_path: Path,
-    *,
-    commit: str = COMMIT,
-    tree: str = TREE,
-    trusted: str = TRUSTED,
-    replacements: dict[str, str] | None = None,
-) -> Path:
-    release = tmp_path / commit
-    shutil.copytree(PACKAGE, release / "deploy/e6_operational_v1")
-    for path in (release / "deploy/e6_operational_v1").rglob("*"):
-        if path.is_file():
-            rendered = _render(
-                path.read_text(encoding="utf-8"),
-                release=release,
-                commit=commit,
-                tree=tree,
-                trusted=trusted,
-            )
-            if replacements:
-                for original, replacement in replacements.items():
-                    rendered = rendered.replace(original, replacement)
-            path.write_text(rendered, encoding="utf-8")
-    (release / ".e6-release-manifest").write_text(
-        f"SOURCE_COMMIT={commit}\n"
-        f"SOURCE_TREE={tree}\n"
-        f"TRUSTED_CHECKPOINT_COMMIT={trusted}\n",
-        encoding="ascii",
-    )
-    (release / "TRUSTED_E6_CHECKPOINT_COMMIT").write_text(
-        trusted + "\n", encoding="ascii"
-    )
-    rendered = release / ".e6-rendered"
-    rendered.mkdir()
-    rendered.joinpath("ai-crypto-signal-agent-e6.service").write_bytes(
-        release.joinpath(
-            "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.service.in"
-        ).read_bytes()
-    )
-    _refresh_hashes(release)
-    release.chmod(0o555)
-    return release
+def _write(path: Path, text: str, mode: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    path.chmod(mode)
 
 
-def _configuration_text(
-    *,
-    release: Path,
-    release_ref: Path,
-    credential_metadata: Path,
-    owner_state: Path,
-    user: str,
-    group: str,
-    authorized: bool,
-    overrides: dict[str, str] | None = None,
-) -> str:
-    decision = "true" if authorized else "false"
+def _fixture_authority(tmp_path: Path) -> dict[str, str]:
+    identity = f"ai-crypto-signal-agent-e6-candidate-{COMMIT}"
+    state = tmp_path / "state" / identity
+    owner = state / "owner-blueprint"
+    runtime = tmp_path / "run" / identity
+    cache = tmp_path / "cache" / identity
+    control = tmp_path / "control" / COMMIT
+    configuration = tmp_path / "config" / COMMIT
+    return {
+        "service_unit": f"{identity}.service",
+        "timer_unit": f"{identity}.timer",
+        "state_root": str(state),
+        "owner_state_root": str(owner),
+        "ledger_root": str(owner),
+        "active_ledger_path": str(owner / "active-signal-ledger-v2.json"),
+        "owner_state_path": str(
+            owner / "telegram-owner-control-state-v1.json"
+        ),
+        "publication_root": str(state / "publication-evidence"),
+        "operational_artifact_root": str(state / "operational-artifacts"),
+        "runtime_root": str(runtime),
+        "runtime_lock": str(runtime / "e6-operational.lock"),
+        "cache_root": str(cache),
+        "control_root": str(control),
+        "install_pointer": str(control / "installed-release.path"),
+        "rollback_pointer": str(control / "rollback-release.path"),
+        "accepted_marker": str(control / "accepted-release.marker"),
+        "kill_switch": str(control / "kill-switch.active"),
+        "configuration_root": str(configuration),
+        "activation_configuration_path": str(configuration / "activation-v1.env"),
+        "credential_metadata_path": str(configuration / "credentials.metadata"),
+    }
+
+
+def _activation_mapping(
+    authority: dict[str, str], *, release_root: Path
+) -> dict[str, str]:
     values = {
-        "E6_ACTIVATION_SCHEMA_VERSION": "e6-activation-configuration-v1",
-        "E6_RELEASE_COMMIT": release.name,
+        "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+        "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+        "E6_DEPLOYMENT_PROFILE": "CANDIDATE_CANARY",
+        "E6_RELEASE_COMMIT": COMMIT,
         "E6_RELEASE_TREE": TREE,
         "E6_TRUSTED_CHECKPOINT_COMMIT": TRUSTED,
-        "E6_RELEASE_ROOT": str(release),
-        "E6_RELEASE_REFERENCE_PATH": str(release_ref),
-        "E6_CREDENTIAL_METADATA_PATH": str(credential_metadata),
-        "E6_OWNER_CONTROL_STATE_PATH": str(owner_state),
-        "E6_SERVICE_USER": user,
-        "E6_SERVICE_GROUP": group,
-        "E6_RUNTIME_ENABLED": decision,
-        "E6_PROVIDER_ENABLED": decision,
-        "E6_ACTIVATION_GATE": decision,
-        "E6_WORKLOAD_GATE": decision,
-        "E6_CREDENTIAL_GATE": decision,
-        "E6_NETWORK_GATE": decision,
-        "E6_PUBLICATION_GATE": decision,
-        "E6_TELEGRAM_PUBLICATION_GATE": decision,
+        "E6_RELEASE_ROOT": str(release_root),
+        "E6_SERVICE_UNIT": authority["service_unit"],
+        "E6_TIMER_UNIT": authority["timer_unit"],
+        "E6_STATE_ROOT": authority["state_root"],
+        "E6_OWNER_STATE_ROOT": authority["owner_state_root"],
+        "E6_LEDGER_ROOT": authority["ledger_root"],
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH": authority["active_ledger_path"],
+        "E6_OWNER_CONTROL_STATE_PATH": authority["owner_state_path"],
+        "E6_PUBLICATION_ROOT": authority["publication_root"],
+        "E6_OPERATIONAL_ARTIFACT_ROOT": authority["operational_artifact_root"],
+        "E6_RUNTIME_ROOT": authority["runtime_root"],
+        "E6_RUNTIME_LOCK_PATH": authority["runtime_lock"],
+        "E6_CACHE_ROOT": authority["cache_root"],
+        "E6_LOG_POLICY": "NONE_JOURNALD_ONLY",
+        "E6_CONTROL_ROOT": authority["control_root"],
+        "E6_RELEASE_REFERENCE_PATH": authority["install_pointer"],
+        "E6_ROLLBACK_REFERENCE_PATH": authority["rollback_pointer"],
+        "E6_ACCEPTED_RELEASE_MARKER_PATH": authority["accepted_marker"],
+        "E6_KILL_SWITCH_PATH": authority["kill_switch"],
+        "E6_CONFIGURATION_ROOT": authority["configuration_root"],
+        "E6_CREDENTIAL_METADATA_PATH": authority["credential_metadata_path"],
+        "E6_ACTIVATION_CONFIGURATION_PATH": authority[
+            "activation_configuration_path"
+        ],
+        "E6_SERVICE_USER": _fixture_identity()[0],
+        "E6_SERVICE_GROUP": _fixture_identity()[1],
+        "E6_PROVIDER_BINDING_VERSION": E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+        "E6_PROVIDER_BINDING_SHA256": E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+        "E6_RUNTIME_ENABLED": "true",
+        "E6_PROVIDER_ENABLED": "true",
+        "E6_ACTIVATION_GATE": "true",
+        "E6_WORKLOAD_GATE": "true",
+        "E6_CREDENTIAL_GATE": "true",
+        "E6_NETWORK_GATE": "true",
+        "E6_PUBLICATION_GATE": "true",
+        "E6_TELEGRAM_PUBLICATION_GATE": "true",
         "E6_AUTOMATIC_RETRY_COUNT": "0",
         "E6_PROVIDER_SUBSTITUTION_ENABLED": "false",
         "E6_PROMPT_REPAIR_ENABLED": "false",
         "E6_STALE_REVIEW_REUSE_ENABLED": "false",
         "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED": "false",
     }
-    if overrides:
-        values.update(overrides)
-    return "".join(f"{key}={values[key]}\n" for key in CONFIGURATION_KEYS)
+    assert tuple(values) == _EXPECTED_KEYS
+    return values
 
 
-def test_exact_repository_and_package_inventory_manifest_and_modes() -> None:
-    assert all((ROOT / path).is_file() for path in TEN_PATHS)
+def _configuration_text(values: dict[str, str]) -> str:
+    return "".join(f"{key}={values[key]}\n" for key in _EXPECTED_KEYS)
+
+
+def _release_manifest(release: Path) -> None:
+    _write(
+        release / ".e6-release-manifest",
+        f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\n"
+        f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
+        0o444,
+    )
+    included = [
+        path
+        for path in sorted(release.rglob("*"))
+        if path.is_file() and path.name != ".e6-sha256-manifest"
+    ]
+    lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  "
+        f"{path.relative_to(release).as_posix()}\n"
+        for path in included
+    ]
+    _write(release / ".e6-sha256-manifest", "".join(lines), 0o444)
+    release.chmod(0o555)
+
+
+def _replace_fixture_authority(
+    source: str, *, authority: dict[str, str], tmp_path: Path
+) -> str:
+    user, group = _fixture_identity()
+    replacements = {
+        '@@TRUSTED_CHECKPOINT_COMMIT@@': TRUSTED,
+        'readonly SERVICE_USER="ai-crypto-signal-agent"': f'readonly SERVICE_USER="{user}"',
+        'readonly SERVICE_GROUP="ai-crypto-signal-agent"': f'readonly SERVICE_GROUP="{group}"',
+        'readonly ROOT_USER="root"': f'readonly ROOT_USER="{user}"',
+        'readonly ROOT_GROUP="root"': f'readonly ROOT_GROUP="{group}"',
+        'state_root="/var/lib/$identity"': f'state_root="{tmp_path}/state/$identity"',
+        'runtime_root="/run/$identity"': f'runtime_root="{tmp_path}/run/$identity"',
+        'cache_root="/var/cache/$identity"': f'cache_root="{tmp_path}/cache/$identity"',
+        'control_root="/var/lib/ai-crypto-signal-agent-e6-installations/$source_commit"': f'control_root="{tmp_path}/control/$source_commit"',
+        'control_root="/var/lib/ai-crypto-signal-agent-e6-installations/$release_commit"': f'control_root="{tmp_path}/control/$release_commit"',
+        'configuration_root="/etc/ai-crypto-signal-agent/e6-candidates/$source_commit"': f'configuration_root="{tmp_path}/config/$source_commit"',
+        'configuration_root="/etc/ai-crypto-signal-agent/e6-candidates/$release_commit"': f'configuration_root="{tmp_path}/config/$release_commit"',
+        '"root:root:400"': f'"{user}:{group}:400"',
+    }
+    for old, new in replacements.items():
+        source = source.replace(old, new)
+    return source
+
+
+def test_exact_package_inventory_manifest_and_modes() -> None:
     actual = {
-        path.relative_to(PACKAGE).as_posix()
+        path.relative_to(PACKAGE).as_posix(): f"0{path.stat().st_mode & 0o777:o}"
         for path in PACKAGE.rglob("*")
         if path.is_file()
     }
-    assert actual == set(PACKAGE_PAYLOAD)
+    assert actual == PAYLOAD
     manifest_entries = {}
     for line in _text(PACKAGE / "deployment-package-manifest.txt").splitlines():
         if line.startswith("PAYLOAD="):
             path, kind, mode = line.removeprefix("PAYLOAD=").split("|")
             assert kind == "regular"
             manifest_entries[path] = mode
-    assert manifest_entries == PACKAGE_PAYLOAD
+    assert manifest_entries == PAYLOAD
     assert list(manifest_entries) == sorted(manifest_entries)
-    for relative, mode in PACKAGE_PAYLOAD.items():
-        assert f"{(PACKAGE / relative).stat().st_mode & 0o777:04o}" == mode
 
 
-def test_all_new_files_are_lf_only_final_lf_and_have_no_secret_material() -> None:
-    forbidden_material = (
-        b"BEGIN " + b"PRIVATE KEY",
-        b"s" + b"k-",
-        b"x" + b"oxb-",
-        b"fixture-private-" + b"provider-value",
-    )
-    for relative in TEN_PATHS:
-        data = (ROOT / relative).read_bytes()
-        assert b"\r" not in data
+def test_package_files_are_lf_only_final_lf_and_nonsecret() -> None:
+    for relative in PAYLOAD:
+        data = (PACKAGE / relative).read_bytes()
         assert data.endswith(b"\n")
-        assert not any(value in data for value in forbidden_material)
-
-
-def test_documented_placeholders_are_exact_and_complete() -> None:
-    documented = {
-        "@@RELEASE_ROOT@@",
-        "@@E6_SOURCE_COMMIT@@",
-        "@@E6_SOURCE_TREE@@",
-        "@@TRUSTED_CHECKPOINT_COMMIT@@",
-    }
-    found = set()
-    for path in PACKAGE.rglob("*"):
-        if path.is_file():
-            found.update(re.findall(r"@@[A-Z0-9_]+@@", _text(path)))
-    assert found == documented
-    readme = _text(PACKAGE / "README.md")
-    assert all(value in readme for value in documented)
-
-
-def test_shell_syntax_and_static_no_retry_fallback_or_host_mutation_contract() -> None:
-    for path in BIN.iterdir():
-        subprocess.run(["bash", "-n", str(path)], check=True)
-        text = _text(path)
-        assert re.search(
-            r"\bsystemctl\s+(start|stop|restart|reload|enable|disable|preset|daemon-reload)\b",
-            text,
-        ) is None
-        assert not any(value in text for value in ("curl ", "wget ", "ccxt", "create_order"))
-    run_once = _text(BIN / "ai-crypto-signal-agent-e6-run-once")
-    assert run_once.count("engine.run_production_signal_v1") == 1
-    assert "run_master_engine_v4" not in run_once
-    assert re.search(r"^\s*(while|until)\b", run_once, re.MULTILINE) is None
-    assert "sleep " not in run_once
-    assert "e6-rollback" not in run_once
-    assert run_once.count("/usr/bin/timeout") == 1
-    health = _text(BIN / "ai-crypto-signal-agent-e6-health")
-    assert re.search(r"\b(open|touch|mkdir|mktemp|install|chmod|chown|mv|unlink)\b", health) is None
-
-
-def test_operational_scripts_use_root_safe_mode_bit_immutability_contract() -> None:
-    expected_occurrences = {
-        "ai-crypto-signal-agent-e6-health": 3,
-        "ai-crypto-signal-agent-e6-run-once": 2,
-        "ai-crypto-signal-agent-e6-rollback": 2,
-    }
-    for filename, occurrence_count in expected_occurrences.items():
-        text = _text(BIN / filename)
-        assert ROOT_SAFE_IMMUTABILITY_HELPER in text
-        assert text.count("e6_path_has_no_write_mode_bits") == occurrence_count
-        assert "! -w" not in text
-        assert "stat -Lc '%a' -- \"$path\"" in text
-        assert '[[ "$mode" =~ ^[0-7]{3,4}$ ]]' in text
-        assert "(( (8#$mode & 8#222) == 0 ))" in text
-
-
-def test_service_and_nonpersistent_timer_contracts_are_exact(tmp_path: Path) -> None:
-    service = _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
-    required_environment_files = [
-        "/etc/ai-crypto-signal-agent/e6-activation-v1.env",
-        "/etc/ai-crypto-signal-agent/phase09r1.env",
-        "/etc/ai-crypto-signal-agent/deepseek.env",
-    ]
-    assert _directives(service, "Type") == ["oneshot"]
-    assert _directives(service, "Restart") == ["no"]
-    assert _directives(service, "TimeoutStartSec") == ["20min"]
-    assert _directives(service, "User") == ["ai-crypto-signal-agent"]
-    assert _directives(service, "Group") == ["ai-crypto-signal-agent"]
-    assert _directives(service, "WorkingDirectory") == [
-        "/var/lib/ai-crypto-signal-agent/phase09r1"
-    ]
-    assert _directives(service, "EnvironmentFile") == required_environment_files
-    assert not any(value.startswith("-") for value in required_environment_files)
-    assert _directives(service, "Environment").count(
-        STATIC_ACTIVATION_PATH_BINDING
-    ) == 1
-    assert _directives(service, "LoadCredential") == [
-        "accepted_e6_release_commit:"
-        "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker"
-    ]
-    assert _directives(service, "ExecStart") == [
-        "@@RELEASE_ROOT@@/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
-    ]
-    release = _make_release(tmp_path / "rendered-service")
-    rendered_service = _text(
-        release / ".e6-rendered/ai-crypto-signal-agent-e6.service"
-    )
-    assert _directives(rendered_service, "EnvironmentFile") == required_environment_files
-    assert _directives(rendered_service, "Environment").count(
-        STATIC_ACTIVATION_PATH_BINDING
-    ) == 1
-    assert _directives(rendered_service, "LoadCredential") == _directives(
-        service, "LoadCredential"
-    )
-    assert not any(
-        value.startswith("-")
-        for value in _directives(rendered_service, "EnvironmentFile")
-    )
-    for forbidden in (
-        "/etc/ai-crypto-signal-agent/owner-control.env",
+        assert b"\r" not in data
+    combined = "\n".join(_text(PACKAGE / relative) for relative in PAYLOAD)
+    for marker in (
         "DEEPSEEK_API_KEY=",
         "ANTHROPIC_API_KEY=",
         "TELEGRAM_BOT_TOKEN=",
-        "TELEGRAM_DESTINATION_ID=",
+        "Authorization: Bearer",
+        "BEGIN OPENSSH PRIVATE KEY",
+        "46.250.228.53",
+        COMMIT,
     ):
-        assert forbidden not in rendered_service
-    assert "run_master_engine_v4" not in service
-    assert _directives(service, "User") == ["ai-crypto-signal-agent"]
-    assert _directives(service, "Group") == ["ai-crypto-signal-agent"]
-    assert _directives(service, "Restart") == ["no"]
-    assert "[Install]" not in service
-    timer_candidates = (
-        SYSTEMD / "ai-crypto-signal-agent-e6.timer",
-        SYSTEMD / "ai-crypto-signal-agent-e6.timer.in",
+        assert marker not in combined
+
+
+def test_shell_syntax_and_zero_retry_no_remote_command_contract() -> None:
+    for name in (
+        "ai-crypto-signal-agent-e6-run-once",
+        "ai-crypto-signal-agent-e6-health",
+        "ai-crypto-signal-agent-e6-rollback",
+    ):
+        result = subprocess.run(
+            ["bash", "-n", str(BIN / name)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+    combined = "\n".join(_text(path) for path in BIN.iterdir())
+    assert "AUTOMATIC_RETRY_COUNT=0" in combined
+    assert not re.search(r"\b(ssh|scp|sftp|rsync|curl|wget|apt|pip|npm)\b", combined)
+    assert not re.search(r"systemctl\s+(start|restart|enable|disable|preset)", combined)
+
+
+def test_candidate_service_rendering_is_exact_and_has_no_shared_writable_path() -> None:
+    template = _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
+    rendered = _render_candidate(template)
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile="CANDIDATE_CANARY", release_commit=COMMIT
     )
-    resolved = [path for path in timer_candidates if path.is_file()]
-    assert resolved == [SYSTEMD / "ai-crypto-signal-agent-e6.timer"]
-    timer = _text(resolved[0])
-    assert _directives(timer, "Unit") == ["ai-crypto-signal-agent-e6.service"]
+    assert "@@" not in rendered
+    assert _directives(rendered, "WorkingDirectory") == [binding.state_root]
+    assert _directives(rendered, "RuntimeDirectory") == [
+        f"ai-crypto-signal-agent-e6-candidate-{COMMIT}"
+    ]
+    assert _directives(rendered, "CacheDirectory") == [
+        f"ai-crypto-signal-agent-e6-candidate-{COMMIT}"
+    ]
+    assert _directives(rendered, "ReadWritePaths") == [
+        " ".join(
+            (
+                binding.state_root,
+                binding.operational_artifact_root,
+                binding.runtime_root,
+                binding.cache_root,
+            )
+        )
+    ]
+    assert _directives(rendered, "EnvironmentFile") == [
+        binding.activation_configuration_path,
+        "/etc/ai-crypto-signal-agent/phase09r1.env",
+        "/etc/ai-crypto-signal-agent/deepseek.env",
+    ]
+    assert _directives(rendered, "ExecStart") == [
+        f"{binding.release_root}/deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
+    ]
+    for forbidden in (
+        "/var/lib/ai-crypto-signal-agent/phase09r1",
+        "/var/lib/ai-crypto-signal-agent/operational-artifacts",
+        "/run/ai-crypto-signal-agent ",
+    ):
+        assert forbidden not in _directives(rendered, "ReadWritePaths")[0]
+    assert "[Install]" not in template
+    for relation in ("Requires=", "PartOf=", "Alias=", "Also="):
+        assert relation not in template
+
+
+def test_candidate_timer_targets_only_matching_versioned_service() -> None:
+    template = _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
+    rendered = _render_candidate(template)
+    assert _directives(rendered, "Unit") == [
+        f"ai-crypto-signal-agent-e6-candidate-{COMMIT}.service"
+    ]
+    assert _directives(rendered, "OnCalendar") == ["*-*-* *:*:00 UTC"]
+    assert _directives(rendered, "AccuracySec") == ["1s"]
+    assert _directives(rendered, "Persistent") == ["false"]
+    assert "Unit=ai-crypto-signal-agent-e6.service" not in rendered
+    for key in ("OnActiveSec", "OnUnitActiveSec", "RandomizedDelaySec"):
+        assert _directives(rendered, key) == []
+
+
+def test_stable_production_templates_rebind_state_without_candidate_namespace() -> None:
+    service = _text(
+        SYSTEMD / "ai-crypto-signal-agent-e6-production.service.in"
+    )
+    timer = _text(SYSTEMD / "ai-crypto-signal-agent-e6-production.timer")
+    assert _directives(service, "WorkingDirectory") == [
+        "/var/lib/ai-crypto-signal-agent/phase09r1"
+    ]
+    assert _directives(service, "RuntimeDirectory") == [
+        "ai-crypto-signal-agent-e6-production"
+    ]
+    assert _directives(service, "CacheDirectory") == [
+        "ai-crypto-signal-agent-e6-production"
+    ]
+    assert "candidate-" not in service.lower()
+    assert "[Install]" not in service
+    assert _directives(timer, "Unit") == [
+        "ai-crypto-signal-agent-e6-production.service"
+    ]
     assert _directives(timer, "OnCalendar") == ["*-*-* *:*:00 UTC"]
     assert _directives(timer, "AccuracySec") == ["1s"]
     assert _directives(timer, "Persistent") == ["false"]
-    assert not any(
-        _directives(timer, key)
-        for key in (
-            "OnActiveSec",
-            "OnBootSec",
-            "OnStartupSec",
-            "OnUnitActiveSec",
-            "OnUnitInactiveSec",
-            "RandomizedDelaySec",
-        )
-    )
-    assert "30min" not in timer
-    assert not any(mode in timer for mode in ("SWING", "INTRADAY", "SCALP"))
+    assert "ai-crypto-signal-agent-e6.service" not in service + timer
 
 
-def test_host_access_contract_is_exact_nonsecret_and_documented() -> None:
-    assert len(CONFIGURATION_KEYS) == 23
-    assert "E6_ACTIVATION_CONFIGURATION_PATH" not in CONFIGURATION_KEYS
-    readme = _text(PACKAGE / "README.md")
-    for path, metadata in HOST_ACCESS_CONTRACT.items():
-        assert path in readme
-        assert metadata in readme
-    assert STATIC_ACTIVATION_PATH_BINDING in readme
-    assert "schema remains exactly 23 keys" in readme
-    assert "direct service-user file readability" in readme
-    assert "${CREDENTIALS_DIRECTORY}/accepted_e6_release_commit" in readme
-    assert "no second canary, cutover, or activation" in readme
-
-
-def _make_run_once_fixture(
-    tmp_path: Path, *, authorized: bool = True, overrides: dict[str, str] | None = None
-) -> tuple[Path, dict[str, str], dict[str, Path]]:
-    runtime = tmp_path / "runtime"
-    credentials = tmp_path / "credentials"
-    metadata = tmp_path / "metadata"
-    for path in (runtime, credentials, metadata):
-        path.mkdir(parents=True, exist_ok=True)
-    runtime.chmod(0o750)
-    invocation = tmp_path / "invocation"
-    fake_python = tmp_path / "fake-python"
-    fake_python.write_text(
-        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$E6_FAKE_INVOCATION\"\n",
-        encoding="utf-8",
-    )
-    fake_python.chmod(0o755)
-    user = tmp_path.owner()
-    group = tmp_path.group()
-    lock = runtime / "e6-operational.lock"
-    kill = tmp_path / "kill-switch.active"
-    replacements = {
-        'readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"': f'readonly LOCK_PATH="{lock}"',
-        'readonly KILL_SWITCH_PATH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"': f'readonly KILL_SWITCH_PATH="{kill}"',
-        'readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"': f'readonly PYTHON_BIN="{fake_python}"',
-        'readonly SERVICE_USER="ai-crypto-signal-agent"': f'readonly SERVICE_USER="{user}"',
-        'readonly SERVICE_GROUP="ai-crypto-signal-agent"': f'readonly SERVICE_GROUP="{group}"',
-    }
-    release = _make_release(tmp_path / "release-parent", replacements=replacements)
-    release_ref = metadata / "installed-release.path"
-    credential_metadata = metadata / "credentials.metadata"
-    owner_state = metadata / "owner-state.json"
-    configuration = metadata / "activation.env"
-    release_ref.write_text(f"{release}\n", encoding="ascii")
-    release_ref.chmod(0o440)
-    credential_metadata.write_text("metadata-only\n", encoding="ascii")
-    owner_state.write_text("{}\n", encoding="ascii")
-    credential_metadata.chmod(0o640)
-    owner_state.chmod(0o600)
-    configuration.write_text(
-        _configuration_text(
-            release=release,
-            release_ref=release_ref,
-            credential_metadata=credential_metadata,
-            owner_state=owner_state,
-            user=user,
-            group=group,
-            authorized=authorized,
-            overrides=overrides,
-        ),
-        encoding="ascii",
-    )
-    configuration.chmod(0o640)
-    credentials.joinpath("accepted_e6_release_commit").write_text(
-        release.name + "\n", encoding="ascii"
-    )
-    environment = {
-        **os.environ,
-        "CREDENTIALS_DIRECTORY": str(credentials),
-        "E6_ACTIVATION_CONFIGURATION_PATH": str(configuration),
-        "E6_FAKE_INVOCATION": str(invocation),
-    }
-    paths = {"invocation": invocation, "lock": lock, "kill": kill, "configuration": configuration}
-    wrapper = release / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
-    return wrapper, environment, paths
-
-
-def test_run_once_requires_bound_activation_path_and_credential_copy(
-    tmp_path: Path,
-) -> None:
-    wrapper, environment, paths = _make_run_once_fixture(tmp_path, authorized=True)
-    for configured_path in (None, ""):
-        rejected_environment = environment.copy()
-        if configured_path is None:
-            rejected_environment.pop("E6_ACTIVATION_CONFIGURATION_PATH")
-        else:
-            rejected_environment["E6_ACTIVATION_CONFIGURATION_PATH"] = configured_path
-        rejected = subprocess.run(
-            [str(wrapper)],
-            env=rejected_environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rejected.returncode == 78
-        assert "E6_LAUNCH_BLOCKED=ACTIVATION_CONFIGURATION_FILE" in rejected.stderr
-        assert not paths["invocation"].exists()
-
-    source = _text(BIN / "ai-crypto-signal-agent-e6-run-once")
-    assert "/etc/ai-crypto-signal-agent/phase09r1.env" not in source
-    assert "/etc/ai-crypto-signal-agent/deepseek.env" not in source
-    assert "/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker" not in source
-    assert '${CREDENTIALS_DIRECTORY:-}' in source
-    assert 'accepted_e6_release_commit' in source
-
-
-def test_run_once_defaults_and_partial_authorization_block_before_invocation(tmp_path: Path) -> None:
-    wrapper, environment, paths = _make_run_once_fixture(tmp_path / "default", authorized=False)
-    denied = subprocess.run([str(wrapper)], env=environment, text=True, capture_output=True, check=False)
-    assert denied.returncode == 78
-    assert "E6_RUNTIME_DISABLED" in denied.stderr
-    assert not paths["invocation"].exists()
-    assert not paths["lock"].exists()
-
-    wrapper, environment, paths = _make_run_once_fixture(
-        tmp_path / "partial",
-        authorized=True,
-        overrides={"E6_TELEGRAM_PUBLICATION_GATE": "false"},
-    )
-    partial = subprocess.run([str(wrapper)], env=environment, text=True, capture_output=True, check=False)
-    assert partial.returncode == 78
-    assert "TELEGRAM_PUBLICATION_GATE_CLOSED" in partial.stderr
-    assert not paths["invocation"].exists()
-
-
-def test_run_once_authorized_fake_invokes_e6_cli_once_and_removes_lock(tmp_path: Path) -> None:
-    wrapper, environment, paths = _make_run_once_fixture(tmp_path, authorized=True)
-    result = subprocess.run([str(wrapper)], env=environment, text=True, capture_output=True, check=False)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert paths["invocation"].read_text(encoding="utf-8").splitlines() == [
-        "-m engine.run_production_signal_v1"
-    ]
-    assert not paths["lock"].exists()
-
-
-def test_run_once_release_write_mode_bits_fail_closed_before_invocation(tmp_path: Path) -> None:
-    for mode in (0o755, 0o575, 0o557):
-        wrapper, environment, paths = _make_run_once_fixture(
-            tmp_path / f"mode-{mode:o}", authorized=True
-        )
-        wrapper.parents[3].chmod(mode)
-        rejected = subprocess.run(
-            [str(wrapper)], env=environment, text=True, capture_output=True, check=False
-        )
-        assert rejected.returncode == 78, f"{mode:o}: {rejected.stdout}{rejected.stderr}"
-        assert "RELEASE_NOT_IMMUTABLE" in rejected.stderr
-        assert not paths["invocation"].exists()
-        assert not paths["lock"].exists()
-
-
-def test_run_once_kill_switch_and_overlap_lock_block_without_retry(tmp_path: Path) -> None:
-    wrapper, environment, paths = _make_run_once_fixture(tmp_path / "kill", authorized=True)
-    paths["kill"].write_text("active\n", encoding="ascii")
-    killed = subprocess.run([str(wrapper)], env=environment, text=True, capture_output=True, check=False)
-    assert killed.returncode == 75
-    assert "KILL_SWITCH_ACTIVE" in killed.stderr
-    assert not paths["invocation"].exists()
-
-    wrapper, environment, paths = _make_run_once_fixture(tmp_path / "lock", authorized=True)
-    with paths["lock"].open("w", encoding="ascii") as held:
-        paths["lock"].chmod(0o600)
-        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        blocked = subprocess.run([str(wrapper)], env=environment, text=True, capture_output=True, check=False)
-    assert blocked.returncode == 75
-    assert "OVERLAP_LOCK_HELD" in blocked.stderr
-    assert not paths["invocation"].exists()
-
-
-def _make_health_fixture(
-    tmp_path: Path, *, authorized: bool = False
-) -> tuple[Path, dict[str, str], dict[str, Path]]:
-    runtime = tmp_path / "runtime"
-    units = tmp_path / "units"
-    metadata = tmp_path / "metadata"
-    fake_bin = tmp_path / "fake-bin"
-    for path in (runtime, units, metadata, fake_bin):
-        path.mkdir(parents=True)
-    metadata.chmod(0o750)
-    user = tmp_path.owner()
-    group = tmp_path.group()
-    release_ref = runtime / "installed-release.path"
-    marker = runtime / "accepted-release.marker"
-    kill = runtime / "kill-switch.active"
-    lock = runtime / "operational.lock"
-    service = units / "ai-crypto-signal-agent-e6.service"
-    timer = units / "ai-crypto-signal-agent-e6.timer"
-    configuration = metadata / "activation.env"
-    credential_metadata = metadata / "credentials.metadata"
-    telegram_environment = metadata / "phase09r1.env"
-    provider_environment = metadata / "deepseek.env"
-    owner_state = metadata / "owner-state.json"
-    rollback_ref = runtime / "rollback-release.path"
-    replacements = {
-        'readonly RELEASE_REF="/var/lib/ai-crypto-signal-agent/e6-installed-release.path"': f'readonly RELEASE_REF="{release_ref}"',
-        'readonly RUNTIME_MARKER="/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker"': f'readonly RUNTIME_MARKER="{marker}"',
-        'readonly KILL_SWITCH="/var/lib/ai-crypto-signal-agent/e6-kill-switch.active"': f'readonly KILL_SWITCH="{kill}"',
-        'readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"': f'readonly LOCK_PATH="{lock}"',
-        'readonly SERVICE_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.service"': f'readonly SERVICE_UNIT="{service}"',
-        'readonly TIMER_UNIT="/etc/systemd/system/ai-crypto-signal-agent-e6.timer"': f'readonly TIMER_UNIT="{timer}"',
-        'readonly CONFIGURATION_DIRECTORY="/etc/ai-crypto-signal-agent"': f'readonly CONFIGURATION_DIRECTORY="{metadata}"',
-        'readonly ACTIVATION_CONFIGURATION="/etc/ai-crypto-signal-agent/e6-activation-v1.env"': f'readonly ACTIVATION_CONFIGURATION="{configuration}"',
-        'readonly CREDENTIAL_METADATA="/etc/ai-crypto-signal-agent/e6-credentials.metadata"': f'readonly CREDENTIAL_METADATA="{credential_metadata}"',
-        'readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"': f'readonly TELEGRAM_ENVIRONMENT="{telegram_environment}"',
-        'readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"': f'readonly PROVIDER_ENVIRONMENT="{provider_environment}"',
-        'readonly OWNER_CONTROL_STATE="/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json"': f'readonly OWNER_CONTROL_STATE="{owner_state}"',
-        'readonly ROLLBACK_REF="/var/lib/ai-crypto-signal-agent/e6-rollback-release.path"': f'readonly ROLLBACK_REF="{rollback_ref}"',
-        'readonly ROOT_USER="root"': f'readonly ROOT_USER="{user}"',
-        'readonly ROOT_GROUP="root"': f'readonly ROOT_GROUP="{group}"',
-        'readonly SERVICE_USER="ai-crypto-signal-agent"': f'readonly SERVICE_USER="{user}"',
-        'readonly SERVICE_GROUP="ai-crypto-signal-agent"': f'readonly SERVICE_GROUP="{group}"',
-    }
-    release = _make_release(tmp_path / "release-parent", replacements=replacements)
-    release_ref.write_text(f"{release}\n", encoding="ascii")
-    release_ref.chmod(0o440)
-    marker.write_text(release.name + "\n", encoding="ascii")
-    marker.chmod(0o400)
-    service.write_bytes(release.joinpath(".e6-rendered/ai-crypto-signal-agent-e6.service").read_bytes())
-    timer.write_bytes(release.joinpath("deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer").read_bytes())
-    configuration.write_text(
-        _configuration_text(
-            release=release,
-            release_ref=release_ref,
-            credential_metadata=credential_metadata,
-            owner_state=owner_state,
-            user=user,
-            group=group,
-            authorized=authorized,
-        ),
-        encoding="ascii",
-    )
-    configuration.chmod(0o640)
-    credential_metadata.write_text("fixture-secret-must-not-be-output\n", encoding="ascii")
-    credential_metadata.chmod(0o640)
-    telegram_environment.write_text("telegram-secret-must-not-be-output\n", encoding="ascii")
-    telegram_environment.chmod(0o600)
-    provider_environment.write_text("provider-secret-must-not-be-output\n", encoding="ascii")
-    provider_environment.chmod(0o600)
-    owner_state.write_text(
-        '{"schema_name":"telegram-owner-control-state","schema_version":1}\n',
-        encoding="ascii",
-    )
-    owner_state.chmod(0o600)
-    fake_systemctl = fake_bin / "systemctl"
-    fake_systemctl.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-case "$1:$2" in
-  is-active:ai-crypto-signal-agent-e6.service) printf '%s\n' "$MOCK_SERVICE_ACTIVE" ;;
-  is-enabled:ai-crypto-signal-agent-e6.service) printf '%s\n' "$MOCK_SERVICE_ENABLED" ;;
-  is-active:ai-crypto-signal-agent-e6.timer) printf '%s\n' "$MOCK_TIMER_ACTIVE" ;;
-  is-enabled:ai-crypto-signal-agent-e6.timer) printf '%s\n' "$MOCK_TIMER_ENABLED" ;;
-  show:ai-crypto-signal-agent-e6.timer)
-    if [[ "$*" == *NextElapseUSecMonotonic* ]]; then
-      printf '%s\n' "$MOCK_TIMER_NEXT"
-    elif [[ "$*" == *SubState* ]]; then
-      printf '%s\n' "$MOCK_TIMER_SUBSTATE"
-    else
-      exit 64
-    fi
-    ;;
-  is-active:ai-crypto-signal-agent.timer) printf '%s\n' "$MOCK_LEGACY_TIMER_ACTIVE" ;;
-  is-enabled:ai-crypto-signal-agent.timer) printf '%s\n' "$MOCK_LEGACY_TIMER_ENABLED" ;;
-  show:ai-crypto-signal-agent.timer)
-    [[ "$*" == *SubState* ]] && printf '%s\n' "$MOCK_LEGACY_TIMER_SUBSTATE" || exit 64
-    ;;
-  *) exit 64 ;;
-esac
-""",
-        encoding="utf-8",
-    )
-    fake_systemctl.chmod(0o755)
-    fake_stat = fake_bin / "stat"
-    fake_stat.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-path="${!#}"
-if [[ "$path" == "$MOCK_CONFIG_DIRECTORY_PATH" && -n "${MOCK_CONFIG_DIRECTORY_STAT:-}" ]]; then
-  printf '%s\n' "$MOCK_CONFIG_DIRECTORY_STAT"
-elif [[ "$path" == "$MOCK_RELEASE_REFERENCE_PATH" && -n "${MOCK_RELEASE_REFERENCE_STAT:-}" ]]; then
-  printf '%s\n' "$MOCK_RELEASE_REFERENCE_STAT"
-elif [[ "$path" == "$MOCK_ACCEPTED_MARKER_PATH" && -n "${MOCK_ACCEPTED_MARKER_STAT:-}" ]]; then
-  printf '%s\n' "$MOCK_ACCEPTED_MARKER_STAT"
-elif [[ "$path" == "$MOCK_TELEGRAM_ENVIRONMENT_PATH" && -n "${MOCK_TELEGRAM_ENVIRONMENT_STAT:-}" ]]; then
-  printf '%s\n' "$MOCK_TELEGRAM_ENVIRONMENT_STAT"
-elif [[ "$path" == "$MOCK_PROVIDER_ENVIRONMENT_PATH" && -n "${MOCK_PROVIDER_ENVIRONMENT_STAT:-}" ]]; then
-  printf '%s\n' "$MOCK_PROVIDER_ENVIRONMENT_STAT"
-else
-  exec /usr/bin/stat "$@"
-fi
-""",
-        encoding="utf-8",
-    )
-    fake_stat.chmod(0o755)
-    environment = {
-        **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        "MOCK_SERVICE_ACTIVE": "inactive",
-        "MOCK_SERVICE_ENABLED": "static",
-        "MOCK_TIMER_ACTIVE": "inactive",
-        "MOCK_TIMER_ENABLED": "disabled",
-        "MOCK_TIMER_SUBSTATE": "dead",
-        "MOCK_TIMER_NEXT": "0",
-        "MOCK_LEGACY_TIMER_ACTIVE": "active",
-        "MOCK_LEGACY_TIMER_ENABLED": "enabled",
-        "MOCK_LEGACY_TIMER_SUBSTATE": "waiting",
-        "MOCK_CONFIG_DIRECTORY_PATH": str(metadata),
-        "MOCK_RELEASE_REFERENCE_PATH": str(release_ref),
-        "MOCK_ACCEPTED_MARKER_PATH": str(marker),
-        "MOCK_TELEGRAM_ENVIRONMENT_PATH": str(telegram_environment),
-        "MOCK_PROVIDER_ENVIRONMENT_PATH": str(provider_environment),
-    }
-    health = release / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-health"
-    paths = {
-        "release": release,
-        "configuration": configuration,
-        "credential_metadata": credential_metadata,
-        "configuration_directory": metadata,
-        "release_ref": release_ref,
-        "marker": marker,
-        "telegram_environment": telegram_environment,
-        "provider_environment": provider_environment,
-        "kill": kill,
-        "lock": lock,
-        "service": service,
-        "timer": timer,
-    }
-    return health, environment, paths
-
-
-def test_health_accepts_exact_disabled_and_active_states_only(tmp_path: Path) -> None:
-    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-zero")
-    disabled = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
-    assert disabled.returncode == 0, disabled.stdout + disabled.stderr
-    assert "HEALTH_STATUS=READY_NOT_ENABLED" in disabled.stdout
-    assert "SERVICE_UNIT_MATCH=YES" in disabled.stdout
-    assert "ROLLBACK_READINESS=YES" in disabled.stdout
-    assert "ROLLBACK_STATE=NOT_CONFIGURED" in disabled.stdout
-    assert "HEALTH_REASON=" not in disabled.stdout
-    assert "SECRET_VALUE_EXPOSURE_COUNT=0" in disabled.stdout
-    assert "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO" in disabled.stdout
-    assert "CONFIGURATION_DIRECTORY_ACCESS_VALID=YES" in disabled.stdout
-    assert "INSTALLED_RELEASE_REFERENCE_METADATA_VALID=YES" in disabled.stdout
-    assert "ACCEPTED_RELEASE_MARKER_METADATA_VALID=YES" in disabled.stdout
-    assert "SECRET_ENVIRONMENT_METADATA_VALID=YES" in disabled.stdout
-    assert "TIMER_CONTRACT_VALID=YES" in disabled.stdout
-    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=YES" in disabled.stdout
-    assert "LEGACY_TIMER_ACTIVE=active" in disabled.stdout
-    assert "LEGACY_TIMER_ENABLED=enabled" in disabled.stdout
-    assert "fixture-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
-    assert "telegram-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
-    assert "provider-secret-must-not-be-output" not in disabled.stdout + disabled.stderr
-
-    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-infinity")
-    environment["MOCK_TIMER_NEXT"] = "infinity"
-    disabled_infinity = subprocess.run(
-        [str(health)], env=environment, text=True, capture_output=True, check=False
-    )
-    assert disabled_infinity.returncode == 0, disabled_infinity.stdout + disabled_infinity.stderr
-    assert "HEALTH_STATUS=READY_NOT_ENABLED" in disabled_infinity.stdout
-
-    health, environment, _paths = _make_health_fixture(tmp_path / "disabled-finite")
-    environment["MOCK_TIMER_NEXT"] = "2800000000"
-    disabled_finite = subprocess.run(
-        [str(health)], env=environment, text=True, capture_output=True, check=False
-    )
-    assert disabled_finite.returncode == 1
-    assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in disabled_finite.stdout
-
-    health, environment, _paths = _make_health_fixture(tmp_path / "active", authorized=True)
-    environment.update(
-        MOCK_TIMER_ACTIVE="active",
-        MOCK_TIMER_ENABLED="enabled",
-        MOCK_TIMER_SUBSTATE="waiting",
-        MOCK_TIMER_NEXT="2800000000",
-        MOCK_LEGACY_TIMER_ACTIVE="inactive",
-        MOCK_LEGACY_TIMER_ENABLED="disabled",
-        MOCK_LEGACY_TIMER_SUBSTATE="dead",
-    )
-    active = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
-    assert active.returncode == 0, active.stdout + active.stderr
-    assert "HEALTH_STATUS=READY_AND_AUTOMATION_ENABLED" in active.stdout
-    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=YES" in active.stdout
-
-    health, environment, _paths = _make_health_fixture(
-        tmp_path / "active-infinity", authorized=True
-    )
-    environment.update(
-        MOCK_TIMER_ACTIVE="active",
-        MOCK_TIMER_ENABLED="enabled",
-        MOCK_TIMER_SUBSTATE="waiting",
-        MOCK_TIMER_NEXT="infinity",
-    )
-    active_infinity = subprocess.run(
-        [str(health)], env=environment, text=True, capture_output=True, check=False
-    )
-    assert active_infinity.returncode == 1
-    assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in active_infinity.stdout
-
-    health, environment, _paths = _make_health_fixture(tmp_path / "partial")
-    environment.update(MOCK_TIMER_ACTIVE="active", MOCK_TIMER_ENABLED="enabled", MOCK_TIMER_SUBSTATE="waiting", MOCK_TIMER_NEXT="2800000000")
-    partial = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
-    assert partial.returncode == 1
-    assert "HEALTH_STATUS=NOT_READY" in partial.stdout
-    assert "SERVICE_TIMER_ACTIVATION_STATE_CONTRADICTORY" in partial.stdout
-
-
-def test_health_rejects_service_missing_required_environment_file(tmp_path: Path) -> None:
-    required_host_environment_files = (
-        "/etc/ai-crypto-signal-agent/phase09r1.env",
-        "/etc/ai-crypto-signal-agent/deepseek.env",
-    )
-    for environment_file in required_host_environment_files:
-        health, environment, paths = _make_health_fixture(
-            tmp_path / Path(environment_file).stem
-        )
-        service = paths["service"]
-        service.write_text(
-            service.read_text(encoding="utf-8").replace(
-                f"EnvironmentFile={environment_file}\n", ""
-            ),
-            encoding="utf-8",
-        )
-        rejected = subprocess.run(
-            [str(health)],
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rejected.returncode == 1
-        assert "SERVICE_UNIT_MATCH=NO" in rejected.stdout
-        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
-
-    service_variants = {
-        "missing-static-binding": lambda text: text.replace(
-            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n", ""
-        ),
-        "duplicate-static-binding": lambda text: text.replace(
-            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n",
-            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n" * 2,
-        ),
-        "altered-static-binding": lambda text: text.replace(
-            STATIC_ACTIVATION_PATH_BINDING,
-            "E6_ACTIVATION_CONFIGURATION_PATH=/etc/ai-crypto-signal-agent/wrong.env",
-        ),
-        "reordered-static-binding": lambda text: text.replace(
-            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n"
-            f"Environment=E6_SOURCE_COMMIT={COMMIT}\n",
-            f"Environment=E6_SOURCE_COMMIT={COMMIT}\n"
-            f"Environment={STATIC_ACTIVATION_PATH_BINDING}\n",
-        ),
-    }
-    for name, mutate in service_variants.items():
-        health, environment, paths = _make_health_fixture(tmp_path / name)
-        service = paths["service"]
-        original = service.read_text(encoding="utf-8")
-        changed = mutate(original)
-        assert changed != original
-        service.write_text(changed, encoding="utf-8")
-        rejected = subprocess.run(
-            [str(health)], env=environment, text=True, capture_output=True, check=False
-        )
-        assert rejected.returncode == 1
-        assert "SERVICE_UNIT_MATCH=NO" in rejected.stdout
-        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
-
-
-def test_health_rejects_each_host_access_metadata_defect_without_secret_read(
-    tmp_path: Path,
-) -> None:
-    cases = (
-        "configuration-parent-old-group",
-        "configuration-parent-wrong-mode",
-        "configuration-parent-symlink",
-        "release-reference-old-metadata",
-        "release-reference-wrong-group",
-        "release-reference-wrong-mode",
-        "release-reference-symlink",
-        "accepted-marker-wrong-owner",
-        "accepted-marker-wrong-group",
-        "accepted-marker-wrong-mode",
-        "telegram-environment-wrong-owner",
-        "telegram-environment-wrong-mode",
-        "provider-environment-wrong-group",
-        "provider-environment-wrong-mode",
-    )
-    for case in cases:
-        health, environment, paths = _make_health_fixture(tmp_path / case)
-        user = tmp_path.owner()
-        group = tmp_path.group()
-        if case == "configuration-parent-old-group":
-            environment["MOCK_CONFIG_DIRECTORY_STAT"] = f"{user}:root:750"
-        elif case == "configuration-parent-wrong-mode":
-            paths["configuration_directory"].chmod(0o700)
-        elif case == "configuration-parent-symlink":
-            configuration_directory = paths["configuration_directory"]
-            real_directory = configuration_directory.with_name("metadata-real")
-            configuration_directory.rename(real_directory)
-            configuration_directory.symlink_to(real_directory, target_is_directory=True)
-        elif case == "release-reference-old-metadata":
-            environment["MOCK_RELEASE_REFERENCE_STAT"] = f"{user}:root:400"
-        elif case == "release-reference-wrong-group":
-            environment["MOCK_RELEASE_REFERENCE_STAT"] = f"{user}:wrong:440"
-        elif case == "release-reference-wrong-mode":
-            paths["release_ref"].chmod(0o400)
-        elif case == "release-reference-symlink":
-            release_ref = paths["release_ref"]
-            real_reference = release_ref.with_name("installed-release-real.path")
-            release_ref.rename(real_reference)
-            release_ref.symlink_to(real_reference)
-        elif case == "accepted-marker-wrong-owner":
-            environment["MOCK_ACCEPTED_MARKER_STAT"] = f"wrong:{group}:400"
-        elif case == "accepted-marker-wrong-group":
-            environment["MOCK_ACCEPTED_MARKER_STAT"] = f"{user}:wrong:400"
-        elif case == "accepted-marker-wrong-mode":
-            paths["marker"].chmod(0o440)
-        elif case == "telegram-environment-wrong-owner":
-            environment["MOCK_TELEGRAM_ENVIRONMENT_STAT"] = f"wrong:{group}:600"
-        elif case == "telegram-environment-wrong-mode":
-            paths["telegram_environment"].chmod(0o640)
-        elif case == "provider-environment-wrong-group":
-            environment["MOCK_PROVIDER_ENVIRONMENT_STAT"] = f"{user}:wrong:600"
-        elif case == "provider-environment-wrong-mode":
-            paths["provider_environment"].chmod(0o640)
-        rejected = subprocess.run(
-            [str(health)], env=environment, text=True, capture_output=True, check=False
-        )
-        assert rejected.returncode == 1, case
-        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, case
-        assert "fixture-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
-        assert "telegram-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
-        assert "provider-secret-must-not-be-output" not in rejected.stdout + rejected.stderr
-        assert "AUTOMATIC_RETRY_COUNT=0" in rejected.stdout
-        assert "AUTOMATED_EXCHANGE_TRADING_ENABLED=NO" in rejected.stdout
-
-
-def test_health_rejects_identity_timer_credential_kill_and_lock_defects_read_only(tmp_path: Path) -> None:
-    health, environment, paths = _make_health_fixture(tmp_path / "lock-absent")
-    before = {path: path.read_bytes() for path in paths.values() if path.is_file()}
-    result = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
-    assert result.returncode == 0
-    assert not paths["lock"].exists()
-    assert "fixture-secret-must-not-be-output" not in result.stdout + result.stderr
-    assert all(path.read_bytes() == value for path, value in before.items())
-
-    cases = (
-        "writable-release-owner",
-        "writable-release-group",
-        "writable-release-other",
-        "persistent",
-        "credential",
-        "kill",
-        "lock",
-    )
-    writable_modes = {
-        "writable-release-owner": 0o755,
-        "writable-release-group": 0o575,
-        "writable-release-other": 0o557,
-    }
-    for case in cases:
-        health, environment, paths = _make_health_fixture(tmp_path / case)
-        held = None
-        if case in writable_modes:
-            paths["release"].chmod(writable_modes[case])
-        elif case == "persistent":
-            paths["timer"].write_text(
-                paths["timer"].read_text().replace("Persistent=false", "Persistent=true")
-            )
-        elif case == "credential":
-            paths["credential_metadata"].chmod(0o600)
-        elif case == "kill":
-            paths["kill"].write_text("active\n", encoding="ascii")
-        elif case == "lock":
-            held = paths["lock"].open("w", encoding="ascii")
-            paths["lock"].chmod(0o600)
-            fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            rejected = subprocess.run([str(health)], env=environment, text=True, capture_output=True, check=False)
-        finally:
-            if held is not None:
-                held.close()
-        assert rejected.returncode == 1, case
-        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, case
-
-
-def test_health_rejects_every_minute_heartbeat_and_authority_drift(
-    tmp_path: Path,
-) -> None:
-    timer_mutations = {
-        "calendar": ("OnCalendar=*-*-* *:*:00 UTC", "OnCalendar=*-*-* *:30:00 UTC"),
-        "accuracy": ("AccuracySec=1s", "AccuracySec=2s"),
-        "relative": ("OnCalendar=*-*-* *:*:00 UTC", "OnUnitInactiveSec=30min"),
-        "random-delay": ("Persistent=false", "RandomizedDelaySec=10s\nPersistent=false"),
-        "catch-up": ("Persistent=false", "Persistent=true"),
-    }
-    for name, (original, replacement) in timer_mutations.items():
-        health, environment, paths = _make_health_fixture(tmp_path / name)
-        timer = paths["timer"]
-        before = timer.read_text(encoding="utf-8")
-        after = before.replace(original, replacement)
-        assert after != before
-        timer.write_text(after, encoding="utf-8")
-        rejected = subprocess.run(
-            [str(health)],
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rejected.returncode == 1, name
-        assert "TIMER_CONTRACT_VALID=NO" in rejected.stdout, name
-        assert "HEALTH_STATUS=NOT_READY" in rejected.stdout, name
-
-    health, environment, _paths = _make_health_fixture(tmp_path / "dual-authority")
-    environment.update(
-        MOCK_TIMER_ACTIVE="active",
-        MOCK_TIMER_ENABLED="enabled",
-        MOCK_TIMER_SUBSTATE="waiting",
-        MOCK_TIMER_NEXT="2800000000",
-    )
-    rejected = subprocess.run(
-        [str(health)],
-        env=environment,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert rejected.returncode == 1
-    assert "LEGACY_PRODUCTION_AUTHORITY_CONTRACT=NO" in rejected.stdout
-    assert "HEALTH_STATUS=NOT_READY" in rejected.stdout
-
-
-def test_readme_freezes_python_cadence_and_separate_activation_authority() -> None:
-    readme = _text(PACKAGE / "README.md")
-    for required in (
-        "once-per-minute UTC wake-up",
-        "OnCalendar=*-*-* *:*:00 UTC",
-        "Python mode profiles and the due-window dispatcher are the sole cadence policy",
-        "at most one selected mode job",
-        "catch-up, parallel mode execution, and automatic retry are prohibited",
-        "replay-suppressed",
-        "Ordinary no-work and NO_TRADE outcomes",
-        "healthy process exit 0",
-        "legacy `ai-crypto-signal-agent.timer` remains the sole production schedule",
-        "A canary does not imply activation",
-        "Activation requires separate, exact owner authorization",
+def test_run_once_rederives_profile_authority_and_uses_only_profile_lock() -> None:
+    script = _text(BIN / "ai-crypto-signal-agent-e6-run-once")
+    for marker in (
+        "case \"$deployment_profile\" in",
+        "CANDIDATE_CANARY)",
+        "PRODUCTION)",
+        'runtime_lock="$runtime_root/e6-operational.lock"',
+        'exec 9>"$runtime_lock"',
+        "E6_DEPLOYMENT_BINDING_VERSION",
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH",
+        "E6_OWNER_CONTROL_STATE_PATH",
+        "E6_RUNTIME_LOCK_PATH",
     ):
-        assert required in readme
+        assert marker in script
+    assert 'readonly LOCK_PATH="/run/ai-crypto-signal-agent/e6-operational.lock"' not in script
+    assert "/var/lib/ai-crypto-signal-agent/e6-installed-release.path" not in script
+    assert "while true" not in script
+    assert "retry" not in script.lower() or "AUTOMATIC_RETRY_COUNT" in script
 
 
-def _make_rollback_release(parent: Path, commit: str, trusted: str = TRUSTED) -> Path:
-    return _make_release(parent, commit=commit, trusted=trusted)
-
-
-def _make_rollback_script(tmp_path: Path) -> Path:
-    rollback = tmp_path / "e6-rollback"
-    rollback.write_text(
-        _text(BIN / "ai-crypto-signal-agent-e6-rollback")
-        .replace("@@TRUSTED_CHECKPOINT_COMMIT@@", TRUSTED)
-        .replace('readonly ROOT_USER="root"', f'readonly ROOT_USER="{tmp_path.owner()}"')
-        .replace('readonly ROOT_GROUP="root"', f'readonly ROOT_GROUP="{tmp_path.group()}"')
-        .replace(
-            'readonly SERVICE_GROUP="ai-crypto-signal-agent"',
-            f'readonly SERVICE_GROUP="{tmp_path.group()}"',
-        ),
-        encoding="utf-8",
-    )
-    rollback.chmod(0o755)
-    return rollback
-
-
-def test_manual_rollback_requires_trusted_immutable_target_and_is_idempotent(tmp_path: Path) -> None:
-    current = _make_rollback_release(tmp_path / "current", "d" * 40)
-    target = _make_rollback_release(tmp_path / "target", "e" * 40)
-    host = tmp_path / "host"
-    state = host / "var/lib/ai-crypto-signal-agent"
-    state.mkdir(parents=True)
-    current_ref = state / "e6-installed-release.path"
-    current_ref.write_text(f"{current}\n", encoding="ascii")
-    current_ref.chmod(0o440)
-    accepted_marker = state / "e6-accepted-release.marker"
-    accepted_marker.write_text(current.name + "\n", encoding="ascii")
-    accepted_marker.chmod(0o400)
-    accepted_before = (accepted_marker.read_bytes(), _metadata(accepted_marker))
-    rollback = _make_rollback_script(tmp_path)
-
-    first = subprocess.run(
-        [str(rollback), "--target-release", str(target), "--destdir", str(host)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert first.returncode == 0, first.stdout + first.stderr
-    assert "E6_ROLLBACK=COMPLETE" in first.stdout
-    assert current_ref.read_text() == f"{target}\n"
-    rollback_ref = state / "e6-rollback-release.path"
-    evidence = state / "e6-rollback-evidence.txt"
-    assert rollback_ref.read_text() == f"{current}\n"
-    assert f"FROM_RELEASE={current}" in evidence.read_text()
-    expected_user = tmp_path.owner()
-    expected_group = tmp_path.group()
-    assert _metadata(current_ref) == (expected_user, expected_group, "0440")
-    assert _metadata(rollback_ref) == (expected_user, expected_group, "0400")
-    assert _metadata(evidence) == (expected_user, expected_group, "0400")
-    assert accepted_before == (accepted_marker.read_bytes(), _metadata(accepted_marker))
-    before = (
-        current_ref.read_bytes(),
-        _metadata(current_ref),
-        rollback_ref.read_bytes(),
-        _metadata(rollback_ref),
-        evidence.read_bytes(),
-        _metadata(evidence),
-    )
-
-    replay = subprocess.run(
-        [str(rollback), "--target-release", str(target), "--destdir", str(host)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert replay.returncode == 0
-    assert "E6_ROLLBACK=IDEMPOTENT_REPLAY" in replay.stdout
-    assert before == (
-        current_ref.read_bytes(),
-        _metadata(current_ref),
-        rollback_ref.read_bytes(),
-        _metadata(rollback_ref),
-        evidence.read_bytes(),
-        _metadata(evidence),
-    )
-    assert accepted_before == (accepted_marker.read_bytes(), _metadata(accepted_marker))
-
-
-def test_manual_rollback_rejects_missing_writable_symlink_and_untrusted_targets(tmp_path: Path) -> None:
-    current = _make_rollback_release(tmp_path / "current", "d" * 40)
-    host = tmp_path / "host"
-    state = host / "var/lib/ai-crypto-signal-agent"
-    state.mkdir(parents=True)
-    current_ref = state / "e6-installed-release.path"
-    current_ref.write_text(f"{current}\n")
-    current_ref.chmod(0o440)
-    rollback = _make_rollback_script(tmp_path)
-    writable_targets = []
-    for mode in (0o755, 0o575, 0o557):
-        writable = _make_rollback_release(tmp_path / f"writable-{mode:o}", "e" * 40)
-        writable.chmod(mode)
-        writable_targets.append(writable)
-    untrusted = _make_rollback_release(tmp_path / "untrusted", "f" * 40, "0" * 40)
-    link = tmp_path / "target-link"
-    link.symlink_to(untrusted, target_is_directory=True)
-    legacy = tmp_path / "legacy" / ("1" * 40)
-    legacy.mkdir(parents=True)
-    legacy.chmod(0o555)
-    current_before = (current_ref.read_bytes(), _metadata(current_ref))
-    for target in (tmp_path / "missing", *writable_targets, link, untrusted, legacy):
-        rejected = subprocess.run(
-            [str(rollback), "--target-release", str(target), "--destdir", str(host)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        assert rejected.returncode == 65
-        assert current_before == (current_ref.read_bytes(), _metadata(current_ref))
-    assert current_ref.read_text() == f"{current}\n"
-    assert not state.joinpath("e6-rollback-release.path").exists()
-
-
-def test_manual_rollback_atomic_current_reference_failure_preserves_current(
+def test_candidate_run_once_fixture_uses_only_bound_paths_and_one_python_call(
     tmp_path: Path,
 ) -> None:
-    current = _make_rollback_release(tmp_path / "current", "d" * 40)
-    target = _make_rollback_release(tmp_path / "target", "e" * 40)
-    host = tmp_path / "host"
-    state = host / "var/lib/ai-crypto-signal-agent"
-    state.mkdir(parents=True)
-    current_ref = state / "e6-installed-release.path"
-    current_ref.write_text(f"{current}\n", encoding="ascii")
-    current_ref.chmod(0o440)
-    before = (current_ref.read_bytes(), _metadata(current_ref))
-    rollback = _make_rollback_script(tmp_path)
-    fake_bin = tmp_path / "fake-bin"
-    fake_bin.mkdir()
-    fake_mv = fake_bin / "mv"
-    fake_mv.write_text(
-        """#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${!#}" == "$FAIL_DESTINATION" ]]; then
-  exit 74
-fi
-exec /usr/bin/mv "$@"
-""",
-        encoding="utf-8",
+    authority = _fixture_authority(tmp_path)
+    release = tmp_path / "releases" / COMMIT
+    script_path = (
+        release
+        / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
     )
-    fake_mv.chmod(0o755)
-    environment = {
-        **os.environ,
-        "PATH": f"{fake_bin}:{os.environ['PATH']}",
-        "FAIL_DESTINATION": str(current_ref),
-    }
-    failed = subprocess.run(
-        [str(rollback), "--target-release", str(target), "--destdir", str(host)],
+    invoked = tmp_path / "python-invoked"
+    python_stub = tmp_path / "python-stub"
+    _write(
+        python_stub,
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$TEST_INVOKED"\n',
+        0o755,
+    )
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-run-once"),
+        authority=authority,
+        tmp_path=tmp_path,
+    ).replace(
+        'readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"',
+        f'readonly PYTHON_BIN="{python_stub}"',
+    )
+    _write(script_path, source, 0o755)
+    _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
+
+    user, group = _fixture_identity()
+    for key, mode in (
+        ("state_root", 0o750),
+        ("owner_state_root", 0o700),
+        ("publication_root", 0o700),
+        ("operational_artifact_root", 0o700),
+        ("runtime_root", 0o750),
+        ("cache_root", 0o700),
+        ("control_root", 0o750),
+        ("configuration_root", 0o750),
+    ):
+        path = Path(authority[key])
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(mode)
+    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
+    _write(Path(authority["accepted_marker"]), f"{COMMIT}\n", 0o400)
+    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
+    _write(Path(authority["owner_state_path"]), "{}\n", 0o600)
+    _write(Path(authority["active_ledger_path"]), "{}\n", 0o600)
+    configuration = _activation_mapping(authority, release_root=release)
+    _write(
+        Path(authority["activation_configuration_path"]),
+        _configuration_text(configuration),
+        0o640,
+    )
+    _release_manifest(release)
+
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "E6_ACTIVATION_CONFIGURATION_PATH": authority[
+                "activation_configuration_path"
+            ],
+            "ACTIVE_SIGNAL_LEDGER_PATH": authority["active_ledger_path"],
+            "TELEGRAM_OWNER_CONTROL_STATE_PATH": authority["owner_state_path"],
+            "TEST_INVOKED": str(invoked),
+        }
+    )
+    result = subprocess.run(
+        [str(script_path)],
         env=environment,
         text=True,
         capture_output=True,
         check=False,
     )
-    assert failed.returncode != 0
-    assert before == (current_ref.read_bytes(), _metadata(current_ref))
+    assert result.returncode == 0, result.stderr
+    assert invoked.read_text(encoding="utf-8").strip() == (
+        "-m engine.run_production_signal_v1"
+    )
+    assert not Path(authority["runtime_lock"]).exists()
+    assert user and group
+
+    invoked.unlink()
+    _write(Path(authority["kill_switch"]), "blocked\n", 0o400)
+    blocked = subprocess.run(
+        [str(script_path)],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert blocked.returncode == 75
+    assert "KILL_SWITCH_ACTIVE" in blocked.stderr
+    assert not invoked.exists()
 
 
-def test_package_has_no_automatic_rollback_service_control_or_trading_authority() -> None:
-    run_once = _text(BIN / "ai-crypto-signal-agent-e6-run-once")
+def test_health_is_profile_bound_read_only_and_cannot_invoke_effect_paths() -> None:
     health = _text(BIN / "ai-crypto-signal-agent-e6-health")
-    service = _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
-    timer = _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
-    assert "ai-crypto-signal-agent-e6-rollback" not in run_once + health + service + timer
-    all_text = "\n".join(_text(path) for path in PACKAGE.rglob("*") if path.is_file())
-    assert re.search(
-        r"\bsystemctl\s+(start|stop|restart|reload|enable|disable|preset|daemon-reload)\b",
-        all_text,
-    ) is None
-    assert "create_order" not in all_text
-    assert "mark_entry_active" not in all_text
-    assert "AUTOMATED_EXCHANGE_TRADING=disabled" in all_text
+    for marker in (
+        "--deployment-profile",
+        "--release-commit",
+        "CANDIDATE_STATE_VALID_EMPTY",
+        'grep -q \'"signals":{}\' "$active_ledger"',
+        'grep -q \'"signal_message_bindings":{}\' "$owner_state"',
+        "PROFILE_UNITS_DISABLED_INACTIVE",
+        "OPERATIONAL_LOCK_ABSENT_OR_UNHELD",
+        "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED",
+    ):
+        assert marker in health
+    for command in (
+        "ai-crypto-signal-agent-e6-run-once",
+        "engine.run_production_signal_v1",
+        "run_e6_service_cycle_v1",
+        "mark_entry_active",
+        "reserve_slot",
+        "pair_lock",
+        "create_order",
+        "curl ",
+    ):
+        assert command not in health
+    assert re.search(r"\b(touch|mkdir|mktemp|install|chmod|chown|mv|unlink)\b", health) is None
+
+
+def test_candidate_health_fixture_passes_disabled_inactive_without_mutation(
+    tmp_path: Path,
+) -> None:
+    authority = _fixture_authority(tmp_path)
+    user, group = _fixture_identity()
+    release = tmp_path / "releases" / COMMIT
+    units = tmp_path / "units"
+    telegram_environment = tmp_path / "telegram.env"
+    provider_environment = tmp_path / "provider.env"
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-health"),
+        authority=authority,
+        tmp_path=tmp_path,
+    )
+    source = source.replace(
+        'readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"',
+        f'readonly TELEGRAM_ENVIRONMENT="{telegram_environment}"',
+    ).replace(
+        'readonly PROVIDER_ENVIRONMENT="/etc/ai-crypto-signal-agent/deepseek.env"',
+        f'readonly PROVIDER_ENVIRONMENT="{provider_environment}"',
+    ).replace(
+        'service_path="/etc/systemd/system/$service_unit"',
+        f'service_path="{units}/$service_unit"',
+    ).replace(
+        'timer_path="/etc/systemd/system/$timer_unit"',
+        f'timer_path="{units}/$timer_unit"',
+    ).replace(
+        '"/opt/ai-crypto-signal-agent-releases/$release_commit"',
+        f'"{tmp_path}/releases/$release_commit"',
+    )
+    health = tmp_path / "health"
+    _write(health, source, 0o755)
+
+    for key, mode in (
+        ("state_root", 0o750),
+        ("owner_state_root", 0o700),
+        ("publication_root", 0o700),
+        ("operational_artifact_root", 0o700),
+        ("cache_root", 0o700),
+        ("control_root", 0o750),
+        ("configuration_root", 0o750),
+    ):
+        path = Path(authority[key])
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(mode)
+    owner_document = {
+        "schema_name": "telegram-owner-control-state",
+        "schema_version": 1,
+        "revision": 0,
+        "updated_at": "2026-08-03T00:00:00Z",
+        "last_update_id": -1,
+        "processed_updates": {},
+        "processed_commands": {},
+        "signal_message_bindings": {},
+    }
+    ledger_document = {
+        "schema_name": "active-signal-ledger",
+        "schema_version": 2,
+        "ledger_revision": 0,
+        "created_at": "2026-08-03T00:00:00Z",
+        "updated_at": "2026-08-03T00:00:00Z",
+        "capacity_policy": {},
+        "signals": {},
+        "transitions": {},
+        "publication_transactions": {},
+    }
+    _write(
+        Path(authority["owner_state_path"]),
+        json.dumps(owner_document, separators=(",", ":")) + "\n",
+        0o600,
+    )
+    _write(
+        Path(authority["active_ledger_path"]),
+        json.dumps(ledger_document, separators=(",", ":")) + "\n",
+        0o600,
+    )
+    _write(Path(authority["install_pointer"]), f"{release}\n", 0o440)
+    _write(Path(authority["accepted_marker"]), f"{COMMIT}\n", 0o400)
+    _write(Path(authority["credential_metadata_path"]), "metadata-only\n", 0o640)
+    _write(telegram_environment, "not-read\n", 0o600)
+    _write(provider_environment, "not-read\n", 0o600)
+    configuration = _activation_mapping(authority, release_root=release)
+    _write(
+        Path(authority["activation_configuration_path"]),
+        _configuration_text(configuration),
+        0o640,
+    )
+
+    rendered = release / ".e6-rendered"
+    candidate_service = _render_candidate(
+        _text(SYSTEMD / "ai-crypto-signal-agent-e6.service.in")
+    )
+    candidate_timer = _render_candidate(
+        _text(SYSTEMD / "ai-crypto-signal-agent-e6.timer")
+    )
+    _write(rendered / authority["service_unit"], candidate_service, 0o444)
+    _write(rendered / authority["timer_unit"], candidate_timer, 0o444)
+    _release_manifest(release)
+    _write(units / authority["service_unit"], candidate_service, 0o644)
+    _write(units / authority["timer_unit"], candidate_timer, 0o644)
+
+    mock_bin = tmp_path / "mock-bin"
+    systemctl = mock_bin / "systemctl"
+    _write(
+        systemctl,
+        "#!/usr/bin/env bash\n"
+        "case \"$1:$2\" in\n"
+        f"is-active:{authority['service_unit']}) echo inactive ;;\n"
+        f"is-enabled:{authority['service_unit']}) echo disabled ;;\n"
+        f"is-active:{authority['timer_unit']}) echo inactive ;;\n"
+        f"is-enabled:{authority['timer_unit']}) echo disabled ;;\n"
+        "is-active:ai-crypto-signal-agent.timer) echo active ;;\n"
+        "is-enabled:ai-crypto-signal-agent.timer) echo enabled ;;\n"
+        "show:ai-crypto-signal-agent.timer) echo waiting ;;\n"
+        "*) exit 1 ;;\n"
+        "esac\n",
+        0o755,
+    )
+    before = {
+        Path(authority["owner_state_path"]): Path(
+            authority["owner_state_path"]
+        ).read_bytes(),
+        Path(authority["active_ledger_path"]): Path(
+            authority["active_ledger_path"]
+        ).read_bytes(),
+    }
+    environment = dict(os.environ)
+    environment["PATH"] = f"{mock_bin}:{environment['PATH']}"
+    result = subprocess.run(
+        [
+            str(health),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED" in result.stdout
+    assert "SERVICE_CYCLE_INVOCATION_COUNT=0" in result.stdout
+    assert "AUTOMATIC_RETRY_COUNT=0" in result.stdout
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert user and group
+
+
+def test_rollback_is_profile_closed_and_never_touches_state_or_old_e6_pointer() -> None:
+    rollback = _text(BIN / "ai-crypto-signal-agent-e6-rollback")
+    assert "--deployment-profile" in rollback
+    assert "--release-commit" in rollback
+    assert 'control_relative="var/lib/ai-crypto-signal-agent-e6-installations/$release_commit"' in rollback
+    assert 'control_relative="var/lib/ai-crypto-signal-agent-e6-production-control"' in rollback
+    assert "/var/lib/ai-crypto-signal-agent/e6-installed-release.path" not in rollback
+    assert "/var/lib/ai-crypto-signal-agent/phase09r1" not in rollback
+    assert "STATE_AUTHORITY_RETAINED_IN_PLACE=YES" in rollback
+    assert "CANARY_STATE_PROMOTION_COUNT=0" in rollback
+    assert not re.search(r"systemctl\s+", rollback)
+
+
+def test_candidate_rollback_fixture_mutates_only_versioned_control_namespace(
+    tmp_path: Path,
+) -> None:
+    user, group = _fixture_identity()
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-rollback"),
+        authority=_fixture_authority(tmp_path),
+        tmp_path=tmp_path,
+    )
+    rollback = tmp_path / "rollback"
+    _write(rollback, source, 0o755)
+
+    def make_release(commit: str) -> Path:
+        release = tmp_path / "releases" / commit
+        _write(release / "payload", f"{commit}\n", 0o444)
+        _write(
+            release / ".e6-release-manifest",
+            f"SOURCE_COMMIT={commit}\nSOURCE_TREE={TREE}\n"
+            f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
+            0o444,
+        )
+        digest = hashlib.sha256((release / "payload").read_bytes()).hexdigest()
+        _write(release / ".e6-sha256-manifest", f"{digest}  payload\n", 0o444)
+        release.chmod(0o555)
+        return release
+
+    current = make_release(COMMIT)
+    target = make_release("d" * 40)
+    host = tmp_path / "host"
+    control = host / "var/lib/ai-crypto-signal-agent-e6-installations" / COMMIT
+    control.mkdir(parents=True)
+    _write(control / "installed-release.path", f"{current}\n", 0o440)
+    legacy_pointer = host / "var/lib/ai-crypto-signal-agent/e6-installed-release.path"
+    state_sentinel = host / "var/lib/ai-crypto-signal-agent/phase09r1/sentinel"
+    _write(legacy_pointer, "old-e6-evidence\n", 0o440)
+    _write(state_sentinel, "production-authority\n", 0o600)
+
+    result = subprocess.run(
+        [
+            str(rollback),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+            "--target-release",
+            str(target),
+            "--destdir",
+            str(host),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (control / "installed-release.path").read_text() == f"{target}\n"
+    assert (control / "rollback-release.path").read_text() == f"{current}\n"
+    assert "STATE_AUTHORITY_RETAINED_IN_PLACE=YES" in (
+        control / "rollback-evidence.txt"
+    ).read_text()
+    assert legacy_pointer.read_text() == "old-e6-evidence\n"
+    assert state_sentinel.read_text() == "production-authority\n"
+    assert user and group
+
+
+def test_manifest_and_readme_freeze_two_profile_authority_and_reentry() -> None:
+    manifest = _text(PACKAGE / "deployment-package-manifest.txt")
+    readme = _text(PACKAGE / "README.md")
+    normalized_readme = " ".join(readme.split())
+    for marker in (
+        "DEPLOYMENT_BINDING_VERSION=e6-deployment-state-binding-v1",
+        "DEPLOYMENT_PROFILES=CANDIDATE_CANARY,PRODUCTION",
+        "CANDIDATE_STATE_AUTHORITY=empty-nonauthoritative-never-promoted",
+        "PRODUCTION_STATE_AUTHORITY=rebound-in-place-under-r44-freeze",
+        "OLD_E6_DISPOSITION=preserve",
+        "AUTOMATIC_RETRY_COUNT=0",
+    ):
+        assert marker in manifest
+    for marker in (
+        "CURRENT_LEGACY",
+        "R41_DISABLED_VERSIONED_CANDIDATE",
+        "R42_ONE_CANARY",
+        "R44_PRODUCTION_PROFILE_CUTOVER",
+        "old E6 installation",
+        "Candidate state is never imported or promoted",
+        "writer freeze",
+        "Same-day accepted Claude canary usage requires deterministic reconciliation",
+        "No arbitrary environment or path override is supported",
+    ):
+        assert marker in normalized_readme
+
+
+def test_no_automatic_rollback_activation_publication_or_trading_authority() -> None:
+    combined = "\n".join(_text(PACKAGE / path) for path in PAYLOAD)
+    for marker in (
+        "systemctl start",
+        "systemctl restart",
+        "systemctl enable",
+        "systemctl preset",
+        "mark_entry_active(",
+        "reserve_slot(",
+        "create_order(",
+    ):
+        assert marker not in combined
+    assert "AUTOMATED_EXCHANGE_TRADING=disabled" in combined

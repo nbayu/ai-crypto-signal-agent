@@ -23,13 +23,28 @@ from engine.e6_production_cycle_input_v1 import (
 from engine.e6_production_runtime_composition_v1 import (
     build_e6_production_runtime_composition_v1,
 )
+from engine.e5_technical_review_payload_v1 import (
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
+    E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+)
+from engine.e6_activation_configuration_v1 import (
+    E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+)
+from engine.e6_deployment_state_binding_v1 import (
+    E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+    build_e6_deployment_state_binding_v1,
+)
 from engine.phase09r_observability_v1 import (
     E6_PRODUCTION_IDEMPOTENT_REPLAY_V1,
     E6_PRODUCTION_NO_TRADE_V1,
     E6_PRODUCTION_NO_WORK_DUE_V1,
     E6ProductionObservabilityEventV1,
 )
-from engine.run_production_signal_v1 import _run_production_module_v1, main
+from engine.run_production_signal_v1 import (
+    _production_state_paths_v1,
+    _run_production_module_v1,
+    main,
+)
 from engine.telegram_owner_control_state_v1 import initialize_state, load_state
 from test_e6_integrated_orchestrator_v1 import _new_ports, _run, _scenario
 from engine.e6_service_composition_root_v1 import E6ServiceCycleRequestV1
@@ -601,17 +616,42 @@ def _no_trade_request(*, identity=IDENTITY, **changes):
 
 def _activation_mapping(**changes):
     commit = "a" * 40
+    binding = build_e6_deployment_state_binding_v1(
+        deployment_profile="CANDIDATE_CANARY", release_commit=commit
+    )
     values = {
-        "E6_ACTIVATION_SCHEMA_VERSION": "e6-activation-configuration-v1",
+        "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
+        "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
+        "E6_DEPLOYMENT_PROFILE": binding.deployment_profile.value,
         "E6_RELEASE_COMMIT": commit,
         "E6_RELEASE_TREE": "b" * 40,
         "E6_TRUSTED_CHECKPOINT_COMMIT": "c" * 40,
-        "E6_RELEASE_ROOT": f"/opt/ai-crypto-signal-agent-releases/{commit}",
-        "E6_RELEASE_REFERENCE_PATH": "/var/lib/ai-crypto-signal-agent/e6-installed-release.path",
-        "E6_CREDENTIAL_METADATA_PATH": "/etc/ai-crypto-signal-agent/e6-credentials.metadata",
-        "E6_OWNER_CONTROL_STATE_PATH": "/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json",
-        "E6_SERVICE_USER": "ai-crypto-signal-agent",
-        "E6_SERVICE_GROUP": "ai-crypto-signal-agent",
+        "E6_RELEASE_ROOT": binding.release_root,
+        "E6_SERVICE_UNIT": binding.service_unit,
+        "E6_TIMER_UNIT": binding.timer_unit,
+        "E6_STATE_ROOT": binding.state_root,
+        "E6_OWNER_STATE_ROOT": binding.owner_state_root,
+        "E6_LEDGER_ROOT": binding.ledger_root,
+        "E6_ACTIVE_SIGNAL_LEDGER_PATH": binding.active_ledger_path,
+        "E6_OWNER_CONTROL_STATE_PATH": binding.owner_state_path,
+        "E6_PUBLICATION_ROOT": binding.publication_root,
+        "E6_OPERATIONAL_ARTIFACT_ROOT": binding.operational_artifact_root,
+        "E6_RUNTIME_ROOT": binding.runtime_root,
+        "E6_RUNTIME_LOCK_PATH": binding.runtime_lock,
+        "E6_CACHE_ROOT": binding.cache_root,
+        "E6_LOG_POLICY": binding.log_policy,
+        "E6_CONTROL_ROOT": binding.control_root,
+        "E6_RELEASE_REFERENCE_PATH": binding.install_pointer,
+        "E6_ROLLBACK_REFERENCE_PATH": binding.rollback_pointer,
+        "E6_ACCEPTED_RELEASE_MARKER_PATH": binding.accepted_marker,
+        "E6_KILL_SWITCH_PATH": binding.kill_switch,
+        "E6_CONFIGURATION_ROOT": binding.configuration_root,
+        "E6_CREDENTIAL_METADATA_PATH": binding.credential_metadata_path,
+        "E6_ACTIVATION_CONFIGURATION_PATH": binding.activation_configuration_path,
+        "E6_SERVICE_USER": binding.service_user,
+        "E6_SERVICE_GROUP": binding.service_group,
+        "E6_PROVIDER_BINDING_VERSION": E5_PROVIDER_MODEL_PRICE_BINDING_V4_VERSION,
+        "E6_PROVIDER_BINDING_SHA256": E5_PROVIDER_MODEL_PRICE_BINDING_V4_SHA256,
         "E6_RUNTIME_ENABLED": "true",
         "E6_PROVIDER_ENABLED": "true",
         "E6_ACTIVATION_GATE": "true",
@@ -625,6 +665,8 @@ def _activation_mapping(**changes):
         "E6_PROMPT_REPAIR_ENABLED": "false",
         "E6_STALE_REVIEW_REUSE_ENABLED": "false",
         "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED": "false",
+        "ACTIVE_SIGNAL_LEDGER_PATH": binding.active_ledger_path,
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": binding.owner_state_path,
     }
     values.update(changes)
     return values
@@ -879,6 +921,40 @@ def test_private_seam_invalid_activation_stops_before_dispatch():
         public_main_runner=_bomb(calls, "main"),
     ) == 2
     assert calls == []
+
+
+def test_entrypoint_state_paths_come_only_from_the_validated_binding() -> None:
+    environment = _activation_mapping()
+    activation_only = {
+        key: environment[key]
+        for key in __import__(
+            "engine.e6_activation_configuration_v1", fromlist=["_EXPECTED_KEYS"]
+        )._EXPECTED_KEYS
+    }
+    composition = build_e6_production_runtime_composition_v1(
+        configuration=activation_only
+    )
+    state_root, active_path, owner_path = _production_state_paths_v1(
+        configuration=environment, composition=composition
+    )
+    binding = composition.deployment_binding
+    assert state_root == Path(binding.state_root)
+    assert active_path == Path(binding.active_ledger_path)
+    assert owner_path == Path(binding.owner_state_path)
+    for key in (
+        "E6_DEPLOYMENT_PROFILE",
+        "E6_RELEASE_COMMIT",
+        "E6_STATE_ROOT",
+        "E6_RUNTIME_LOCK_PATH",
+        "ACTIVE_SIGNAL_LEDGER_PATH",
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH",
+    ):
+        detached = dict(environment)
+        detached[key] = "/tmp/detached"
+        with pytest.raises(ValueError, match="E6_PRODUCTION_STATE_PATH_INVALID"):
+            _production_state_paths_v1(
+                configuration=detached, composition=composition
+            )
 
 
 def test_module_execution_uses_real_private_dispatcher_without_cli_authority():

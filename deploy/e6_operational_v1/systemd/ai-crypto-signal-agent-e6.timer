@@ -1,8 +1,8 @@
 [Unit]
-Description=AI Crypto Signal Agent E6 UTC minute heartbeat
+Description=AI Crypto Signal Agent E6 commit-versioned candidate UTC minute heartbeat
 
 [Timer]
-Unit=ai-crypto-signal-agent-e6.service
+Unit=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@.service
 OnCalendar=*-*-* *:*:00 UTC
 AccuracySec=1s
 Persistent=false

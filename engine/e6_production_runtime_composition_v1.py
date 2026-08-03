@@ -16,6 +16,7 @@ from engine.e6_activation_configuration_v1 import (
     E6ActivationConfigurationV1,
     load_e6_activation_configuration_v1,
 )
+from engine.e6_deployment_state_binding_v1 import E6DeploymentStateBindingV1
 from engine.e6_production_cycle_input_v1 import (
     E6_NO_TRADE_CYCLE_POLICY_V1,
     E6_NO_TRADE_CYCLE_REQUEST_SCHEMA_V1,
@@ -61,6 +62,7 @@ class E6ProductionRuntimeCompositionV1:
     """Validated non-secret decisions supplied explicitly to the public main."""
 
     activation_configuration: E6ActivationConfigurationV1 = field(repr=False)
+    deployment_binding: E6DeploymentStateBindingV1 = field(repr=False)
     e6_enabled: bool
     authorization: ControlledProductionSignalCycleAuthorizationV1
     e6_activation_authorized: bool
@@ -72,6 +74,13 @@ class E6ProductionRuntimeCompositionV1:
             if type(self.activation_configuration) is not E6ActivationConfigurationV1:
                 _invalid()
             self.activation_configuration.__post_init__()
+            if (
+                type(self.deployment_binding) is not E6DeploymentStateBindingV1
+                or self.deployment_binding
+                is not self.activation_configuration.deployment_binding
+            ):
+                _invalid()
+            self.deployment_binding.__post_init__()
             if (
                 type(self.authorization)
                 is not ControlledProductionSignalCycleAuthorizationV1
@@ -136,6 +145,7 @@ def build_e6_production_runtime_composition_v1(
     )
     return E6ProductionRuntimeCompositionV1(
         activation_configuration=loaded,
+        deployment_binding=loaded.deployment_binding,
         e6_enabled=loaded.e6_runtime_enabled and loaded.provider_enabled,
         authorization=authorization,
         e6_activation_authorized=loaded.activation_gate,

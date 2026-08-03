@@ -1,124 +1,123 @@
-# E6 operational activation package
+# E6 operational deployment package v2
 
-This repository package has been created locally for review. It has not been
-transferred, installed, enabled, started, deployed, canaried, cut over, rolled
-back on a host, or activated. Merely reading these files performs no runtime or
-host action.
+This package renders one immutable E6 release through the pure
+`e6-deployment-state-binding-v1` authority. A deployment binding is derived
+only from `DEPLOYMENT_PROFILE` plus one exact lowercase 40-hex release commit.
+It does not inspect Git, accept arbitrary path overrides, or contain secret
+values.
 
-## Exact Slice-09 repository paths
+## Authority progression
 
-1. `engine/e6_activation_configuration_v1.py`
-2. `deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once`
-3. `deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-health`
-4. `deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-rollback`
-5. `deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.service.in`
-6. `deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer`
-7. `deploy/e6_operational_v1/README.md`
-8. `deploy/e6_operational_v1/deployment-package-manifest.txt`
-9. `tests/test_e6_activation_configuration_v1.py`
-10. `tests/test_e6_operational_deployment_package_v1.py`
+The only supported operational progression is:
 
-The package must be rendered into an immutable release directory whose basename
-is its 40-character source commit. `.e6-release-manifest`,
-`.e6-sha256-manifest`, `TRUSTED_E6_CHECKPOINT_COMMIT`, the installed release
-reference, and the accepted-release marker must agree before a run is possible.
-The documented render placeholders are `@@RELEASE_ROOT@@`,
-`@@E6_SOURCE_COMMIT@@`, `@@E6_SOURCE_TREE@@`, and
-`@@TRUSTED_CHECKPOINT_COMMIT@@`. No other placeholder is supported.
+`CURRENT_LEGACY`
+→ `R41_DISABLED_VERSIONED_CANDIDATE`
+→ `R42_ONE_CANARY`
+→ `R44_PRODUCTION_PROFILE_CUTOVER`
+→ `ROLLBACK`
 
-## Default-deny activation
+R41 installs only a disabled, inactive `CANDIDATE_CANARY`. R42 may authorize
+exactly one candidate invocation while legacy production remains the sole
+authoritative publisher and scheduler. The `PRODUCTION` profile is reserved
+for a separately authorized R44 writer freeze and cutover. No script in this
+package automatically stops, starts, enables, disables, presets, or reloads a
+legacy unit.
 
-The activation configuration is non-secret metadata. Credential metadata paths,
-owners, groups, and modes may be checked; credential contents must never be read
-or emitted by this package. E6 runtime and provider use are disabled by default.
-These six gates are independent and false by default:
+## Candidate canary profile
 
-- `activation_gate`
-- `workload_gate`
-- `credential_gate`
-- `network_gate`
-- `publication_gate`
-- `telegram_publication_gate`
+For `<commit40>`, the renderer produces:
 
-No gate implies another. There is no enable-all option, provider substitution,
-prompt repair, stale-review reuse, retry, legacy publication fallback, or
-automated exchange-trading authority.
+- `ai-crypto-signal-agent-e6-candidate-<commit40>.service` and matching timer;
+- `/var/lib/ai-crypto-signal-agent-e6-candidate-<commit40>` state;
+- `/run/ai-crypto-signal-agent-e6-candidate-<commit40>` runtime and lock;
+- `/var/cache/ai-crypto-signal-agent-e6-candidate-<commit40>` cache;
+- `/var/lib/ai-crypto-signal-agent-e6-installations/<commit40>` control and
+  release pointers; and
+- `/etc/ai-crypto-signal-agent/e6-candidates/<commit40>` nonsecret activation
+  and credential-metadata files.
 
-## Package roles
+The old E6 installation is preserved as non-authoritative operational evidence.
+Candidate owner state, active ledger, publication evidence, dispatch evidence,
+audit, E4 history, and provider-usage state start empty and non-authoritative.
+They are candidate-confined and disposable. Candidate state is never imported
+or promoted into production. The older disabled canonical E6 installation and
+its evidence are preserved; the versioned candidate unit names do not replace
+`ai-crypto-signal-agent-e6.service` or `ai-crypto-signal-agent-e6.timer`.
 
-The run-once wrapper validates release bytes, checkpoint binding, activation
-metadata, the kill switch, and a nonblocking overlap lock before invoking
-`engine.run_production_signal_v1` exactly once. It implements no provider or
-Telegram transport and performs no automatic rollback.
+## Production profile
 
-The health verifier is read-only. It classifies only an exact installed-but-
-disabled state and an exact enabled/active/waiting timer state. It does not
-create a lock or modify service state. Partial or contradictory state is not
-ready.
+The production unit identities are stable and separate:
 
-The rollback tool is manual-only. It validates immutable current and target
-releases and operates only on the explicit destination root. It preserves the
-previous verified release reference and supports an exact idempotent replay. No
-service-control operation is part of the transaction.
+- `ai-crypto-signal-agent-e6-production.service`;
+- `ai-crypto-signal-agent-e6-production.timer`;
+- `/run/ai-crypto-signal-agent-e6-production` runtime;
+- `/var/cache/ai-crypto-signal-agent-e6-production` cache; and
+- `/var/lib/ai-crypto-signal-agent-e6-production-control` release control.
 
-The service is a hardened `Type=oneshot` unit with `Restart=no` and a 20-minute
-timeout. Systemd provides only a policy-independent once-per-minute UTC wake-up
-using `OnCalendar=*-*-* *:*:00 UTC`, `AccuracySec=1s`, and `Persistent=false`.
-It encodes no SWING, INTRADAY, or SCALP cadence and has no relative interval,
-random delay, or boot catch-up. Nothing in this package enables or starts either
-unit.
+At R44, after an exact writer freeze, the profile rebinds the existing
+authoritative state in place:
 
-Python mode profiles and the due-window dispatcher are the sole cadence policy.
-Each invocation admits at most one selected mode job; catch-up, parallel mode execution, and automatic retry are prohibited. The overlap lock remains the
-non-overlap authority. A claimed due-window occurrence is replay-suppressed if
-the process crashes after claiming it. Ordinary no-work and NO_TRADE outcomes
-are healthy process exit 0.
+- `/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json`;
+- `/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json`;
+- `/var/lib/ai-crypto-signal-agent/phase09r1/production-signals`; and
+- `/var/lib/ai-crypto-signal-agent/operational-artifacts`.
 
-Before activation, the E6 service and timer remain disabled and inactive, and
-the legacy `ai-crypto-signal-agent.timer` remains the sole production schedule
-authority. A canary does not imply activation. Activation requires separate, exact owner authorization and an authority transition that disables the legacy
-timer before enabling the E6 timer.
+There is no raw live-state copy, empty production initialization, candidate
+state promotion, owner-state reset, active-ledger reset, slot reset, pair-lock
+reset, or publication-history replacement. Rollback retains valid
+post-cutover owner and ledger transitions in the same authoritative location.
+Same-day accepted Claude canary usage requires deterministic reconciliation
+from accepted evidence before production authority; raw candidate usage state
+is not promoted.
 
-Publication creates only `PUBLISHED_PENDING_ENTRY` owner state. It does not
-synthesize an owner decision. Owner-confirmed `ENTRY_ACTIVE` remains the sole
-authority that consumes a slot or pair lock. Automated trading and exchange
-orders are prohibited.
+## Ownership and modes
 
-## Host access contract
+Candidate state and runtime roots are
+`ai-crypto-signal-agent:ai-crypto-signal-agent:0750`. Private mutable
+directories are `0700`; mutable files and the runtime lock are `0600`; the
+cache is `0700`. Control and configuration parents are
+`root:ai-crypto-signal-agent:0750`; install and rollback pointers are `0440`;
+the accepted marker is `root:root:0400`; activation and credential metadata are
+`ai-crypto-signal-agent:ai-crypto-signal-agent:0640`. Logs use journald only.
 
-The service supplies the activation-file location through the static row
-`Environment=E6_ACTIVATION_CONFIGURATION_PATH=/etc/ai-crypto-signal-agent/e6-activation-v1.env`.
-This launcher binding is not a twenty-fourth activation key: the activation
-configuration schema remains exactly 23 keys.
+Provider and Telegram secret environment files remain external
+`root:root:0600` read-only inputs. The package validates only their metadata;
+secret contents never enter activation metadata, unit arguments, health
+output, the package manifest, or release identity.
 
-Host preparation must apply this exact metadata contract in a separately
-authorized bounded installation transaction:
+## Rendering and launch
 
-- `/etc/ai-crypto-signal-agent` is
-  `root:ai-crypto-signal-agent:0750`;
-- `/etc/ai-crypto-signal-agent/e6-activation-v1.env` and
-  `/etc/ai-crypto-signal-agent/e6-credentials.metadata` are
-  `ai-crypto-signal-agent:ai-crypto-signal-agent:0640`;
-- `/etc/ai-crypto-signal-agent/phase09r1.env` and
-  `/etc/ai-crypto-signal-agent/deepseek.env` remain `root:root:0600` because
-  systemd reads them as `EnvironmentFile` inputs; direct service-user file readability is neither required nor permitted;
-- `/var/lib/ai-crypto-signal-agent/e6-installed-release.path` is
-  `root:ai-crypto-signal-agent:0440`;
-- `/var/lib/ai-crypto-signal-agent/e6-accepted-release.marker` remains
-  `root:root:0400` and reaches run-once only as
-  `${CREDENTIALS_DIRECTORY}/accepted_e6_release_commit` through
-  `LoadCredential`.
+The candidate service and timer templates use deterministic `@@...@@`
+placeholders supplied from the validated binding. The production templates use
+stable production identities and the same immutable release placeholder. The
+run-once wrapper re-derives every path and unit from the activation profile and
+commit, compares every supplied field, verifies immutable release bytes, and
+uses a nonblocking profile-specific lock. Automatic retry is zero.
 
-Health rejects the former `root:root:0750` configuration parent and former
-`root:root:0400` installed-release reference. Source remediation alone changes
-no host metadata and authorizes no second canary, cutover, or activation.
-Automated exchange trading remains prohibited.
+Systemd is only the UTC minute heartbeat:
 
-## Required future sequence
+- `OnCalendar=*-*-* *:*:00 UTC`;
+- `AccuracySec=1s`; and
+- `Persistent=false`.
 
-1. Slice 10: read-only final candidate audit.
-2. Slice 11: exactly one final full regression.
-3. Slice 12: owner-controlled canary and release.
+Python remains the due-window and mode scheduling authority. A healthy process
+exit 0 may mean `NO_WORK`, `NO_TRADE`, or `NO_MODE_JOB_DUE`.
 
-Separate owner authorization is required before transfer, installation, any
-service control, rollback execution, deployment, canary, cutover, or activation.
+## Health and rollback
+
+Health requires `--deployment-profile` and `--release-commit`. Candidate health
+checks exact versioned units, immutable release parity, binding parity,
+ownership/modes, empty candidate owner/ledger state, an absent or unheld
+candidate lock, disabled/inactive candidate units, and continuing legacy timer
+authority. It performs no run-once, service cycle, provider call, Telegram
+send, publication, lifecycle transition, slot/pair-lock mutation, or order.
+
+Rollback requires the same exact profile and bound commit. Candidate rollback
+can change only its commit-versioned control namespace. Production rollback
+changes only production release-control evidence while preserving in-place
+authoritative state. Neither path touches legacy units, old canonical E6 units,
+or the old `/var/lib/ai-crypto-signal-agent/e6-installed-release.path`.
+
+Provider execution, Telegram delivery, canary execution, production activation,
+and scheduler cutover remain separate owner-authorized gates. No arbitrary
+environment or path override is supported.

@@ -506,21 +506,30 @@ def _production_state_paths_v1(
     configuration: Mapping[str, str],
     composition: E6ProductionRuntimeCompositionV1,
 ) -> tuple[Path, Path, Path]:
+    binding = composition.deployment_binding
     active_value = configuration.get("ACTIVE_SIGNAL_LEDGER_PATH")
     owner_value = configuration.get("TELEGRAM_OWNER_CONTROL_STATE_PATH")
+    supplied_authority = {
+        "E6_DEPLOYMENT_PROFILE": binding.deployment_profile.value,
+        "E6_RELEASE_COMMIT": binding.release_commit,
+        "E6_STATE_ROOT": binding.state_root,
+        "E6_RUNTIME_LOCK_PATH": binding.runtime_lock,
+        "ACTIVE_SIGNAL_LEDGER_PATH": binding.active_ledger_path,
+        "TELEGRAM_OWNER_CONTROL_STATE_PATH": binding.owner_state_path,
+    }
+    if any(configuration.get(key) != value for key, value in supplied_authority.items()):
+        raise ValueError("E6_PRODUCTION_STATE_PATH_INVALID")
     if (
-        type(active_value) is not str
-        or not active_value.strip()
-        or type(owner_value) is not str
-        or not owner_value.strip()
-        or owner_value != composition.activation_configuration.owner_control_state_path
+        active_value != composition.activation_configuration.deployment_binding.active_ledger_path
+        or owner_value
+        != composition.activation_configuration.deployment_binding.owner_state_path
     ):
         raise ValueError("E6_PRODUCTION_STATE_PATH_INVALID")
-    active_path = Path(active_value)
-    owner_path = Path(owner_value)
-    if active_path.parent != owner_path.parent or owner_path.parent.name != "owner-blueprint":
-        raise ValueError("E6_PRODUCTION_STATE_PATH_INVALID")
-    return owner_path.parent.parent, active_path, owner_path
+    return (
+        Path(binding.state_root),
+        Path(binding.active_ledger_path),
+        Path(binding.owner_state_path),
+    )
 
 
 def _build_production_dispatch_decision_v1(

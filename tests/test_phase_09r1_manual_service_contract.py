@@ -17,6 +17,9 @@ AUTHORIZED_F4_TIMER = Path(
 AUTHORIZED_E6_TIMER = Path(
     "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6.timer"
 )
+AUTHORIZED_E6_PRODUCTION_TIMER = Path(
+    "deploy/e6_operational_v1/systemd/ai-crypto-signal-agent-e6-production.timer"
+)
 F4_INSTALLER = Path(
     "deploy/operational_v1/bin/ai-crypto-signal-agent-install"
 )
@@ -50,7 +53,8 @@ def _assert_phase09r1_and_f4_timer_scope(root):
     timer_files = sorted(deploy_root.rglob("*.timer"))
     f4_timer = root / AUTHORIZED_F4_TIMER
     e6_timer = root / AUTHORIZED_E6_TIMER
-    assert timer_files == sorted((f4_timer, e6_timer))
+    e6_production_timer = root / AUTHORIZED_E6_PRODUCTION_TIMER
+    assert timer_files == sorted((f4_timer, e6_timer, e6_production_timer))
 
     f4_timer_text = f4_timer.read_text(encoding="utf-8")
     assert _directives(f4_timer_text, "Unit") == [
@@ -71,7 +75,7 @@ def _assert_phase09r1_and_f4_timer_scope(root):
 
     e6_timer_text = e6_timer.read_text(encoding="utf-8")
     assert _directives(e6_timer_text, "Unit") == [
-        "ai-crypto-signal-agent-e6.service"
+        "ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@.service"
     ]
     assert _directives(e6_timer_text, "OnCalendar") == [
         "*-*-* *:*:00 UTC"
@@ -90,10 +94,22 @@ def _assert_phase09r1_and_f4_timer_scope(root):
     for mode in ("SWING", "INTRADAY", "SCALP"):
         assert mode not in e6_timer_text.upper()
 
+    e6_production_timer_text = e6_production_timer.read_text(encoding="utf-8")
+    assert _directives(e6_production_timer_text, "Unit") == [
+        "ai-crypto-signal-agent-e6-production.service"
+    ]
+    assert _directives(e6_production_timer_text, "OnCalendar") == [
+        "*-*-* *:*:00 UTC"
+    ]
+    assert _directives(e6_production_timer_text, "AccuracySec") == ["1s"]
+    assert _directives(e6_production_timer_text, "Persistent") == ["false"]
+    assert "ai-crypto-signal-agent-e6.service" not in (
+        e6_timer_text + e6_production_timer_text
+    )
+
     e6_readme_text = (root / E6_README).read_text(encoding="utf-8")
     assert (
-        "Python mode profiles and the due-window dispatcher are the sole "
-        "cadence policy."
+        "Python remains the due-window and mode scheduling authority."
     ) in e6_readme_text
 
     installer_text = (root / F4_INSTALLER).read_text(encoding="utf-8")
