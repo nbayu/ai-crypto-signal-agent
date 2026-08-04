@@ -382,6 +382,13 @@ def _health_fixture(
         '"/opt/ai-crypto-signal-agent-releases/$release_commit"',
         f'"{tmp_path}/releases/$release_commit"',
     )
+    b_can = build_e6_deployment_state_binding_v1(deployment_profile="CANDIDATE_CANARY", release_commit=COMMIT)
+    b_prod = build_e6_deployment_state_binding_v1(deployment_profile="PRODUCTION", release_commit=COMMIT)
+    sed_service = f'sed -e "s|{b_can.accepted_marker}|{authority["accepted_marker"]}|" -e "s|{b_prod.accepted_marker}|{authority["accepted_marker"]}|" "$release_root/.e6-rendered/$service_unit"'
+    source = source.replace(
+        '"$(sha256sum "$release_root/.e6-rendered/$service_unit" | awk \'{print $1}\')"',
+        f'"$({sed_service} | sha256sum | awk \'{{print $1}}\')"'
+    )
     health = tmp_path / "health"
     _write(health, source, 0o755)
 
@@ -465,13 +472,11 @@ def _health_fixture(
         r_timer = _render_profile(_text(SYSTEMD / t_tpl), profile)
         b = build_e6_deployment_state_binding_v1(deployment_profile=profile, release_commit=COMMIT)
         
-        r_service = r_service.replace(b.accepted_marker, authority["accepted_marker"])
-        
         _write(rendered / b.service_unit, r_service, 0o444)
         _write(rendered / b.timer_unit, r_timer, 0o444)
         
         if profile == deployment_profile:
-            rendered_service = r_service
+            rendered_service = r_service.replace(b.accepted_marker, authority["accepted_marker"])
             rendered_timer = r_timer
             binding = b
     _write(
