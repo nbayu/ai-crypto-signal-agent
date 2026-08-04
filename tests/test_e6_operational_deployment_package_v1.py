@@ -30,7 +30,7 @@ BIN = PACKAGE / "bin"
 SYSTEMD = PACKAGE / "systemd"
 COMMIT = "ee332b790e2be56ae309be9af12dabc2427f0ab1"
 TREE = "b" * 40
-TRUSTED = "c" * 40
+TRUSTED = "007f8dee851655fae76b70dc36c3be59612a7725"
 PAYLOAD = {
     "README.md": "0644",
     "bin/ai-crypto-signal-agent-e6-health": "0755",
@@ -1209,3 +1209,48 @@ def test_no_automatic_rollback_activation_publication_or_trading_authority() -> 
     ):
         assert marker not in combined
     assert "AUTOMATED_EXCHANGE_TRADING=disabled" in combined
+
+
+def test_run_once_release_trust_identity_validation(tmp_path: Path) -> None:
+    fixture = _run_once_fixture(tmp_path)
+    env = fixture["environment"]
+    script = str(fixture["script_path"])
+
+    # 1. Accepted case: static checkpoint equals manifest checkpoint, all identities correct
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 0
+    assert not res.stderr
+
+    # 2. Rejected case: trusted checkpoint mismatch (modify manifest)
+    manifest = Path(fixture["release"]) / ".e6-release-manifest"
+    manifest.chmod(0o644)
+    manifest.write_text(f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\nTRUSTED_CHECKPOINT_COMMIT=1111111111111111111111111111111111111111\n")
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr
+
+    # 3. Rejected case: missing checkpoint field
+    manifest.write_text(f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\n")
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr
+
+    # 4. Rejected case: malformed checkpoint (length 39)
+    manifest.write_text(f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\nTRUSTED_CHECKPOINT_COMMIT={'0'*39}\n")
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr
+
+    # 5. Rejected case: uppercase noncanonical hash
+    manifest.write_text(f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\nTRUSTED_CHECKPOINT_COMMIT={TRUSTED.upper()}\n")
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr
+
+    # 6. Rejected case: literal @@TRUSTED_CHECKPOINT_COMMIT@@ remains in packaged launcher
+    manifest.write_text(f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\nTRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n")
+    source = Path(script).read_text().replace(TRUSTED, "@@TRUSTED_CHECKPOINT_COMMIT@@")
+    Path(script).write_text(source)
+    res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr

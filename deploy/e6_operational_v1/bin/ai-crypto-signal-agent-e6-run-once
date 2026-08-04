@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
+readonly TRUSTED_CHECKPOINT_COMMIT="007f8dee851655fae76b70dc36c3be59612a7725"
 readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"
 readonly SERVICE_USER="ai-crypto-signal-agent"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
