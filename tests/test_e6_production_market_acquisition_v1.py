@@ -12,6 +12,9 @@ from engine.mode_scan_execution_plan_v1 import build_mode_scan_execution_plan
 
 
 OBSERVED = "2026-08-03T08:01:00Z"
+QUOTE_ACQUIRED_AT = datetime(
+    2026, 8, 3, 8, 0, 0, 535000, tzinfo=timezone.utc
+)
 SECONDS = {
     "1w": 604800,
     "1d": 86400,
@@ -109,10 +112,12 @@ class FakeClient:
         return self.mark_payload
 
 
-def _port():
+def _port(*, clock=None):
     client = FakeClient()
+    selected_clock = clock or (lambda: QUOTE_ACQUIRED_AT)
     port = module.build_e6_production_binance_public_market_port_v1(
-        client_factory=lambda: client
+        client_factory=lambda: client,
+        clock=selected_clock,
     )
     return port, client
 
@@ -219,12 +224,56 @@ def test_executable_quote_binds_oldest_timestamp_and_three_single_calls() -> Non
     assert [item[0] for item in client.calls].count("fapiPublicGetPremiumIndex") == 1
 
 
+
+def test_quote_accepts_exchange_timestamp_after_cycle_time_but_before_acquisition_completion() -> None:
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+
+    client.mark_payload = {
+        "markPrice": 100.1,
+        "time": _ms(
+            datetime(
+                2026,
+                8,
+                3,
+                8,
+                0,
+                0,
+                288000,
+                tzinfo=timezone.utc,
+            )
+        ),
+    }
+
+    quote = port.fetch_executable_quote(
+        canonical_symbol=snapshot.entries[0].canonical_symbol,
+        observed_at=OBSERVED,
+    )
+
+    assert quote.observed_at == "2026-08-03T08:00:00.535Z"
+    assert quote.mark_price == 100.1
+    assert quote.order_book_call_count == 1
+    assert quote.ticker_call_count == 1
+    assert quote.mark_call_count == 1
+
+
 def test_incomplete_or_future_quote_fails_with_exact_no_trade_reason() -> None:
     port, client = _port()
     snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
     client.mark_payload = {
         "markPrice": 100.1,
-        "time": _ms(datetime(2026, 8, 3, 8, 2, tzinfo=timezone.utc)),
+        "time": _ms(
+            datetime(
+                2026,
+                8,
+                3,
+                8,
+                0,
+                0,
+                536000,
+                tzinfo=timezone.utc,
+            )
+        ),
     }
     with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1) as raised:
         port.fetch_executable_quote(

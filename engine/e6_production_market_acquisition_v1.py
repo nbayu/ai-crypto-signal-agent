@@ -126,6 +126,28 @@ def _parse_exchange_millisecond_timestamp(value: object) -> tuple[str, datetime]
 
 
 
+def _system_utc_now_v1() -> datetime:
+    """Return the current authoritative UTC acquisition boundary."""
+    return datetime.now(timezone.utc)
+
+
+def _canonical_utc_millisecond_v1(
+    value: object,
+) -> tuple[str, datetime]:
+    """Normalize an injected UTC clock value to exchange millisecond precision."""
+    _require(type(value) is datetime)
+    _require(
+        value.tzinfo is not None
+        and value.utcoffset() == timedelta(0)
+    )
+    normalized = value.astimezone(timezone.utc).replace(
+        microsecond=(value.microsecond // 1000) * 1000
+    )
+    return _parse_exchange_millisecond_timestamp(
+        normalized.isoformat().replace("+00:00", "Z")
+    )
+
+
 def _finite(value: object, *, positive: bool = False) -> float:
     _require(type(value) in (int, float) and not isinstance(value, bool))
     numeric = float(value)
@@ -249,7 +271,7 @@ class E6ProductionExecutableQuoteEvidenceV1:
         _require(self.policy_version == E6_PRODUCTION_MARKET_ACQUISITION_POLICY_V1)
         _require(self.venue == BINANCE_USDM_VENUE_V1)
         _symbol(self.canonical_symbol)
-        _observed_text, observed = _utc(self.observed_at)
+        _observed_text, observed = _parse_exchange_millisecond_timestamp(self.observed_at)
         _exchange_text, exchanged = _parse_exchange_millisecond_timestamp(self.exchange_timestamp)
         _require(exchanged <= observed, "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE")
         bid = _finite(self.best_bid, positive=True)
@@ -306,6 +328,7 @@ class E6ProductionBinancePublicMarketPortV1:
 
     __slots__ = (
         "_client_factory",
+        "_clock",
         "_client",
         "_snapshot",
         "_load_markets_count",
@@ -315,9 +338,16 @@ class E6ProductionBinancePublicMarketPortV1:
         "_mark_count",
     )
 
-    def __init__(self, *, client_factory: Callable[[], object] = _default_ccxt_client_factory_v1) -> None:
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[], object] = _default_ccxt_client_factory_v1,
+        clock: Callable[[], object] = _system_utc_now_v1,
+    ) -> None:
         _require(callable(client_factory))
+        _require(callable(clock))
         self._client_factory = client_factory
+        self._clock = clock
         self._client = None
         self._snapshot = None
         self._load_markets_count = 0
@@ -472,7 +502,7 @@ class E6ProductionBinancePublicMarketPortV1:
         self, *, canonical_symbol: str, observed_at: str
     ) -> E6ProductionExecutableQuoteEvidenceV1:
         symbol = _symbol(canonical_symbol)
-        canonical_observed, observed = _utc(observed_at)
+        _canonical_cycle_observed, _cycle_observed = _utc(observed_at)
         _require(type(self._snapshot) is E6ProductionMarketSnapshotV1)
         _require(self._order_book_count == self._ticker_count == self._mark_count == 0)
         client = self._selected_client()
@@ -485,6 +515,9 @@ class E6ProductionBinancePublicMarketPortV1:
             ticker = client.fetch_ticker(symbol)
             self._mark_count += 1
             mark = client.fapiPublicGetPremiumIndex({"symbol": market_id})
+            quote_observed, quote_observed_at = (
+                _canonical_utc_millisecond_v1(self._clock())
+            )
         except Exception:
             _invalid("E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE")
         _require(
@@ -504,14 +537,17 @@ class E6ProductionBinancePublicMarketPortV1:
             timestamps = []
             for raw in (order_book.get("timestamp"), ticker.get("timestamp"), mark.get("time", mark.get("timestamp"))):
                 text_value, parsed = _parse_exchange_millisecond_timestamp(raw)
-                _require(parsed <= observed, "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE")
+                _require(
+                    parsed <= quote_observed_at,
+                    "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE",
+                )
                 timestamps.append((text_value, parsed))
             oldest = min(timestamps, key=lambda item: item[1])[0]
             content = {
                 "policy_version": E6_PRODUCTION_MARKET_ACQUISITION_POLICY_V1,
                 "venue": BINANCE_USDM_VENUE_V1,
                 "canonical_symbol": symbol,
-                "observed_at": canonical_observed,
+                "observed_at": quote_observed,
                 "exchange_timestamp": oldest,
                 "best_bid": best_bid,
                 "best_ask": best_ask,
@@ -539,9 +575,14 @@ class E6ProductionBinancePublicMarketPortV1:
 
 
 def build_e6_production_binance_public_market_port_v1(
-    *, client_factory: Callable[[], object] = _default_ccxt_client_factory_v1
+    *,
+    client_factory: Callable[[], object] = _default_ccxt_client_factory_v1,
+    clock: Callable[[], object] = _system_utc_now_v1,
 ) -> E6ProductionBinancePublicMarketPortV1:
-    return E6ProductionBinancePublicMarketPortV1(client_factory=client_factory)
+    return E6ProductionBinancePublicMarketPortV1(
+        client_factory=client_factory,
+        clock=clock,
+    )
 
 
 __all__ = (
