@@ -144,14 +144,31 @@ require_configuration_value E6_SERVICE_USER "$SERVICE_USER"
 require_configuration_value E6_SERVICE_GROUP "$SERVICE_GROUP"
 require_configuration_value E6_PROVIDER_BINDING_VERSION "$PROVIDER_BINDING_VERSION"
 require_configuration_value E6_PROVIDER_BINDING_SHA256 "$PROVIDER_BINDING_SHA256"
-require_configuration_value E6_RUNTIME_ENABLED true
-require_configuration_value E6_PROVIDER_ENABLED true
-require_configuration_value E6_ACTIVATION_GATE true
-require_configuration_value E6_WORKLOAD_GATE true
-require_configuration_value E6_CREDENTIAL_GATE true
-require_configuration_value E6_NETWORK_GATE true
-require_configuration_value E6_PUBLICATION_GATE true
-require_configuration_value E6_TELEGRAM_PUBLICATION_GATE true
+
+trust_only_validation="${E6_TRUST_ONLY_VALIDATION:-0}"
+if [[ "$trust_only_validation" == "0" ]]; then
+    require_configuration_value E6_RUNTIME_ENABLED true
+    require_configuration_value E6_PROVIDER_ENABLED true
+    require_configuration_value E6_ACTIVATION_GATE true
+    require_configuration_value E6_WORKLOAD_GATE true
+    require_configuration_value E6_CREDENTIAL_GATE true
+    require_configuration_value E6_NETWORK_GATE true
+    require_configuration_value E6_PUBLICATION_GATE true
+    require_configuration_value E6_TELEGRAM_PUBLICATION_GATE true
+elif [[ "$trust_only_validation" == "1" ]]; then
+    [[ "$deployment_profile" == "CANDIDATE_CANARY" ]] || fail_closed "TRUST_ONLY_PROFILE"
+    require_configuration_value E6_RUNTIME_ENABLED false
+    require_configuration_value E6_PROVIDER_ENABLED false
+    require_configuration_value E6_ACTIVATION_GATE false
+    require_configuration_value E6_WORKLOAD_GATE false
+    require_configuration_value E6_CREDENTIAL_GATE false
+    require_configuration_value E6_NETWORK_GATE false
+    require_configuration_value E6_PUBLICATION_GATE false
+    require_configuration_value E6_TELEGRAM_PUBLICATION_GATE false
+else
+    fail_closed "TRUST_ONLY_TRIGGER_INVALID"
+fi
+
 require_configuration_value E6_AUTOMATIC_RETRY_COUNT 0
 require_configuration_value E6_PROVIDER_SUBSTITUTION_ENABLED false
 require_configuration_value E6_PROMPT_REPAIR_ENABLED false
@@ -159,6 +176,11 @@ require_configuration_value E6_STALE_REVIEW_REUSE_ENABLED false
 require_configuration_value E6_AUTOMATED_EXCHANGE_TRADING_ENABLED false
 
 [[ "$configuration_path" == "$activation_configuration" ]] || fail_closed "ACTIVATION_CONFIGURATION_BINDING"
+
+if [[ "$trust_only_validation" == "1" ]]; then
+    printf 'E6_TRUST_ONLY_VALIDATION=PASS\n'
+    exit 0
+fi
 [[ "${ACTIVE_SIGNAL_LEDGER_PATH:-}" == "$active_ledger" ]] || fail_closed "ACTIVE_LEDGER_BINDING"
 [[ "${TELEGRAM_OWNER_CONTROL_STATE_PATH:-}" == "$owner_state" ]] || fail_closed "OWNER_STATE_BINDING"
 [[ -f "$install_pointer" && ! -L "$install_pointer" && "$(cat "$install_pointer")" == "$release_root" ]] ||

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
 readonly SERVICE_USER="ai-crypto-signal-agent"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
 readonly ROOT_USER="root"
@@ -114,9 +113,13 @@ if metadata_is "$release_ref" "$ROOT_USER" "$SERVICE_GROUP" 440 && [[ "$(wc -l <
 fi
 if [[ "$release_root" == "/opt/ai-crypto-signal-agent-releases/$release_commit" &&
       -d "$release_root" && ! -L "$release_root" &&
-      -f "$release_root/.e6-release-manifest" &&
+      -f "$release_root/.e6-release-manifest" && ! -L "$release_root/.e6-release-manifest" &&
+      -f "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" && ! -L "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT" &&
+      "$(wc -l < "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT")" -eq 1 &&
       "$(sed -n 's/^SOURCE_COMMIT=//p' "$release_root/.e6-release-manifest")" == "$release_commit" &&
-      "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]] &&
+      "$(grep -c '^TRUSTED_CHECKPOINT_COMMIT=' "$release_root/.e6-release-manifest" 2>/dev/null || true)" -eq 1 &&
+      "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")" =~ ^[0-9a-f]{40}$ &&
+      "$(cat "$release_root/TRUSTED_E6_CHECKPOINT_COMMIT")" == "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release_root/.e6-release-manifest")" ]] &&
    e6_path_has_no_write_mode_bits "$release_root"; then
     release_match=YES
     if (cd -- "$release_root" && sha256sum --quiet -c .e6-sha256-manifest); then

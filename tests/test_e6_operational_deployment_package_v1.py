@@ -88,6 +88,11 @@ def _fixture_identity() -> tuple[str, str]:
 
 def _write(path: Path, text: str, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not path.is_symlink():
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
     path.write_text(text, encoding="utf-8")
     path.chmod(mode)
 
@@ -203,12 +208,19 @@ def _configuration_text(values: dict[str, str]) -> str:
 
 
 def _release_manifest(release: Path) -> None:
+    if release.exists():
+        try:
+            release.chmod(0o755)
+        except OSError:
+            pass
     _write(
         release / ".e6-release-manifest",
         f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\n"
         f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
         0o444,
     )
+    if not (release / "TRUSTED_E6_CHECKPOINT_COMMIT").exists():
+        _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
     included = [
         path
         for path in sorted(release.rglob("*"))
@@ -228,7 +240,6 @@ def _replace_fixture_authority(
 ) -> str:
     user, group = _fixture_identity()
     replacements = {
-        '@@TRUSTED_CHECKPOINT_COMMIT@@': TRUSTED,
         'readonly SERVICE_USER="ai-crypto-signal-agent"': f'readonly SERVICE_USER="{user}"',
         'readonly SERVICE_GROUP="ai-crypto-signal-agent"': f'readonly SERVICE_GROUP="{group}"',
         'readonly ROOT_USER="root"': f'readonly ROOT_USER="{user}"',
@@ -562,6 +573,9 @@ def _health_fixture(
         "authority": authority,
         "result": result,
         "state_preimage": state_preimage,
+        "release": release,
+        "script": health,
+        "environment": environment,
     }
 
 
@@ -1120,14 +1134,24 @@ def test_candidate_rollback_fixture_mutates_only_versioned_control_namespace(
     def make_release(commit: str) -> Path:
         release = tmp_path / "releases" / commit
         _write(release / "payload", f"{commit}\n", 0o444)
+        _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
         _write(
             release / ".e6-release-manifest",
             f"SOURCE_COMMIT={commit}\nSOURCE_TREE={TREE}\n"
             f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
             0o444,
         )
-        digest = hashlib.sha256((release / "payload").read_bytes()).hexdigest()
-        _write(release / ".e6-sha256-manifest", f"{digest}  payload\n", 0o444)
+        included = [
+            path
+            for path in sorted(release.rglob("*"))
+            if path.is_file() and path.name != ".e6-sha256-manifest"
+        ]
+        lines = [
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  "
+            f"{path.relative_to(release).as_posix()}\n"
+            for path in included
+        ]
+        _write(release / ".e6-sha256-manifest", "".join(lines), 0o444)
         release.chmod(0o555)
         return release
 
@@ -1254,3 +1278,524 @@ def test_run_once_release_trust_identity_validation(tmp_path: Path) -> None:
     res = subprocess.run(["bash", script], env=env, capture_output=True, text=True)
     assert res.returncode == 78
     assert "E6_LAUNCH_BLOCKED=RELEASE_TRUST_IDENTITY" in res.stderr
+
+
+def _trust_only_fixture(
+    tmp_path: Path,
+    deployment_profile: str = "CANDIDATE_CANARY",
+    gate_overrides: dict[str, str] | None = None,
+) -> dict[str, object]:
+    authority = _fixture_authority(tmp_path, deployment_profile=deployment_profile)
+    release = tmp_path / "releases" / COMMIT
+    script_path = (
+        release
+        / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once"
+    )
+    invoked = tmp_path / "python-invoked"
+    python_stub = tmp_path / "python-stub"
+    _write(
+        python_stub,
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" > "$TEST_INVOKED"\n',
+        0o755,
+    )
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-run-once"),
+        authority=authority,
+        tmp_path=tmp_path,
+    ).replace(
+        'readonly PYTHON_BIN="/opt/ai-crypto-signal-agent-phase09r1/.venv/bin/python"',
+        f'readonly PYTHON_BIN="{python_stub}"',
+    )
+    _write(script_path, source, 0o755)
+    _write(release / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
+
+    for key, mode in (
+        ("state_root", 0o750),
+        ("owner_state_root", 0o700),
+        ("publication_root", 0o700),
+        ("operational_artifact_root", 0o700),
+        ("runtime_root", 0o750),
+        ("cache_root", 0o700),
+        ("control_root", 0o750),
+        ("configuration_root", 0o750),
+    ):
+        path = Path(authority[key])
+        path.mkdir(parents=True, exist_ok=True)
+        path.chmod(mode)
+
+    values = _activation_mapping(
+        authority, release_root=release, deployment_profile=deployment_profile
+    )
+    for gate in (
+        "E6_RUNTIME_ENABLED",
+        "E6_PROVIDER_ENABLED",
+        "E6_ACTIVATION_GATE",
+        "E6_WORKLOAD_GATE",
+        "E6_CREDENTIAL_GATE",
+        "E6_NETWORK_GATE",
+        "E6_PUBLICATION_GATE",
+        "E6_TELEGRAM_PUBLICATION_GATE",
+    ):
+        values[gate] = "false"
+    if gate_overrides:
+        values.update(gate_overrides)
+
+    config_path = Path(authority["activation_configuration_path"])
+    _write(config_path, _configuration_text(values), 0o640)
+    _release_manifest(release)
+
+    return {
+        "authority": authority,
+        "release": release,
+        "script_path": script_path,
+        "invoked": invoked,
+        "environment": {
+            "PATH": os.environ["PATH"],
+            "E6_ACTIVATION_CONFIGURATION_PATH": str(config_path),
+            "E6_TRUST_ONLY_VALIDATION": "1",
+        },
+    }
+
+
+def test_default_runtime_path_preservation(tmp_path: Path) -> None:
+    fixture = _run_once_fixture(tmp_path)
+    for unset_value in (None, "", "0"):
+        env = dict(fixture["environment"])
+        if unset_value is None:
+            env.pop("E6_TRUST_ONLY_VALIDATION", None)
+        else:
+            env["E6_TRUST_ONLY_VALIDATION"] = unset_value
+        res = subprocess.run(
+            ["bash", str(fixture["script_path"])],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 0, res.stderr
+        assert "E6_TRUST_ONLY_VALIDATION=PASS" not in res.stdout
+        assert Path(str(fixture["invoked"])).exists()
+        Path(str(fixture["invoked"])).unlink()
+
+
+def test_trust_only_success(tmp_path: Path) -> None:
+    fixture = _trust_only_fixture(tmp_path)
+    res = subprocess.run(
+        ["bash", str(fixture["script_path"])],
+        env=fixture["environment"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == "E6_TRUST_ONLY_VALIDATION=PASS\n"
+    assert not Path(str(fixture["invoked"])).exists()
+
+
+def test_trust_only_profile_rejection(tmp_path: Path) -> None:
+    fixture = _trust_only_fixture(tmp_path, deployment_profile="PRODUCTION")
+    res = subprocess.run(
+        ["bash", str(fixture["script_path"])],
+        env=fixture["environment"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 78
+    assert "E6_LAUNCH_BLOCKED=TRUST_ONLY_PROFILE" in res.stderr
+    assert not Path(str(fixture["invoked"])).exists()
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        "E6_RUNTIME_ENABLED",
+        "E6_PROVIDER_ENABLED",
+        "E6_ACTIVATION_GATE",
+        "E6_WORKLOAD_GATE",
+        "E6_CREDENTIAL_GATE",
+        "E6_NETWORK_GATE",
+        "E6_PUBLICATION_GATE",
+        "E6_TELEGRAM_PUBLICATION_GATE",
+    ],
+)
+@pytest.mark.parametrize("invalid_value", ["true", "1", "invalid", ""])
+def test_trust_only_gate_matrix(
+    tmp_path: Path, gate: str, invalid_value: str
+) -> None:
+    fixture = _trust_only_fixture(
+        tmp_path, gate_overrides={gate: invalid_value}
+    )
+    res = subprocess.run(
+        ["bash", str(fixture["script_path"])],
+        env=fixture["environment"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 78
+    assert f"E6_LAUNCH_BLOCKED=BINDING_{gate}" in res.stderr
+
+
+def test_trust_only_invalid_trigger_values(tmp_path: Path) -> None:
+    fixture = _trust_only_fixture(tmp_path)
+    for invalid_trigger in ("2", "true", "yes", "PASS", "false"):
+        env = dict(fixture["environment"])
+        env["E6_TRUST_ONLY_VALIDATION"] = invalid_trigger
+        res = subprocess.run(
+            ["bash", str(fixture["script_path"])],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode == 78
+        assert "E6_LAUNCH_BLOCKED=TRUST_ONLY_TRIGGER_INVALID" in res.stderr
+
+
+def test_trust_only_zero_side_effects(tmp_path: Path) -> None:
+    fixture = _trust_only_fixture(tmp_path)
+    authority = fixture["authority"]
+
+    res = subprocess.run(
+        ["bash", str(fixture["script_path"])],
+        env=fixture["environment"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == "E6_TRUST_ONLY_VALIDATION=PASS\n"
+
+    # 1. No lock file created
+    assert not Path(authority["runtime_lock"]).exists()
+    # 2. No state ledger touched
+    assert not Path(authority["active_ledger_path"]).exists()
+    # 3. No owner state touched
+    assert not Path(authority["owner_state_path"]).exists()
+    # 4. No python invocation
+    assert not Path(str(fixture["invoked"])).exists()
+
+
+def test_activation_configuration_45_key_contract() -> None:
+    assert len(_EXPECTED_KEYS) == 45
+    assert len(set(_EXPECTED_KEYS)) == 45
+    assert _EXPECTED_KEYS[0] == "E6_ACTIVATION_SCHEMA_VERSION"
+    assert _EXPECTED_KEYS[44] == "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED"
+
+
+def test_runtime_placeholder_closure() -> None:
+    for script_name in (
+        "ai-crypto-signal-agent-e6-run-once",
+        "ai-crypto-signal-agent-e6-health",
+        "ai-crypto-signal-agent-e6-rollback",
+    ):
+        script_text = _text(BIN / script_name)
+        assert "@@TRUSTED_CHECKPOINT_COMMIT@@" not in script_text
+
+
+def test_health_checkpoint_binding_contract(tmp_path: Path) -> None:
+    fixture = _health_fixture(tmp_path, deployment_profile="CANDIDATE_CANARY")
+    script = fixture["script"]
+    env = fixture["environment"]
+    release = fixture["release"]
+    checkpoint_file = release / "TRUSTED_E6_CHECKPOINT_COMMIT"
+    manifest = release / ".e6-release-manifest"
+
+    # Base case: pass
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+
+    # 1. Missing checkpoint file
+    release.chmod(0o755)
+    checkpoint_file.unlink()
+    release.chmod(0o555)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 2. Symlink checkpoint file
+    release.chmod(0o755)
+    target_chk = tmp_path / "chk_target"
+    _write(target_chk, f"{TRUSTED}\n", 0o444)
+    checkpoint_file.symlink_to(target_chk)
+    release.chmod(0o555)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+    release.chmod(0o755)
+    checkpoint_file.unlink()
+    release.chmod(0o555)
+
+    # 3. Malformed binding bytes (not 40-hex lowercase)
+    release.chmod(0o755)
+    _write(checkpoint_file, f"{'0'*39}\n", 0o444)
+    _release_manifest(release)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 4. Uppercase binding identity
+    release.chmod(0o755)
+    _write(checkpoint_file, f"{TRUSTED.upper()}\n", 0o444)
+    _release_manifest(release)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 5. Extra whitespace
+    release.chmod(0o755)
+    _write(checkpoint_file, f"  {TRUSTED}  \n", 0o444)
+    _release_manifest(release)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 6. Multiple lines
+    release.chmod(0o755)
+    _write(checkpoint_file, f"{TRUSTED}\n{TRUSTED}\n", 0o444)
+    _release_manifest(release)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 7. Binding-versus-manifest mismatch
+    release.chmod(0o755)
+    _write(checkpoint_file, f"{'1'*40}\n", 0o444)
+    _release_manifest(release)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 8. Missing manifest checkpoint
+    release.chmod(0o755)
+    _write(checkpoint_file, f"{TRUSTED}\n", 0o444)
+    manifest.chmod(0o644)
+    _write(
+        manifest,
+        f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\n",
+        0o444,
+    )
+    release.chmod(0o555)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+    # 9. Duplicate manifest checkpoint
+    release.chmod(0o755)
+    manifest.chmod(0o644)
+    _write(
+        manifest,
+        f"SOURCE_COMMIT={COMMIT}\nSOURCE_TREE={TREE}\n"
+        f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n"
+        f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
+        0o444,
+    )
+    release.chmod(0o555)
+    res = subprocess.run(
+        [
+            str(script),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 1
+    assert "IMMUTABLE_RELEASE_MATCH=NO" in res.stdout
+
+
+def test_rollback_checkpoint_binding_contract(tmp_path: Path) -> None:
+    source = _replace_fixture_authority(
+        _text(BIN / "ai-crypto-signal-agent-e6-rollback"),
+        authority=_fixture_authority(tmp_path),
+        tmp_path=tmp_path,
+    )
+    rollback = tmp_path / "rollback"
+    _write(rollback, source, 0o755)
+
+    def make_rel(commit: str) -> Path:
+        rel = tmp_path / "releases" / commit
+        _write(rel / "payload", f"{commit}\n", 0o444)
+        _write(rel / "TRUSTED_E6_CHECKPOINT_COMMIT", f"{TRUSTED}\n", 0o444)
+        _write(
+            rel / ".e6-release-manifest",
+            f"SOURCE_COMMIT={commit}\nSOURCE_TREE={TREE}\n"
+            f"TRUSTED_CHECKPOINT_COMMIT={TRUSTED}\n",
+            0o444,
+        )
+        included = [
+            p
+            for p in sorted(rel.rglob("*"))
+            if p.is_file() and p.name != ".e6-sha256-manifest"
+        ]
+        lines = [
+            f"{hashlib.sha256(p.read_bytes()).hexdigest()}  "
+            f"{p.relative_to(rel).as_posix()}\n"
+            for p in included
+        ]
+        _write(rel / ".e6-sha256-manifest", "".join(lines), 0o444)
+        rel.chmod(0o555)
+        return rel
+
+    current = make_rel(COMMIT)
+    target = make_rel("d" * 40)
+    host = tmp_path / "host"
+    control = host / "var/lib/ai-crypto-signal-agent-e6-installations" / COMMIT
+    control.mkdir(parents=True)
+    _write(control / "installed-release.path", f"{current}\n", 0o440)
+
+    # 1. Base case: pass
+    res = subprocess.run(
+        [
+            str(rollback),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+            "--target-release",
+            str(target),
+            "--destdir",
+            str(host),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "E6_ROLLBACK=COMPLETE" in res.stdout
+
+    # 2. Missing checkpoint file in target
+    target2 = make_rel("e" * 40)
+    target2.chmod(0o755)
+    (target2 / "TRUSTED_E6_CHECKPOINT_COMMIT").unlink()
+    target2.chmod(0o555)
+    # Reset rollback-release.path and rollback-evidence.txt for next test
+    (control / "rollback-release.path").unlink(missing_ok=True)
+    (control / "rollback-evidence.txt").unlink(missing_ok=True)
+    (control / "installed-release.path").unlink(missing_ok=True)
+    _write(control / "installed-release.path", f"{current}\n", 0o440)
+    res = subprocess.run(
+        [
+            str(rollback),
+            "--deployment-profile",
+            "CANDIDATE_CANARY",
+            "--release-commit",
+            COMMIT,
+            "--target-release",
+            str(target2),
+            "--destdir",
+            str(host),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert res.returncode == 65
+

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly TRUSTED_CHECKPOINT_COMMIT="@@TRUSTED_CHECKPOINT_COMMIT@@"
 readonly ROOT_USER="root"
 readonly ROOT_GROUP="root"
 readonly SERVICE_GROUP="ai-crypto-signal-agent"
@@ -75,9 +74,18 @@ verify_release() {
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
     [[ -f "$release/.e6-release-manifest" && ! -L "$release/.e6-release-manifest" ]] || return 1
     [[ -f "$release/.e6-sha256-manifest" && ! -L "$release/.e6-sha256-manifest" ]] || return 1
+    [[ -f "$release/TRUSTED_E6_CHECKPOINT_COMMIT" && ! -L "$release/TRUSTED_E6_CHECKPOINT_COMMIT" ]] || return 1
+    [[ "$(wc -l < "$release/TRUSTED_E6_CHECKPOINT_COMMIT")" -eq 1 ]] || return 1
+    local trusted_file_content
+    trusted_file_content="$(cat "$release/TRUSTED_E6_CHECKPOINT_COMMIT")"
+    [[ "$trusted_file_content" =~ ^[0-9a-f]{40}$ ]] || return 1
     [[ "$(sed -n 's/^SOURCE_COMMIT=//p' "$release/.e6-release-manifest")" == "$commit" ]] || return 1
     [[ "$(sed -n 's/^SOURCE_TREE=//p' "$release/.e6-release-manifest")" =~ ^[0-9a-f]{40}$ ]] || return 1
-    [[ "$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release/.e6-release-manifest")" == "$TRUSTED_CHECKPOINT_COMMIT" ]] || return 1
+    [[ "$(grep -c '^TRUSTED_CHECKPOINT_COMMIT=' "$release/.e6-release-manifest" 2>/dev/null || true)" -eq 1 ]] || return 1
+    local manifest_trust
+    manifest_trust="$(sed -n 's/^TRUSTED_CHECKPOINT_COMMIT=//p' "$release/.e6-release-manifest")"
+    [[ "$manifest_trust" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [[ "$trusted_file_content" == "$manifest_trust" ]] || return 1
     (cd -- "$release" && sha256sum --quiet -c .e6-sha256-manifest) || return 1
 }
 
@@ -133,11 +141,12 @@ verify_release "$target_release" || exit 65
 [[ ! -e "$evidence_path" && ! -L "$evidence_path" ]] || exit 66
 
 atomic_write "$rollback_ref" "$current_release" "$ROOT_USER" "$SERVICE_GROUP" 0440
+current_trusted="$(cat "$current_release/TRUSTED_E6_CHECKPOINT_COMMIT")"
 atomic_write "$evidence_path" "DEPLOYMENT_PROFILE=$profile
 BOUND_RELEASE_COMMIT=$release_commit
 FROM_RELEASE=$current_release
 TO_RELEASE=$target_release
-TRUSTED_CHECKPOINT_COMMIT=$TRUSTED_CHECKPOINT_COMMIT
+TRUSTED_CHECKPOINT_COMMIT=$current_trusted
 STATE_AUTHORITY_RETAINED_IN_PLACE=YES" "$ROOT_USER" "$ROOT_GROUP" 0400
 atomic_write "$current_ref" "$target_release" "$ROOT_USER" "$SERVICE_GROUP" 0440
 
