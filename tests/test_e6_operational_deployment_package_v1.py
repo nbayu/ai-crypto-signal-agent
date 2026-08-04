@@ -453,27 +453,27 @@ def _health_fixture(
         0o640,
     )
 
-    if deployment_profile == "CANDIDATE_CANARY":
-        service_template = "ai-crypto-signal-agent-e6.service.in"
-        timer_template = "ai-crypto-signal-agent-e6.timer"
-    else:
-        service_template = "ai-crypto-signal-agent-e6-production.service.in"
-        timer_template = "ai-crypto-signal-agent-e6-production.timer"
-    rendered_service = _render_profile(
-        _text(SYSTEMD / service_template), deployment_profile
-    )
-    rendered_timer = _render_profile(
-        _text(SYSTEMD / timer_template), deployment_profile
-    )
-    binding = build_e6_deployment_state_binding_v1(
-        deployment_profile=deployment_profile, release_commit=COMMIT
-    )
-    rendered_service = rendered_service.replace(
-        binding.accepted_marker, authority["accepted_marker"]
-    )
     rendered = release / ".e6-rendered"
-    _write(rendered / authority["service_unit"], rendered_service, 0o444)
-    _write(rendered / authority["timer_unit"], rendered_timer, 0o444)
+    for profile in ("CANDIDATE_CANARY", "PRODUCTION"):
+        if profile == "CANDIDATE_CANARY":
+            s_tpl = "ai-crypto-signal-agent-e6.service.in"
+            t_tpl = "ai-crypto-signal-agent-e6.timer"
+        else:
+            s_tpl = "ai-crypto-signal-agent-e6-production.service.in"
+            t_tpl = "ai-crypto-signal-agent-e6-production.timer"
+        r_service = _render_profile(_text(SYSTEMD / s_tpl), profile)
+        r_timer = _render_profile(_text(SYSTEMD / t_tpl), profile)
+        b = build_e6_deployment_state_binding_v1(deployment_profile=profile, release_commit=COMMIT)
+        
+        r_service = r_service.replace(b.accepted_marker, authority["accepted_marker"])
+        
+        _write(rendered / b.service_unit, r_service, 0o444)
+        _write(rendered / b.timer_unit, r_timer, 0o444)
+        
+        if profile == deployment_profile:
+            rendered_service = r_service
+            rendered_timer = r_timer
+            binding = b
     _write(
         release
         / "deploy/e6_operational_v1/bin/ai-crypto-signal-agent-e6-run-once",
