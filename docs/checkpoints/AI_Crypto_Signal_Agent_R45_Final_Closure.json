@@ -1,0 +1,82 @@
+{
+  "project_identity": {
+    "hierarchy": [
+      "PDF Evaluasi 1",
+      "PDF Evaluasi 2",
+      "E1-E6 roadmap/checkpoints",
+      "R38-R45 closure roadmap"
+    ]
+  },
+  "final_local_identities": {
+    "resolution_commit": "7d7ea7a748ddd20b4287d5aa814fac4c07bc2093",
+    "resolution_tree": "91259b847018c4ee57d13ecfd64397bc547ecae3",
+    "branch": "HEAD",
+    "clean_worktree_index": "YES"
+  },
+  "final_vps_production_identities": {
+    "host": "vmi3412728",
+    "production_profile": "PRODUCTION",
+    "active_commit": "7d7ea7a748ddd20b4287d5aa814fac4c07bc2093",
+    "active_tree": "91259b847018c4ee57d13ecfd64397bc547ecae3",
+    "active_release": "/opt/ai-crypto-signal-agent-releases/7d7ea7a748ddd20b4287d5aa814fac4c07bc2093",
+    "production_service": "ai-crypto-signal-agent-e6-production.service",
+    "production_timer": "ai-crypto-signal-agent-e6-production.timer",
+    "sole_scheduler_authority": "ai-crypto-signal-agent-e6-production.timer"
+  },
+  "release_artifact_hashes": {
+    "candidate_service": "40d0b0db8791ca064a6f86da89047f64e6e192adb247b17fbe3f86089a990f99",
+    "candidate_timer": "ee902dcf4c3968464c061261e3b1f700d87b91e247f40de88e3084ab5285d9fa",
+    "production_service": "449ebfd69fb5be842c8e90a0abd6ac2d3962988f999c8fc3c9a7410e24ae2372",
+    "production_timer": "3ab0fb3e70ac8ec043d3ed93cccdd8ba187f1706f50ee53c7c6124682b611a32",
+    "r44_evidence_hashes_present": true
+  },
+  "test_and_release_validation": {
+    "focused_test_result": "PASS",
+    "full_regression_counts": {"failed": 0, "errors": 0},
+    "full_regression_exit_status": 0,
+    "canonical_seal_result": "PASS",
+    "release_integrity_result": "PASS"
+  },
+  "production_activation": {
+    "transaction_count": 1,
+    "scheduler_handoff": 1,
+    "post_health_result": "PASS",
+    "downtime": 0,
+    "rollback_readiness": "NO"
+  },
+  "incident_history": [
+    "degraded E6 activation",
+    "rollback to legacy",
+    "EB37",
+    "A306",
+    "FDAF",
+    "R9R11 failure",
+    "R9R11R2 state remediation",
+    "R9R12 successful replacement canary",
+    "R9R12R2 owner evidence-gap exception",
+    "R44 and R44R1 safe failures",
+    "final canonical production correction and cutover"
+  ],
+  "explicit_residual_disclosure": {
+    "missing_historical_r9r12_pre_post_tree_digests": true,
+    "missing_historical_exact_eight_key_matrix": true,
+    "owner_exception_sha_disclosed": true,
+    "no_claim_missing_facts_reconstructed": true
+  },
+  "final_operating_state": {
+    "production_timer_sole_scheduler": true,
+    "legacy_timer_disabled_but_retained": true,
+    "candidate_units_disabled": true,
+    "eb37_failed_and_preserved": true,
+    "no_exchange_order_or_automated_trading_authority": true
+  },
+  "closure_declaration": {
+    "e1_e6_formally_closed": true,
+    "production_incident_01_formally_closed": true,
+    "r38_r45_formally_closed": true,
+    "production_monitoring_continues_as_normal_operations": true,
+    "future_changes_require_backlog_rfc_and_separate_authorized_deployment_workflow": true,
+    "web_dashboard_remains_postponed": true,
+    "git_remote_sync_pending_separate_exact_push_authorization": true
+  }
+}
