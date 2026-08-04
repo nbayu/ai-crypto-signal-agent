@@ -38,6 +38,7 @@ _SYMBOL: Final = re.compile(r"[A-Z0-9]+/[A-Z0-9]+:[A-Z0-9]+\Z")
 _TICK_SIZE: Final = re.compile(
     r"(?:[1-9][0-9]*|0\.[0-9]*[1-9]|[1-9][0-9]*\.[0-9]*[1-9])\Z"
 )
+_RAW_DECIMAL: Final = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?\Z")
 _ERROR: Final = "INVALID_E6_PRODUCTION_MARKET_ACQUISITION"
 
 
@@ -102,6 +103,29 @@ def _finite(value: object, *, positive: bool = False) -> float:
     numeric = float(value)
     _require(math.isfinite(numeric) and (numeric > 0 if positive else numeric >= 0))
     return numeric
+
+
+def _parse_raw_decimal_number(value: object, *, positive: bool = False) -> float:
+    if type(value) in (int, float):
+        if positive or value >= 0:
+            return _finite(value, positive=positive)
+        _require(not isinstance(value, bool) and math.isfinite(float(value)))
+        return float(value)
+    if type(value) is not str or not value:
+        _invalid()
+    if _RAW_DECIMAL.fullmatch(value) is None:
+        _invalid()
+    import decimal
+    try:
+        dec = decimal.Decimal(value)
+    except Exception:
+        _invalid()
+    if not dec.is_finite():
+        _invalid()
+    num = float(dec)
+    if positive or num >= 0:
+        return _finite(num, positive=positive)
+    return num
 
 
 def _symbol(value: object) -> str:
@@ -448,7 +472,7 @@ class E6ProductionBinancePublicMarketPortV1:
             best_bid = _finite(bids[0][0], positive=True)
             best_ask = _finite(asks[0][0], positive=True)
             last_price = _finite(ticker["last"], positive=True)
-            mark_price = _finite(mark["markPrice"], positive=True)
+            mark_price = _parse_raw_decimal_number(mark["markPrice"], positive=True)
             timestamps = []
             for raw in (order_book.get("timestamp"), ticker.get("timestamp"), mark.get("time", mark.get("timestamp"))):
                 text_value, parsed = _milliseconds(raw)

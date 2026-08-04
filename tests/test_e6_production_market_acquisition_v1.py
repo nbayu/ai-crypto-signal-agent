@@ -241,3 +241,73 @@ def test_source_has_zero_retry_private_or_order_authority() -> None:
         "create_order", "cancel_order", "while true", "retry(",
     ):
         assert prohibited not in source
+
+
+def test_parse_raw_decimal_number_accepted_cases() -> None:
+    assert module._parse_raw_decimal_number(1) == 1.0
+    assert module._parse_raw_decimal_number(1.5) == 1.5
+    assert module._parse_raw_decimal_number("1.5") == 1.5
+    assert module._parse_raw_decimal_number("-1.5", positive=False) == -1.5
+    assert module._parse_raw_decimal_number("1.5e2") == 150.0
+    assert module._parse_raw_decimal_number("63677.44", positive=True) == 63677.44
+
+
+def test_parse_raw_decimal_number_rejected_cases() -> None:
+    rejects = [
+        True, False, None, "", " 1.5", "1.5 ", "1 5", "1,500.0",
+        "1.5.5", "NaN", "Infinity", "-Infinity", "nan", "inf",
+        [], {}, b"1.5",
+    ]
+    for invalid in rejects:
+        with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+            module._parse_raw_decimal_number(invalid)
+
+    # Reject zero/negative when positive is required
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        module._parse_raw_decimal_number(0, positive=True)
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        module._parse_raw_decimal_number(-1.5, positive=True)
+
+
+def test_integration_string_mark_price_produces_valid_quote() -> None:
+    # A. String markPrice
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"markPrice": "63677.44", "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    quote = port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+    assert quote.mark_price == 63677.44
+
+    # B. Numeric markPrice remains valid
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"markPrice": 63677.44, "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    quote2 = port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+    assert quote2.mark_price == 63677.44
+
+    # C. Malformed string fails
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"markPrice": "1,000", "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+
+    # D. Missing field fails
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+
+    # E. NaN string fails
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"markPrice": "NaN", "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+
+    # F. Bool fails
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    client.mark_payload = {"markPrice": True, "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
+    with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+        port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
