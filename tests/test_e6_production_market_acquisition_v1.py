@@ -311,3 +311,56 @@ def test_integration_string_mark_price_produces_valid_quote() -> None:
     client.mark_payload = {"markPrice": True, "time": _ms(datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc))}
     with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
         port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+
+
+def test_parse_exchange_millisecond_timestamp_accepted_cases() -> None:
+    # 1. explicit UTC second precision
+    assert module._parse_exchange_millisecond_timestamp("2026-08-04T05:51:38Z") == ("2026-08-04T05:51:38Z", datetime(2026, 8, 4, 5, 51, 38, tzinfo=timezone.utc))
+    # 2. explicit UTC millisecond precision with nonzero milliseconds
+    assert module._parse_exchange_millisecond_timestamp("2026-08-04T05:51:38.123Z") == ("2026-08-04T05:51:38.123Z", datetime(2026, 8, 4, 5, 51, 38, 123000, tzinfo=timezone.utc))
+    # 3. .000Z
+    assert module._parse_exchange_millisecond_timestamp("2026-08-04T05:51:38.000Z") == ("2026-08-04T05:51:38Z", datetime(2026, 8, 4, 5, 51, 38, tzinfo=timezone.utc))
+    # 4. explicit +00:00 equivalent
+    assert module._parse_exchange_millisecond_timestamp("2026-08-04T05:51:38+00:00") == ("2026-08-04T05:51:38Z", datetime(2026, 8, 4, 5, 51, 38, tzinfo=timezone.utc))
+    assert module._parse_exchange_millisecond_timestamp("2026-08-04T05:51:38.123+00:00") == ("2026-08-04T05:51:38.123Z", datetime(2026, 8, 4, 5, 51, 38, 123000, tzinfo=timezone.utc))
+    # 5. valid integer epoch milliseconds
+    assert module._parse_exchange_millisecond_timestamp(1691136000000) == ("2023-08-04T08:00:00Z", datetime(2023, 8, 4, 8, 0, 0, tzinfo=timezone.utc))
+    # 6. the sanitized R4R5 timestamp precision class (integer epoch with nonzero milliseconds)
+    assert module._parse_exchange_millisecond_timestamp(1691136000123) == ("2023-08-04T08:00:00.123Z", datetime(2023, 8, 4, 8, 0, 0, 123000, tzinfo=timezone.utc))
+    assert module._parse_exchange_millisecond_timestamp(1691136000123.0) == ("2023-08-04T08:00:00.123Z", datetime(2023, 8, 4, 8, 0, 0, 123000, tzinfo=timezone.utc))
+
+
+def test_parse_exchange_millisecond_timestamp_rejected_cases() -> None:
+    rejects = [
+        True, False, None, "", " 2026-08-04T05:51:38Z", "2026-08-04T05:51:38Z ", 
+        "2026-08-04T05:51:38", # naive ISO
+        "2026-08-04T05:51:38+02:00", # non-UTC offset
+        "2026-08-04 05:51:38Z", # malformed ISO
+        "2026-13-04T05:51:38Z", # impossible calendar date
+        "2026-08-04T05:51:38.123456Z", # arbitrary microseconds
+        1691136000123.456, # arbitrary microseconds in float
+        [], {}, b"1691136000000",
+        -1, -1000 # negative epoch
+    ]
+    for invalid in rejects:
+        with pytest.raises(module.E6ProductionMarketAcquisitionErrorV1):
+            module._parse_exchange_millisecond_timestamp(invalid)
+
+
+def test_r4r5_timestamp_incident_reproduction_after_fix() -> None:
+    # Reproduces R4R5 exactly: a markPrice timestamp (int) with nonzero milliseconds.
+    # The actual bug failed in `_milliseconds` during `fetch_executable_quote`.
+    port, client = _port()
+    snapshot = port.acquire_market_snapshot(observed_at=OBSERVED)
+    
+    # 1691136000123 = 2023-08-04T08:00:00.123Z (nonzero ms)
+    client.mark_payload = {"markPrice": 63677.44, "time": 1691136000123}
+    client.ticker_payload = {"last": 63677.0, "timestamp": 1691136000000}
+    client.order_book_payload = {"bids": [[63676.0, 1.0]], "asks": [[63678.0, 1.0]], "timestamp": 1691136000000}
+    
+    # This should pass now, normalizing the microsecond timestamp
+    quote = port.fetch_executable_quote(canonical_symbol=snapshot.entries[0].canonical_symbol, observed_at=OBSERVED)
+    
+    assert quote.exchange_timestamp == "2023-08-04T08:00:00.123Z"
+    assert quote.mark_price == 63677.44
+

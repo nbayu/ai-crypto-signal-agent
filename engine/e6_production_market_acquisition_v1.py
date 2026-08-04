@@ -98,6 +98,34 @@ def _milliseconds(value: object) -> tuple[str, datetime]:
     return parsed.strftime("%Y-%m-%dT%H:%M:%SZ"), parsed
 
 
+def _parse_exchange_millisecond_timestamp(value: object) -> tuple[str, datetime]:
+    _require(not isinstance(value, bool))
+    if type(value) in (int, float):
+        numeric = float(value)
+        _require(math.isfinite(numeric) and numeric >= 0 and numeric.is_integer())
+        parsed = datetime.fromtimestamp(numeric / 1000, tz=timezone.utc)
+        _require(parsed.microsecond % 1000 == 0)
+    elif type(value) is str:
+        text = value.replace("+00:00", "Z")
+        try:
+            if "." in text:
+                parsed = datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            else:
+                parsed = datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            _invalid()
+        _require(parsed.microsecond % 1000 == 0)
+    else:
+        _invalid()
+    ms = parsed.microsecond // 1000
+    if ms > 0:
+        text_value = parsed.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
+    else:
+        text_value = parsed.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return text_value, parsed
+
+
+
 def _finite(value: object, *, positive: bool = False) -> float:
     _require(type(value) in (int, float) and not isinstance(value, bool))
     numeric = float(value)
@@ -222,7 +250,7 @@ class E6ProductionExecutableQuoteEvidenceV1:
         _require(self.venue == BINANCE_USDM_VENUE_V1)
         _symbol(self.canonical_symbol)
         _observed_text, observed = _utc(self.observed_at)
-        _exchange_text, exchanged = _utc(self.exchange_timestamp)
+        _exchange_text, exchanged = _parse_exchange_millisecond_timestamp(self.exchange_timestamp)
         _require(exchanged <= observed, "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE")
         bid = _finite(self.best_bid, positive=True)
         ask = _finite(self.best_ask, positive=True)
@@ -392,7 +420,7 @@ class E6ProductionBinancePublicMarketPortV1:
         candles = []
         for row in rows:
             _require(type(row) in (tuple, list) and len(row) >= 6)
-            open_text, opened = _milliseconds(row[0])
+            open_text, opened = _parse_exchange_millisecond_timestamp(row[0])
             close_text = (opened + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
             candles.append(
                 ModeUtcCandleV1(
@@ -429,7 +457,7 @@ class E6ProductionBinancePublicMarketPortV1:
         for row in rows:
             _require(isinstance(row, Mapping))
             timestamp = row.get("timestamp")
-            close_text, _parsed = _milliseconds(timestamp)
+            close_text, _parsed = _parse_exchange_millisecond_timestamp(timestamp)
             amount = row.get("openInterestAmount", row.get("openInterestValue"))
             observations.append(
                 ModeOiObservationV1(
@@ -475,7 +503,7 @@ class E6ProductionBinancePublicMarketPortV1:
             mark_price = _parse_raw_decimal_number(mark["markPrice"], positive=True)
             timestamps = []
             for raw in (order_book.get("timestamp"), ticker.get("timestamp"), mark.get("time", mark.get("timestamp"))):
-                text_value, parsed = _milliseconds(raw)
+                text_value, parsed = _parse_exchange_millisecond_timestamp(raw)
                 _require(parsed <= observed, "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE")
                 timestamps.append((text_value, parsed))
             oldest = min(timestamps, key=lambda item: item[1])[0]
