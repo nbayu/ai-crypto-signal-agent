@@ -17,8 +17,9 @@ The only supported operational progression is:
 → `ROLLBACK`
 
 R41 installs only a disabled, inactive `CANDIDATE_CANARY`. R42 may authorize
-exactly one candidate invocation while legacy production remains the sole
-authoritative publisher and scheduler. The `PRODUCTION` profile is reserved
+exactly one candidate invocation while exactly one continuing production
+scheduler remains authoritative: either the legacy timer before cutover or
+the stable E6 production timer after cutover. The `PRODUCTION` profile is reserved
 for a separately authorized R44 writer freeze and cutover. No script in this
 package automatically stops, starts, enables, disables, presets, or reloads a
 legacy unit.
@@ -108,8 +109,10 @@ exit 0 may mean `NO_WORK`, `NO_TRADE`, or `NO_MODE_JOB_DUE`.
 Health requires `--deployment-profile` and `--release-commit`. Candidate health
 checks exact versioned units, immutable release parity, binding parity,
 ownership/modes, empty candidate owner/ledger state, an absent or unheld
-candidate lock, disabled/inactive candidate units, and continuing legacy timer
-authority. It performs no run-once, service cycle, provider call, Telegram
+candidate lock, disabled/inactive candidate units, and exactly one continuing
+production scheduler authority: legacy before cutover or the stable E6
+production timer after cutover. It performs no run-once, service cycle,
+provider call, Telegram
 send, publication, lifecycle transition, slot/pair-lock mutation, or order.
 
 Rollback requires the same exact profile and bound commit. Candidate rollback

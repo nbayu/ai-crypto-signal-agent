@@ -7,6 +7,7 @@ readonly ROOT_USER="root"
 readonly ROOT_GROUP="root"
 readonly LEGACY_SERVICE_NAME="ai-crypto-signal-agent.service"
 readonly LEGACY_TIMER_NAME="ai-crypto-signal-agent.timer"
+readonly PRODUCTION_TIMER_NAME="ai-crypto-signal-agent-e6-production.timer"
 readonly OLD_E6_TIMER_NAME="ai-crypto-signal-agent-e6.timer"
 readonly CANDIDATE_TIMER_PATTERN="ai-crypto-signal-agent-e6-candidate-*.timer"
 readonly TELEGRAM_ENVIRONMENT="/etc/ai-crypto-signal-agent/phase09r1.env"
@@ -263,6 +264,10 @@ legacy_active="$(systemctl is-active "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
 legacy_enabled="$(systemctl is-enabled "$LEGACY_TIMER_NAME" 2>/dev/null || true)"
 legacy_substate="$(systemctl show "$LEGACY_TIMER_NAME" -p SubState --value 2>/dev/null || true)"
 
+production_active="$(systemctl is-active "$PRODUCTION_TIMER_NAME" 2>/dev/null || true)"
+production_enabled="$(systemctl is-enabled "$PRODUCTION_TIMER_NAME" 2>/dev/null || true)"
+production_substate="$(systemctl show "$PRODUCTION_TIMER_NAME" -p SubState --value 2>/dev/null || true)"
+
 authoritative_scheduler_count=0
 authoritative_scheduler="NONE"
 consider_scheduler_authority() {
@@ -281,7 +286,7 @@ consider_scheduler_authority() {
 
 profile_units_valid=NO
 legacy_service_valid=NO
-legacy_authority_valid=NO
+continuing_production_authority_valid=NO
 production_timer_valid=NO
 legacy_transfer_valid=NO
 candidate_timers_valid=YES
@@ -294,6 +299,9 @@ fi
 
 consider_scheduler_authority "$LEGACY_TIMER_NAME" "$legacy_active" "$legacy_enabled"
 consider_scheduler_authority "$timer_unit" "$timer_active" "$timer_enabled"
+if [[ "$profile" == CANDIDATE_CANARY ]]; then
+    consider_scheduler_authority "$PRODUCTION_TIMER_NAME" "$production_active" "$production_enabled"
+fi
 
 if [[ "$profile" == CANDIDATE_CANARY ]]; then
     if [[ "$service_active" == inactive &&
@@ -301,9 +309,11 @@ if [[ "$profile" == CANDIDATE_CANARY ]]; then
           "$timer_active" == inactive && "$timer_enabled" == disabled ]]; then
         profile_units_valid=YES
     fi
-    if [[ "$legacy_active" == active && "$legacy_enabled" == enabled &&
-          "$legacy_substate" == waiting ]]; then
-        legacy_authority_valid=YES
+    if [[ ( "$legacy_active" == active && "$legacy_enabled" == enabled &&
+            "$legacy_substate" == waiting ) ||
+          ( "$production_active" == active && "$production_enabled" == enabled &&
+            "$production_substate" == waiting ) ]]; then
+        continuing_production_authority_valid=YES
     fi
 else
     if [[ "$service_active" == inactive && "$service_substate" == dead &&
@@ -353,7 +363,8 @@ if [[ "$authoritative_scheduler_count" -eq 0 ]]; then
 elif [[ "$authoritative_scheduler_count" -gt 1 ]]; then
     authoritative_scheduler_reason="SCHEDULER_AUTHORITY_COUNT_MULTIPLE"
 elif [[ "$profile" == CANDIDATE_CANARY &&
-        "$authoritative_scheduler" == "$LEGACY_TIMER_NAME" ]]; then
+        ( "$authoritative_scheduler" == "$LEGACY_TIMER_NAME" ||
+          "$authoritative_scheduler" == "$PRODUCTION_TIMER_NAME" ) ]]; then
     authoritative_scheduler_valid=YES
 elif [[ "$profile" == PRODUCTION &&
         "$authoritative_scheduler" == "$timer_unit" ]]; then
@@ -377,7 +388,7 @@ if [[ "$profile" == CANDIDATE_CANARY ]]; then
     record_check CANDIDATE_STATE_VALID_EMPTY "$state_authority_valid" CANDIDATE_STATE_INVALID
     record_check PROFILE_UNITS_DISABLED_INACTIVE "$profile_units_valid" PROFILE_UNIT_AUTHORITY_INVALID
     record_check LEGACY_SERVICE_INACTIVE "$legacy_service_valid" LEGACY_SERVICE_AUTHORITY_INVALID
-    record_check LEGACY_PRODUCTION_AUTHORITY "$legacy_authority_valid" LEGACY_PRODUCTION_AUTHORITY_INVALID
+    record_check CONTINUING_PRODUCTION_AUTHORITY "$continuing_production_authority_valid" CONTINUING_PRODUCTION_AUTHORITY_INVALID
 else
     record_check PRODUCTION_STATE_AUTHORITY_VALID "$state_authority_valid" PRODUCTION_STATE_AUTHORITY_INVALID
     record_check PRODUCTION_SERVICE_INACTIVE "$profile_units_valid" PRODUCTION_SERVICE_AUTHORITY_INVALID

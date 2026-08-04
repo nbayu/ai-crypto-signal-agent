@@ -510,11 +510,15 @@ def _health_fixture(
         "candidate_timer_2": candidate_timer_2,
     }
     if deployment_profile == "CANDIDATE_CANARY":
+        state_keys["production_timer"] = (
+            "ai-crypto-signal-agent-e6-production.timer"
+        )
         states = {
             "profile_service": ("inactive", "static", "dead"),
             "profile_timer": ("inactive", "disabled", "dead"),
             "legacy_service": ("inactive", "static", "dead"),
             "legacy_timer": ("active", "enabled", "waiting"),
+            "production_timer": ("inactive", "disabled", "dead"),
             "old_e6_timer": ("inactive", "disabled", "dead"),
             "candidate_timer_1": ("inactive", "disabled", "dead"),
             "candidate_timer_2": ("inactive", "disabled", "dead"),
@@ -882,6 +886,7 @@ def test_health_is_profile_bound_read_only_and_cannot_invoke_effect_paths() -> N
         'grep -q \'"signals":{}\' "$active_ledger"',
         'grep -q \'"signal_message_bindings":{}\' "$owner_state"',
         "PROFILE_UNITS_DISABLED_INACTIVE",
+        "CONTINUING_PRODUCTION_AUTHORITY",
         "PRODUCTION_STATE_AUTHORITY_VALID",
         "PRODUCTION_TIMER_ACTIVE",
         "CANDIDATE_TIMER_INACTIVITY",
@@ -926,6 +931,7 @@ def test_candidate_health_fixture_passes_disabled_inactive_without_mutation(
     result = fixture["result"]
     assert result.returncode == 0, result.stdout + result.stderr
     assert "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED" in result.stdout
+    assert "CONTINUING_PRODUCTION_AUTHORITY=YES" in result.stdout
     assert "AUTHORITATIVE_SCHEDULER_COUNT=1" in result.stdout
     assert "AUTHORITATIVE_SCHEDULER=ai-crypto-signal-agent.timer" in result.stdout
     assert "SERVICE_CYCLE_INVOCATION_COUNT=0" in result.stdout
@@ -945,7 +951,7 @@ def test_candidate_health_fixture_passes_disabled_inactive_without_mutation(
         ),
         (
             {"legacy_timer": ("inactive", "disabled", "dead")},
-            "LEGACY_PRODUCTION_AUTHORITY_INVALID",
+            "CONTINUING_PRODUCTION_AUTHORITY_INVALID",
         ),
         (
             {"legacy_service": ("active", "static", "running")},
@@ -954,6 +960,79 @@ def test_candidate_health_fixture_passes_disabled_inactive_without_mutation(
     ),
 )
 def test_candidate_health_rejects_scheduler_authority_drift(
+    tmp_path: Path,
+    state_overrides: dict[str, tuple[str, str, str]],
+    expected_reason: str,
+) -> None:
+    result = _health_fixture(
+        tmp_path,
+        deployment_profile="CANDIDATE_CANARY",
+        state_overrides=state_overrides,
+    )["result"]
+    assert result.returncode == 1
+    assert f"HEALTH_REASON={expected_reason}" in result.stdout
+    assert "HEALTH_STATUS=NOT_READY" in result.stdout
+
+
+
+def test_candidate_health_fixture_passes_post_cutover_production_authority_without_mutation(
+    tmp_path: Path,
+) -> None:
+    fixture = _health_fixture(
+        tmp_path,
+        deployment_profile="CANDIDATE_CANARY",
+        state_overrides={
+            "legacy_timer": ("inactive", "disabled", "dead"),
+            "production_timer": ("active", "enabled", "waiting"),
+        },
+    )
+    result = fixture["result"]
+    assert result.returncode == 0, result.stdout + result.stderr
+    for marker in (
+        "HEALTH_STATUS=PASS_DISABLED_NOT_ACTIVATED",
+        "CONTINUING_PRODUCTION_AUTHORITY=YES",
+        "AUTHORITATIVE_SCHEDULER_COUNT=1",
+        (
+            "AUTHORITATIVE_SCHEDULER="
+            "ai-crypto-signal-agent-e6-production.timer"
+        ),
+        "SERVICE_CYCLE_INVOCATION_COUNT=0",
+        "AUTOMATIC_RETRY_COUNT=0",
+    ):
+        assert marker in result.stdout
+    assert all(
+        path.read_bytes() == content
+        for path, content in fixture["state_preimage"].items()
+    )
+
+
+@pytest.mark.parametrize(
+    ("state_overrides", "expected_reason"),
+    (
+        (
+            {
+                "legacy_timer": ("inactive", "disabled", "dead"),
+                "production_timer": ("inactive", "disabled", "dead"),
+            },
+            "SCHEDULER_AUTHORITY_COUNT_ZERO",
+        ),
+        (
+            {
+                "legacy_timer": ("active", "enabled", "waiting"),
+                "production_timer": ("active", "enabled", "waiting"),
+            },
+            "SCHEDULER_AUTHORITY_COUNT_MULTIPLE",
+        ),
+        (
+            {
+                "legacy_timer": ("inactive", "disabled", "dead"),
+                "production_timer": ("active", "enabled", "running"),
+            },
+            "CONTINUING_PRODUCTION_AUTHORITY_INVALID",
+        ),
+    ),
+)
+def test_candidate_health_rejects_post_cutover_scheduler_authority_drift(
     tmp_path: Path,
     state_overrides: dict[str, tuple[str, str, str]],
     expected_reason: str,
