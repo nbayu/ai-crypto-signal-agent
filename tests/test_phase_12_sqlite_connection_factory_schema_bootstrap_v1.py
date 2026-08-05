@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import inspect
 from dataclasses import FrozenInstanceError, fields, is_dataclass
 
@@ -198,18 +201,39 @@ def test_manifest_and_readiness_are_fail_closed_without_bootstrap_or_migration()
     assert readiness.connection_attempted is readiness.connection_opened is readiness.adapter_ready is False
 
 
-def test_future_bootstrap_uses_only_explicit_ephemeral_location_and_closes(tmp_path: object) -> None:
-    location = str(tmp_path / "phase12-bootstrap-v1.sqlite")
-    configuration = _configuration(
-        location, create_database_if_missing=True, schema_bootstrap_authorized=True,
-        storage_access_authorized=True,
-    )
-    factory = SQLiteConnectionFactoryImplementationV1()
-    bootstrap = bootstrap_sqlite_schema_v1(configuration, _manifest(), factory)
-    readiness = validate_sqlite_connection_readiness_v1(configuration, _manifest(), factory)
-    evidence = build_sqlite_connection_audit_evidence_v1(configuration, readiness, bootstrap)
-    assert bootstrap.bootstrap_confirmed is True
-    assert bootstrap.connection_closed_cleanly is True
-    assert readiness.production_path_authorized is False
-    assert readiness.persistence_authorized is False
-    assert "phase12-bootstrap-v1.sqlite" not in repr(evidence)
+def test_future_bootstrap_uses_only_explicit_ephemeral_location_and_closes() -> None:
+    with TemporaryDirectory(
+        prefix="phase12-bootstrap-v1-",
+        dir="/tmp",
+    ) as temp_directory:
+        location = str(
+            Path(temp_directory)
+            / "phase12-bootstrap-v1.sqlite"
+        )
+        configuration = _configuration(
+            location,
+            create_database_if_missing=True,
+            schema_bootstrap_authorized=True,
+            storage_access_authorized=True,
+        )
+        factory = SQLiteConnectionFactoryImplementationV1()
+        bootstrap = bootstrap_sqlite_schema_v1(
+            configuration,
+            _manifest(),
+            factory,
+        )
+        readiness = validate_sqlite_connection_readiness_v1(
+            configuration,
+            _manifest(),
+            factory,
+        )
+        evidence = build_sqlite_connection_audit_evidence_v1(
+            configuration,
+            readiness,
+            bootstrap,
+        )
+        assert bootstrap.bootstrap_confirmed is True
+        assert bootstrap.connection_closed_cleanly is True
+        assert readiness.production_path_authorized is False
+        assert readiness.persistence_authorized is False
+        assert "phase12-bootstrap-v1.sqlite" not in repr(evidence)

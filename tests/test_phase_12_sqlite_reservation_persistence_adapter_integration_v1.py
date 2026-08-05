@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from dataclasses import FrozenInstanceError, fields, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -186,26 +189,54 @@ def test_zero_authority_configuration_fails_closed_without_port_activation() -> 
     assert result.production_persistence_authorized is False
 
 
-def test_future_tmp_path_first_append_replay_conflict_and_recovery(tmp_path: object) -> None:
-    database_location = str(tmp_path / "phase12-reservation-integration-v1.sqlite")
-    connection_configuration = _connection_configuration(database_location)
-    manifest, factory = _manifest(), SQLiteConnectionFactoryImplementationV1()
-    bootstrap = bootstrap_sqlite_schema_v1(connection_configuration, manifest, factory)
-    assert bootstrap.bootstrap_confirmed is True
-    configuration = _adapter_configuration(
-        persistence_authorized=True, reservation_creation_authorized=True, ledger_mutation_authorized=True,
-    )
-    adapter = SQLiteReservationPersistencePortAdapterV1(configuration, connection_configuration, manifest, factory)
-    first = adapter.compare_and_append(_command())
-    replay = adapter.compare_and_append(_command())
-    conflict = adapter.compare_and_append(_command(expected_revision=1, payload_identity="other-payload-v1"))
-    recovered = adapter.read_reservation("sqlite-reservation-v1")
-    adapter.close()
-    assert first.revision == 1 and first.event_count == 1
-    assert first.reserved_amount == Decimal("0") and first.created_at == _NOW
-    assert replay == first
-    assert conflict is None
-    assert recovered is not None and recovered.revision == 1
+def test_future_tmp_path_first_append_replay_conflict_and_recovery() -> None:
+    with TemporaryDirectory(
+        prefix="phase12-reservation-integration-v1-",
+        dir="/tmp",
+    ) as temp_directory:
+        database_location = str(
+            Path(temp_directory)
+            / "phase12-reservation-integration-v1.sqlite"
+        )
+        connection_configuration = _connection_configuration(
+            database_location
+        )
+        manifest = _manifest()
+        factory = SQLiteConnectionFactoryImplementationV1()
+        bootstrap = bootstrap_sqlite_schema_v1(
+            connection_configuration,
+            manifest,
+            factory,
+        )
+        assert bootstrap.bootstrap_confirmed is True
+        configuration = _adapter_configuration(
+            persistence_authorized=True,
+            reservation_creation_authorized=True,
+            ledger_mutation_authorized=True,
+        )
+        adapter = SQLiteReservationPersistencePortAdapterV1(
+            configuration,
+            connection_configuration,
+            manifest,
+            factory,
+        )
+        first = adapter.compare_and_append(_command())
+        replay = adapter.compare_and_append(_command())
+        conflict = adapter.compare_and_append(
+            _command(
+                expected_revision=1,
+                payload_identity="other-payload-v1",
+            )
+        )
+        recovered = adapter.read_reservation(
+            "sqlite-reservation-v1"
+        )
+        adapter.close()
+        assert first.revision == 1 and first.event_count == 1
+        assert first.reserved_amount == Decimal("0") and first.created_at == _NOW
+        assert replay == first
+        assert conflict is None
+        assert recovered is not None and recovered.revision == 1
 
 
 def test_audit_evidence_is_deterministic_identity_bound_and_provider_free() -> None:
