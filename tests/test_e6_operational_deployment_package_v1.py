@@ -344,6 +344,12 @@ def _run_once_fixture(tmp_path: Path) -> dict[str, object]:
             "TEST_INVOKED": str(invoked),
         }
     )
+    anthropic_credential = credentials_directory / "anthropic_api_key"
+    anthropic_credential.write_text(
+        "test-anthropic-api-key\n",
+        encoding="utf-8",
+    )
+    anthropic_credential.chmod(0o400)
     return {
         "authority": authority,
         "release": release,
@@ -622,7 +628,9 @@ def test_package_files_are_lf_only_final_lf_and_nonsecret() -> None:
     combined = "\n".join(_text(PACKAGE / relative) for relative in PAYLOAD)
     for marker in (
         "DEEPSEEK_API_KEY=",
-        "ANTHROPIC_API_KEY=",
+        'ANTHROPIC_API_KEY="sk-',
+        "ANTHROPIC_API_KEY='sk-",
+        "ANTHROPIC_API_KEY=sk-",
         "TELEGRAM_BOT_TOKEN=",
         "Authorization: Bearer",
         "BEGIN OPENSSH PRIVATE KEY",
@@ -2225,3 +2233,103 @@ def test_m11b_common_zero_effect_contract_remains_unconditional():
         "require_configuration_value E6_AUTOMATIC_RETRY_COUNT 0"
     )
     assert common_start > profile_end
+
+def test_m11h_anthropic_credential_injection_contract_is_exact_and_fail_closed():
+    binding = (
+        "LoadCredentialEncrypted="
+        "anthropic_api_key:"
+        "/etc/credstore.encrypted/anthropic_api_key"
+    )
+
+    binding_value = (
+        "anthropic_api_key:"
+        "/etc/credstore.encrypted/anthropic_api_key"
+    )
+
+    for template_name in (
+        "ai-crypto-signal-agent-e6.service.in",
+        "ai-crypto-signal-agent-e6-production.service.in",
+    ):
+        template = _text(SYSTEMD / template_name)
+
+        assert template.count(binding) == 1
+
+        assert _directives(
+            template,
+            "LoadCredentialEncrypted",
+        ) == [binding_value]
+
+    script = _text(
+        BIN / "ai-crypto-signal-agent-e6-run-once"
+    )
+
+    assignment = (
+        'anthropic_credential='
+        '"${credentials_directory}/anthropic_api_key"'
+    )
+
+    read_value = (
+        'ANTHROPIC_API_KEY='
+        '"$(<"$anthropic_credential")"'
+    )
+
+    assert script.count(assignment) == 1
+    assert script.count(read_value) == 1
+
+    assert script.count(
+        'if [[ ! -e "$anthropic_credential" ||'
+    ) == 1
+
+    assert script.count(
+        'if [[ -z "$ANTHROPIC_API_KEY" ]]; then'
+    ) == 1
+
+    assert script.count(
+        'fail_closed "ANTHROPIC_CREDENTIAL_INVALID"'
+    ) == 2
+
+    assert script.count(
+        "export ANTHROPIC_API_KEY"
+    ) == 1
+
+    trust_only = script.index(
+        "E6_TRUST_ONLY_VALIDATION=PASS"
+    )
+
+    kill_switch = script.index(
+        'if [[ -e "$kill_switch" || -L "$kill_switch" ]]; then'
+    )
+
+    mapping = script.index(assignment)
+
+    runtime = script.index(
+        'export PYTHONPATH="$release_root"'
+    )
+
+    assert trust_only < kill_switch
+    assert kill_switch < mapping
+    assert mapping < runtime
+
+    assert (
+        "ANTHROPIC_API_KEY"
+        not in script[:trust_only]
+    )
+
+    assert "DEEPSEEK_API_KEY" not in script
+    assert 'printf "$ANTHROPIC_API_KEY"' not in script
+    assert 'echo "$ANTHROPIC_API_KEY"' not in script
+    assert "set -x" not in script
+
+    health = _text(
+        BIN / "ai-crypto-signal-agent-e6-health"
+    )
+
+    assert (
+        "grep -Fxc "
+        "'LoadCredentialEncrypted="
+        "anthropic_api_key:"
+        "/etc/credstore.encrypted/anthropic_api_key'"
+    ) in health
+
+    assert "accepted_e6_release_commit" in health
+    assert "engine.run_production_signal_v1" in script

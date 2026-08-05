@@ -22,6 +22,7 @@ Environment=E6_CREDENTIAL_METADATA_PATH=@@E6_CREDENTIAL_METADATA_PATH@@
 Environment=ACTIVE_SIGNAL_LEDGER_PATH=@@E6_ACTIVE_SIGNAL_LEDGER_PATH@@
 Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=@@E6_OWNER_CONTROL_STATE_PATH@@
 LoadCredential=accepted_e6_release_commit:@@E6_ACCEPTED_RELEASE_MARKER_PATH@@
+LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key
 StateDirectory=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@
 StateDirectoryMode=0750
 RuntimeDirectory=ai-crypto-signal-agent-e6-candidate-@@E6_SOURCE_COMMIT@@

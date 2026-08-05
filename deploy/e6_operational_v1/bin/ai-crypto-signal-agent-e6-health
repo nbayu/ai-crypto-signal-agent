@@ -179,7 +179,8 @@ fi
 loadcredential_parity=FAIL
 loadcredential_row="$(sed -n 's/^LoadCredential=//p' "$service_path" 2>/dev/null || true)"
 if [[ "$(grep -c '^LoadCredential=' "$service_path" 2>/dev/null || true)" -eq 1 &&
-      "$loadcredential_row" == "accepted_e6_release_commit:$accepted_marker" ]]; then
+      "$loadcredential_row" == "accepted_e6_release_commit:$accepted_marker" &&
+      "$(grep -Fxc 'LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key' "$service_path" 2>/dev/null || true)" -eq 1 ]]; then
     loadcredential_parity=PASS
 fi
 launcher_credential_valid=NO

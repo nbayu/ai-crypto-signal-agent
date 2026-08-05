@@ -22,6 +22,7 @@ Environment=E6_CREDENTIAL_METADATA_PATH=/etc/ai-crypto-signal-agent/e6-productio
 Environment=ACTIVE_SIGNAL_LEDGER_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/active-signal-ledger-v2.json
 Environment=TELEGRAM_OWNER_CONTROL_STATE_PATH=/var/lib/ai-crypto-signal-agent/phase09r1/owner-blueprint/telegram-owner-control-state-v1.json
 LoadCredential=accepted_e6_release_commit:/var/lib/ai-crypto-signal-agent-e6-production-control/accepted-release.marker
+LoadCredentialEncrypted=anthropic_api_key:/etc/credstore.encrypted/anthropic_api_key
 RuntimeDirectory=ai-crypto-signal-agent-e6-production
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=no

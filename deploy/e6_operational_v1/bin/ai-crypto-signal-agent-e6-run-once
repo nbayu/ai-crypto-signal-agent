@@ -233,6 +233,20 @@ if [[ -e "$kill_switch" || -L "$kill_switch" ]]; then
     exit 75
 fi
 
+anthropic_credential="${credentials_directory}/anthropic_api_key"
+if [[ ! -e "$anthropic_credential" ||
+      -L "$anthropic_credential" ||
+      ! -f "$anthropic_credential" ||
+      ! -r "$anthropic_credential" ]]; then
+    fail_closed "ANTHROPIC_CREDENTIAL_INVALID"
+fi
+
+ANTHROPIC_API_KEY="$(<"$anthropic_credential")"
+if [[ -z "$ANTHROPIC_API_KEY" ]]; then
+    fail_closed "ANTHROPIC_CREDENTIAL_INVALID"
+fi
+export ANTHROPIC_API_KEY
+
 [[ -d "$runtime_root" && ! -L "$runtime_root" &&
    "$(stat -Lc '%U:%G:%a' "$runtime_root")" == "$SERVICE_USER:$SERVICE_GROUP:750" ]] ||
     fail_closed "LOCK_DIRECTORY_IDENTITY"
