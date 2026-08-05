@@ -291,6 +291,99 @@ def test_adverse_slippage_formulas_are_exact(monkeypatch, side, best_bid, best_a
     assert captured["modeled_adverse_slippage_bps"] == expected
 
 
+
+@pytest.mark.parametrize(
+    ("side", "raw_fib_price", "expected_tick"),
+    (
+        ("LONG", 125.49, 1254),
+        ("SHORT", 94.51, 946),
+    ),
+)
+def test_non_aligned_analytical_destination_is_normalized_conservatively(
+    side: str,
+    raw_fib_price: float,
+    expected_tick: int,
+) -> None:
+    scan, candidate, evidence, quote = _scenario(side=side)
+    golden = json.loads(evidence.golden_zone_json)
+    golden["take_profit"]["price"] = raw_fib_price
+    object.__setattr__(
+        evidence,
+        "golden_zone_json",
+        json.dumps(golden, sort_keys=True, separators=(",", ":")),
+    )
+
+    result = module.build_e6_production_e3_candidate_v1(
+        source_commit=COMMIT,
+        outcome_invocation_id=INVOCATION,
+        due_job_id="SWING:BASE_EVALUATION",
+        due_window_occurrence_id=OCCURRENCE,
+        observed_at=OBSERVED,
+        mode_scan_result=scan,
+        candidate=candidate,
+        technical_evidence=evidence,
+        quote_evidence=quote,
+    )
+
+    assert type(result) is module.E6ProductionE3CandidateV1
+    fibonacci = tuple(
+        item
+        for item in result.destination_evidence
+        if item.source_kind == module.FIB_EXTENSION
+    )
+    assert len(fibonacci) == 1
+    assert fibonacci[0].destination_tick == expected_tick
+
+
+def test_non_aligned_last_and_mark_prices_are_nearest_tick_reference_evidence() -> None:
+    scan, candidate, evidence, quote = _scenario()
+    object.__setattr__(quote, "last_price", 105.04)
+    object.__setattr__(quote, "mark_price", 105.04)
+
+    result = module.build_e6_production_e3_candidate_v1(
+        source_commit=COMMIT,
+        outcome_invocation_id=INVOCATION,
+        due_job_id="SWING:BASE_EVALUATION",
+        due_window_occurrence_id=OCCURRENCE,
+        observed_at=OBSERVED,
+        mode_scan_result=scan,
+        candidate=candidate,
+        technical_evidence=evidence,
+        quote_evidence=quote,
+    )
+
+    assert type(result) is module.E6ProductionE3CandidateV1
+    assert result.executable_price_snapshot.last_price_tick == 1050
+    assert result.executable_price_snapshot.mark_price_tick == 1050
+    assert result.price_zone_admission.executable_price_tick == 1050
+
+
+@pytest.mark.parametrize(("field", "value"), (("best_bid", 104.94), ("best_ask", 105.04)))
+def test_non_aligned_executable_book_price_remains_fail_closed(
+    field: str,
+    value: float,
+) -> None:
+    scan, candidate, evidence, quote = _scenario()
+    object.__setattr__(quote, field, value)
+
+    result = module.build_e6_production_e3_candidate_v1(
+        source_commit=COMMIT,
+        outcome_invocation_id=INVOCATION,
+        due_job_id="SWING:BASE_EVALUATION",
+        due_window_occurrence_id=OCCURRENCE,
+        observed_at=OBSERVED,
+        mode_scan_result=scan,
+        candidate=candidate,
+        technical_evidence=evidence,
+        quote_evidence=quote,
+    )
+
+    assert type(result) is E6NoTradeCycleRequestV1
+    assert result.reason_code == "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE"
+    assert result.source_reason_code == "PRICE_NOT_ALIGNED_TO_MARKET_TICK"
+    assert result.provider_attempt_count == result.telegram_attempt_count == 0
+
+
 def test_constructor_corruption_is_not_disguised_as_no_trade(monkeypatch) -> None:
     monkeypatch.setattr(
         module,

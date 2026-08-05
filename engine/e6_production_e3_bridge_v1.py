@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import (
+    Decimal,
+    InvalidOperation,
+    ROUND_CEILING,
+    ROUND_FLOOR,
+    ROUND_HALF_UP,
+)
 from hashlib import sha256
 import json
 import math
@@ -139,6 +145,35 @@ def _price_tick(value: object, tick_size: str) -> int:
         )
     integral = ratio.to_integral_value()
     if ratio != integral or integral <= 0:
+        raise _InsufficientEvidence(
+            "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE",
+            "PRICE_NOT_ALIGNED_TO_MARKET_TICK",
+        )
+    return int(integral)
+
+
+def _normalized_price_tick(
+    value: object,
+    tick_size: str,
+    *,
+    rounding: str,
+) -> int:
+    try:
+        price = Decimal(str(value))
+        size = Decimal(tick_size)
+        ratio = price / size
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        raise _InsufficientEvidence(
+            "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE",
+            "PRICE_NOT_ALIGNED_TO_MARKET_TICK",
+        ) from None
+    if not price.is_finite() or not size.is_finite() or price <= 0 or size <= 0:
+        raise _InsufficientEvidence(
+            "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE",
+            "PRICE_NOT_ALIGNED_TO_MARKET_TICK",
+        )
+    integral = ratio.to_integral_value(rounding=rounding)
+    if integral <= 0:
         raise _InsufficientEvidence(
             "E3_EXECUTABLE_QUOTE_INCOMPLETE_OR_STALE",
             "PRICE_NOT_ALIGNED_TO_MARKET_TICK",
@@ -416,7 +451,11 @@ def _candidate_destinations(
 
     by_tick: dict[int, tuple[str, float, str]] = {}
     for source_kind, price, source_at in candidates:
-        tick = _price_tick(price, geometry.tick_size)
+        tick = _normalized_price_tick(
+            price,
+            geometry.tick_size,
+            rounding=ROUND_FLOOR if geometry.side == "LONG" else ROUND_CEILING,
+        )
         profitable = (
             tick > geometry.golden_zone_high_tick
             if geometry.side == "LONG"
@@ -545,8 +584,16 @@ def build_e6_production_e3_candidate_v1(
             exchange_timestamp=quote_evidence.exchange_timestamp,
             best_bid_tick=_price_tick(quote_evidence.best_bid, quote_evidence.tick_size),
             best_ask_tick=_price_tick(quote_evidence.best_ask, quote_evidence.tick_size),
-            last_price_tick=_price_tick(quote_evidence.last_price, quote_evidence.tick_size),
-            mark_price_tick=_price_tick(quote_evidence.mark_price, quote_evidence.tick_size),
+            last_price_tick=_normalized_price_tick(
+                quote_evidence.last_price,
+                quote_evidence.tick_size,
+                rounding=ROUND_HALF_UP,
+            ),
+            mark_price_tick=_normalized_price_tick(
+                quote_evidence.mark_price,
+                quote_evidence.tick_size,
+                rounding=ROUND_HALF_UP,
+            ),
             modeled_adverse_slippage_bps=slippage,
             tick_size=quote_evidence.tick_size,
         )
