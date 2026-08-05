@@ -168,17 +168,32 @@ def _canonical_sha256(value: object) -> str:
     return sha256(payload.encode("utf-8")).hexdigest()
 
 
+# M11C_R3_PROFILE_AWARE_NORMAL_RUNTIME_AUTHORIZATION_V1
 def _fully_authorized(composition: E6ProductionRuntimeCompositionV1) -> bool:
-    return (
+    common_authorized = (
         composition.e6_enabled is True
         and composition.e6_activation_authorized is True
         and composition.network_authorized is True
-        and composition.publication_authorized is True
-        and all(
-            getattr(composition.authorization, name) is True
-            for name, _reason in _GATES
-        )
+        and composition.authorization.activation_gate is True
+        and composition.authorization.workload_gate is True
+        and composition.authorization.credential_gate is True
+        and composition.authorization.network_gate is True
     )
+    if not common_authorized:
+        return False
+
+    publication_state = (
+        composition.publication_authorized,
+        composition.authorization.publication_gate,
+        composition.authorization.telegram_publication_gate,
+    )
+    deployment_profile = composition.deployment_binding.deployment_profile
+
+    if deployment_profile == "PRODUCTION":
+        return publication_state == (True, True, True)
+    if deployment_profile == "CANDIDATE_CANARY":
+        return publication_state == (False, False, False)
+    return False
 
 
 def _selected_job_no_trade(

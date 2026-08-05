@@ -153,8 +153,20 @@ if [[ "$trust_only_validation" == "0" ]]; then
     require_configuration_value E6_WORKLOAD_GATE true
     require_configuration_value E6_CREDENTIAL_GATE true
     require_configuration_value E6_NETWORK_GATE true
-    require_configuration_value E6_PUBLICATION_GATE true
-    require_configuration_value E6_TELEGRAM_PUBLICATION_GATE true
+
+    case "$deployment_profile" in
+        PRODUCTION)
+            require_configuration_value E6_PUBLICATION_GATE true
+            require_configuration_value E6_TELEGRAM_PUBLICATION_GATE true
+            ;;
+        CANDIDATE_CANARY)
+            require_configuration_value E6_PUBLICATION_GATE false
+            require_configuration_value E6_TELEGRAM_PUBLICATION_GATE false
+            ;;
+        *)
+            fail_closed "NORMAL_RUNTIME_PROFILE"
+            ;;
+    esac
 elif [[ "$trust_only_validation" == "1" ]]; then
     [[ "$deployment_profile" == "CANDIDATE_CANARY" ]] || fail_closed "TRUST_ONLY_PROFILE"
     require_configuration_value E6_RUNTIME_ENABLED false

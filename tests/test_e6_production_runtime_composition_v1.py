@@ -285,8 +285,17 @@ class _OneMarketPublicClient:
 
 
 def _authorized_composition() -> E6ProductionRuntimeCompositionV1:
-    values = {key: "true" for _field, key in GATE_KEYS}
-    values.update(E6_RUNTIME_ENABLED="true", E6_PROVIDER_ENABLED="true")
+    # M11C_R4R2_CANDIDATE_AUTHORIZED_COMPOSITION_PROFILE_V1
+    values = {
+        "E6_RUNTIME_ENABLED": "true",
+        "E6_PROVIDER_ENABLED": "true",
+        "E6_ACTIVATION_GATE": "true",
+        "E6_WORKLOAD_GATE": "true",
+        "E6_CREDENTIAL_GATE": "true",
+        "E6_NETWORK_GATE": "true",
+        "E6_PUBLICATION_GATE": "false",
+        "E6_TELEGRAM_PUBLICATION_GATE": "false",
+    }
     return build_e6_production_runtime_composition_v1(
         configuration=_mapping(**values)
     )
@@ -394,3 +403,107 @@ def test_p2_extension_has_no_e4_e5_service_publication_or_dispatch_activation() 
         "_run_production_module_v1",
     ):
         assert marker not in source.casefold()
+
+# M11C_R3_PROFILE_AWARE_RUNTIME_AUTHORIZATION_V1
+def _m11c_r3_runtime_composition(
+    *,
+    deployment_profile,
+    publication_authorized,
+    publication_gate,
+    telegram_publication_gate,
+):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        deployment_binding=SimpleNamespace(
+            deployment_profile=deployment_profile,
+        ),
+        e6_enabled=True,
+        e6_activation_authorized=True,
+        network_authorized=True,
+        publication_authorized=publication_authorized,
+        authorization=SimpleNamespace(
+            activation_gate=True,
+            workload_gate=True,
+            credential_gate=True,
+            network_gate=True,
+            publication_gate=publication_gate,
+            telegram_publication_gate=telegram_publication_gate,
+        ),
+    )
+
+
+def _m11c_r3_is_fully_authorized(composition):
+    from engine.e6_production_runtime_composition_v1 import (
+        _fully_authorized,
+    )
+
+    return _fully_authorized(composition)
+
+
+def test_m11c_r3_profile_publication_authorization_matrix():
+    expected_states = {
+        "PRODUCTION": (True, True, True),
+        "CANDIDATE_CANARY": (False, False, False),
+    }
+
+    for profile, expected_state in expected_states.items():
+        for publication_authorized in (False, True):
+            for publication_gate in (False, True):
+                for telegram_gate in (False, True):
+                    composition = _m11c_r3_runtime_composition(
+                        deployment_profile=profile,
+                        publication_authorized=publication_authorized,
+                        publication_gate=publication_gate,
+                        telegram_publication_gate=telegram_gate,
+                    )
+                    expected = (
+                        publication_authorized,
+                        publication_gate,
+                        telegram_gate,
+                    ) == expected_state
+                    assert (
+                        _m11c_r3_is_fully_authorized(composition)
+                        is expected
+                    )
+
+
+def test_m11c_r3_common_runtime_gates_remain_fail_closed():
+    for field in (
+        "e6_enabled",
+        "e6_activation_authorized",
+        "network_authorized",
+    ):
+        composition = _m11c_r3_runtime_composition(
+            deployment_profile="CANDIDATE_CANARY",
+            publication_authorized=False,
+            publication_gate=False,
+            telegram_publication_gate=False,
+        )
+        setattr(composition, field, False)
+        assert _m11c_r3_is_fully_authorized(composition) is False
+
+    for field in (
+        "activation_gate",
+        "workload_gate",
+        "credential_gate",
+        "network_gate",
+    ):
+        composition = _m11c_r3_runtime_composition(
+            deployment_profile="CANDIDATE_CANARY",
+            publication_authorized=False,
+            publication_gate=False,
+            telegram_publication_gate=False,
+        )
+        setattr(composition.authorization, field, False)
+        assert _m11c_r3_is_fully_authorized(composition) is False
+
+
+def test_m11c_r3_unknown_runtime_profile_remains_fail_closed():
+    composition = _m11c_r3_runtime_composition(
+        deployment_profile="UNKNOWN_PROFILE",
+        publication_authorized=False,
+        publication_gate=False,
+        telegram_publication_gate=False,
+    )
+    assert _m11c_r3_is_fully_authorized(composition) is False

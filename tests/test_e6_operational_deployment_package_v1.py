@@ -150,6 +150,15 @@ def _activation_mapping(
     release_root: Path,
     deployment_profile: str = "CANDIDATE_CANARY",
 ) -> dict[str, str]:
+    if deployment_profile == "PRODUCTION":
+        publication_gate = "true"
+        telegram_publication_gate = "true"
+    elif deployment_profile == "CANDIDATE_CANARY":
+        publication_gate = "false"
+        telegram_publication_gate = "false"
+    else:
+        raise AssertionError("unsupported deployment profile")
+
     values = {
         "E6_ACTIVATION_SCHEMA_VERSION": E6_ACTIVATION_CONFIGURATION_SCHEMA_V1,
         "E6_DEPLOYMENT_BINDING_VERSION": E6_DEPLOYMENT_STATE_BINDING_VERSION_V1,
@@ -191,8 +200,8 @@ def _activation_mapping(
         "E6_WORKLOAD_GATE": "true",
         "E6_CREDENTIAL_GATE": "true",
         "E6_NETWORK_GATE": "true",
-        "E6_PUBLICATION_GATE": "true",
-        "E6_TELEGRAM_PUBLICATION_GATE": "true",
+        "E6_PUBLICATION_GATE": publication_gate,
+        "E6_TELEGRAM_PUBLICATION_GATE": telegram_publication_gate,
         "E6_AUTOMATIC_RETRY_COUNT": "0",
         "E6_PROVIDER_SUBSTITUTION_ENABLED": "false",
         "E6_PROMPT_REPAIR_ENABLED": "false",
@@ -778,6 +787,19 @@ def test_candidate_run_once_fixture_uses_only_bound_paths_and_one_python_call(
     invoked = fixture["invoked"]
     environment = fixture["environment"]
     user, group = _fixture_identity()
+
+    # M11C_R3_CANDIDATE_FIXTURE_NO_PUBLICATION_ASSERTION_V1
+    activation_configuration = Path(
+        authority["activation_configuration_path"]
+    ).read_text(encoding="utf-8")
+    assert "E6_DEPLOYMENT_PROFILE=CANDIDATE_CANARY\n" in (
+        activation_configuration
+    )
+    assert "E6_PUBLICATION_GATE=false\n" in activation_configuration
+    assert (
+        "E6_TELEGRAM_PUBLICATION_GATE=false\n"
+        in activation_configuration
+    )
     result = subprocess.run(
         [str(script_path)],
         env=environment,
@@ -1883,3 +1905,323 @@ def test_rollback_checkpoint_binding_contract(tmp_path: Path) -> None:
     )
     assert res.returncode == 65
 
+# M11B_CANARY_NO_PUBLICATION_PROFILE_MATRIX_V1
+def test_m11b_run_once_profile_publication_contract_matrix(tmp_path):
+    import os
+    from pathlib import Path
+    import subprocess
+
+    launcher = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "e6_operational_v1"
+        / "bin"
+        / "ai-crypto-signal-agent-e6-run-once"
+    )
+    source = launcher.read_text(encoding="utf-8")
+
+    start_marker = (
+        'trust_only_validation="${E6_TRUST_ONLY_VALIDATION:-0}"'
+    )
+    end_marker = (
+        "require_configuration_value "
+        "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED false"
+    )
+    start = source.index(start_marker)
+    end = source.index(end_marker, start) + len(end_marker)
+    profile_contract = source[start:end]
+
+    harness = tmp_path / "profile-contract.sh"
+    harness.write_text(
+        '''#!/usr/bin/env bash
+set -euo pipefail
+configuration_path="$1"
+deployment_profile="$2"
+trust_override="$3"
+
+fail_closed() {
+    printf 'E6_LAUNCH_BLOCKED=%s\\n' "$1" >&2
+    exit 78
+}
+
+configuration_value() {
+    sed -n "s/^$1=//p" "$configuration_path"
+}
+
+require_configuration_value() {
+    [[ "$(configuration_value "$1")" == "$2" ]] ||
+        fail_closed "BINDING_${1}"
+}
+
+if [[ "$trust_override" == "__UNSET__" ]]; then
+    unset E6_TRUST_ONLY_VALIDATION
+else
+    export E6_TRUST_ONLY_VALIDATION="$trust_override"
+fi
+'''
+        + profile_contract
+        + "\nprintf 'PROFILE_MATRIX_PASS\\n'\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o700)
+
+    default_values = {
+        "E6_RUNTIME_ENABLED": "true",
+        "E6_PROVIDER_ENABLED": "true",
+        "E6_ACTIVATION_GATE": "true",
+        "E6_WORKLOAD_GATE": "true",
+        "E6_CREDENTIAL_GATE": "true",
+        "E6_NETWORK_GATE": "true",
+        "E6_PUBLICATION_GATE": "true",
+        "E6_TELEGRAM_PUBLICATION_GATE": "true",
+        "E6_AUTOMATIC_RETRY_COUNT": "0",
+        "E6_PROVIDER_SUBSTITUTION_ENABLED": "false",
+        "E6_PROMPT_REPAIR_ENABLED": "false",
+        "E6_STALE_REVIEW_REUSE_ENABLED": "false",
+        "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED": "false",
+    }
+
+    def run_case(
+        *,
+        profile,
+        trust_override="__UNSET__",
+        updates=None,
+    ):
+        values = dict(default_values)
+        values.update(updates or {})
+        configuration = tmp_path / (
+            "activation-"
+            + profile.lower().replace("_", "-")
+            + "-"
+            + trust_override.replace("_", "-")
+            + "-"
+            + str(len(list(tmp_path.iterdir())))
+            + ".env"
+        )
+        configuration.write_text(
+            "".join(
+                f"{key}={value}\n"
+                for key, value in values.items()
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [
+                "/bin/bash",
+                str(harness),
+                str(configuration),
+                profile,
+                trust_override,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"]},
+        )
+
+    passing_cases = (
+        {
+            "profile": "PRODUCTION",
+        },
+        {
+            "profile": "CANDIDATE_CANARY",
+            "updates": {
+                "E6_PUBLICATION_GATE": "false",
+                "E6_TELEGRAM_PUBLICATION_GATE": "false",
+            },
+        },
+        {
+            "profile": "CANDIDATE_CANARY",
+            "trust_override": "1",
+            "updates": {
+                "E6_RUNTIME_ENABLED": "false",
+                "E6_PROVIDER_ENABLED": "false",
+                "E6_ACTIVATION_GATE": "false",
+                "E6_WORKLOAD_GATE": "false",
+                "E6_CREDENTIAL_GATE": "false",
+                "E6_NETWORK_GATE": "false",
+                "E6_PUBLICATION_GATE": "false",
+                "E6_TELEGRAM_PUBLICATION_GATE": "false",
+            },
+        },
+    )
+    for case in passing_cases:
+        result = run_case(**case)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == "PROFILE_MATRIX_PASS\n"
+        assert result.stderr == ""
+
+    failing_cases = (
+        (
+            {
+                "profile": "PRODUCTION",
+                "updates": {"E6_PUBLICATION_GATE": "false"},
+            },
+            "E6_LAUNCH_BLOCKED=BINDING_E6_PUBLICATION_GATE\n",
+        ),
+        (
+            {
+                "profile": "PRODUCTION",
+                "updates": {
+                    "E6_TELEGRAM_PUBLICATION_GATE": "false"
+                },
+            },
+            "E6_LAUNCH_BLOCKED="
+            "BINDING_E6_TELEGRAM_PUBLICATION_GATE\n",
+        ),
+        (
+            {
+                "profile": "CANDIDATE_CANARY",
+                "updates": {
+                    "E6_PUBLICATION_GATE": "true",
+                    "E6_TELEGRAM_PUBLICATION_GATE": "false",
+                },
+            },
+            "E6_LAUNCH_BLOCKED=BINDING_E6_PUBLICATION_GATE\n",
+        ),
+        (
+            {
+                "profile": "CANDIDATE_CANARY",
+                "updates": {
+                    "E6_PUBLICATION_GATE": "false",
+                    "E6_TELEGRAM_PUBLICATION_GATE": "true",
+                },
+            },
+            "E6_LAUNCH_BLOCKED="
+            "BINDING_E6_TELEGRAM_PUBLICATION_GATE\n",
+        ),
+        (
+            {
+                "profile": "CANDIDATE_CANARY",
+                "updates": {
+                    "E6_RUNTIME_ENABLED": "false",
+                    "E6_PUBLICATION_GATE": "false",
+                    "E6_TELEGRAM_PUBLICATION_GATE": "false",
+                },
+            },
+            "E6_LAUNCH_BLOCKED=BINDING_E6_RUNTIME_ENABLED\n",
+        ),
+        (
+            {
+                "profile": "UNKNOWN_PROFILE",
+            },
+            "E6_LAUNCH_BLOCKED=NORMAL_RUNTIME_PROFILE\n",
+        ),
+        (
+            {
+                "profile": "PRODUCTION",
+                "trust_override": "1",
+                "updates": {
+                    "E6_RUNTIME_ENABLED": "false",
+                    "E6_PROVIDER_ENABLED": "false",
+                    "E6_ACTIVATION_GATE": "false",
+                    "E6_WORKLOAD_GATE": "false",
+                    "E6_CREDENTIAL_GATE": "false",
+                    "E6_NETWORK_GATE": "false",
+                    "E6_PUBLICATION_GATE": "false",
+                    "E6_TELEGRAM_PUBLICATION_GATE": "false",
+                },
+            },
+            "E6_LAUNCH_BLOCKED=TRUST_ONLY_PROFILE\n",
+        ),
+        (
+            {
+                "profile": "CANDIDATE_CANARY",
+                "trust_override": "2",
+            },
+            "E6_LAUNCH_BLOCKED=TRUST_ONLY_TRIGGER_INVALID\n",
+        ),
+    )
+    for case, expected_stderr in failing_cases:
+        result = run_case(**case)
+        assert result.returncode == 78
+        assert result.stdout == ""
+        assert result.stderr == expected_stderr
+
+
+def test_m11b_candidate_no_publication_branch_is_validation_only():
+    from pathlib import Path
+
+    launcher = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "e6_operational_v1"
+        / "bin"
+        / "ai-crypto-signal-agent-e6-run-once"
+    )
+    source = launcher.read_text(encoding="utf-8")
+
+    production_arm = source.split(
+        "        PRODUCTION)\n",
+        1,
+    )[1].split(
+        "            ;;\n",
+        1,
+    )[0]
+    candidate_arm = source.split(
+        "        CANDIDATE_CANARY)\n",
+        1,
+    )[1].split(
+        "            ;;\n",
+        1,
+    )[0]
+
+    assert production_arm == (
+        "            require_configuration_value "
+        "E6_PUBLICATION_GATE true\n"
+        "            require_configuration_value "
+        "E6_TELEGRAM_PUBLICATION_GATE true\n"
+    )
+    assert candidate_arm == (
+        "            require_configuration_value "
+        "E6_PUBLICATION_GATE false\n"
+        "            require_configuration_value "
+        "E6_TELEGRAM_PUBLICATION_GATE false\n"
+    )
+
+    forbidden_action_tokens = (
+        "systemctl",
+        "curl ",
+        "wget ",
+        "httpx",
+        "requests.",
+        "send_message",
+        "publish(",
+        "exchange_order",
+        "position_mutation",
+    )
+    for token in forbidden_action_tokens:
+        assert token not in candidate_arm
+
+
+def test_m11b_common_zero_effect_contract_remains_unconditional():
+    from pathlib import Path
+
+    launcher = (
+        Path(__file__).resolve().parents[1]
+        / "deploy"
+        / "e6_operational_v1"
+        / "bin"
+        / "ai-crypto-signal-agent-e6-run-once"
+    )
+    source = launcher.read_text(encoding="utf-8")
+
+    common_contract = (
+        "require_configuration_value E6_AUTOMATIC_RETRY_COUNT 0\n"
+        "require_configuration_value "
+        "E6_PROVIDER_SUBSTITUTION_ENABLED false\n"
+        "require_configuration_value E6_PROMPT_REPAIR_ENABLED false\n"
+        "require_configuration_value "
+        "E6_STALE_REVIEW_REUSE_ENABLED false\n"
+        "require_configuration_value "
+        "E6_AUTOMATED_EXCHANGE_TRADING_ENABLED false\n"
+    )
+    assert source.count(common_contract) == 1
+
+    profile_end = source.index(
+        '    fail_closed "TRUST_ONLY_TRIGGER_INVALID"\nfi\n'
+    )
+    common_start = source.index(
+        "require_configuration_value E6_AUTOMATIC_RETRY_COUNT 0"
+    )
+    assert common_start > profile_end
