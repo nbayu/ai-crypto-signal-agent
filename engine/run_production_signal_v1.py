@@ -450,13 +450,14 @@ def main(
 def _composition_fully_authorizes_dispatch_v1(
     composition: E6ProductionRuntimeCompositionV1,
 ) -> bool:
-    return bool(
-        composition.e6_enabled is True
-        and _all_six_authorized(composition.authorization)
-        and composition.e6_activation_authorized is True
-        and composition.network_authorized is True
-        and composition.publication_authorized is True
-    )
+    if type(composition) is not E6ProductionRuntimeCompositionV1:
+        return False
+    try:
+        composition.__post_init__()
+        from engine.e6_production_runtime_composition_v1 import _fully_authorized
+        return _fully_authorized(composition)
+    except Exception:
+        return False
 
 
 def _service_no_trade_reason_v1(result: E6ServiceCycleResultV1) -> str:

@@ -507,3 +507,29 @@ def test_m11c_r3_unknown_runtime_profile_remains_fail_closed():
         telegram_publication_gate=False,
     )
     assert _m11c_r3_is_fully_authorized(composition) is False
+# M11H_STEP_8_REAL_CANDIDATE_DISPATCH_ADMISSION_REGRESSION
+def test_m11h_step8_real_candidate_is_admitted_by_entrypoint_dispatch():
+    from types import SimpleNamespace
+    import engine.e6_production_runtime_composition_v1 as runtime
+    import engine.run_production_signal_v1 as entrypoint
+
+    candidate = runtime.build_e6_production_runtime_composition_v1(
+        configuration=_mapping(
+            E6_RUNTIME_ENABLED="true",
+            E6_PROVIDER_ENABLED="true",
+            E6_ACTIVATION_GATE="true",
+            E6_WORKLOAD_GATE="true",
+            E6_CREDENTIAL_GATE="true",
+            E6_NETWORK_GATE="true",
+            E6_PUBLICATION_GATE="false",
+            E6_TELEGRAM_PUBLICATION_GATE="false",
+        )
+    )
+    assert type(candidate) is runtime.E6ProductionRuntimeCompositionV1
+    assert candidate.deployment_binding.deployment_profile.value == "CANDIDATE_CANARY"
+    assert candidate.publication_authorized is False
+    assert candidate.authorization.publication_gate is False
+    assert candidate.authorization.telegram_publication_gate is False
+    assert runtime._fully_authorized(candidate) is True
+    assert entrypoint._composition_fully_authorizes_dispatch_v1(candidate) is True
+    assert entrypoint._composition_fully_authorizes_dispatch_v1(SimpleNamespace()) is False

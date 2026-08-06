@@ -821,6 +821,9 @@ def test_private_seam_healthy_dispatch_returns_zero_without_public_main(
     disposition, event_name
 ):
     configuration = _activation_mapping()
+    # M11H_STEP_8_PROFILE_AWARE_CANDIDATE_FIXTURE
+    configuration["E6_PUBLICATION_GATE"] = "false"
+    configuration["E6_TELEGRAM_PUBLICATION_GATE"] = "false"
     calls = []
     events = []
 
@@ -849,6 +852,9 @@ def test_private_seam_healthy_dispatch_returns_zero_without_public_main(
 
 def test_private_seam_selected_job_gets_one_factory_and_calls_main_once():
     configuration = _activation_mapping()
+    # M11H_STEP_8_PROFILE_AWARE_CANDIDATE_FIXTURE
+    configuration["E6_PUBLICATION_GATE"] = "false"
+    configuration["E6_TELEGRAM_PUBLICATION_GATE"] = "false"
     calls = []
     runtime_factory = lambda *, outcome_invocation_id: _no_trade_request(
         identity=outcome_invocation_id
@@ -879,10 +885,10 @@ def test_private_seam_selected_job_gets_one_factory_and_calls_main_once():
     supplied = calls[2][1]
     assert supplied["outcome_invocation_id"] == IDENTITY
     assert supplied["e6_enabled"] is True
-    assert supplied["authorization"] == _authorization()
+    assert supplied["authorization"] == _authorization(publication_gate=False, telegram_publication_gate=False)
     assert supplied["e6_activation_authorized"] is True
     assert supplied["network_authorized"] is True
-    assert supplied["publication_authorized"] is True
+    assert supplied["publication_authorized"] is False
     assert supplied["e6_runtime_factory"] is runtime_factory
     assert supplied["environment"] is configuration
     assert callable(supplied["telegram_config_loader"])
